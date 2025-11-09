@@ -3,37 +3,25 @@
 import React, { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-interface EditDatasetModalProps {
-  dataset: any;
-  onClose: () => void;
-  onUpdated?: () => void;
-}
-
-export default function EditDatasetModal({
-  dataset,
-  onClose,
-  onUpdated,
-}: EditDatasetModalProps) {
+export default function EditDatasetModal({ dataset, onClose, onUpdated }: any) {
   const [form, setForm] = useState({
     name: dataset?.name || "",
     description: dataset?.description || "",
-    admin_level: dataset?.admin_level ?? 2,
+    admin_level: dataset?.admin_level || "ADM2",
     type: dataset?.type || "numeric",
-    indicator_id: dataset?.indicator_id || null,
+    category: dataset?.category || "",
+    is_baseline: dataset?.is_baseline || false,
+    is_derived: dataset?.is_derived || false,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   const handleSave = async () => {
-    setError(null);
-    setSuccess(false);
-
     if (!form.name.trim()) {
       setError("Dataset name is required.");
       return;
     }
-
     setLoading(true);
     try {
       const { error } = await supabase
@@ -43,7 +31,9 @@ export default function EditDatasetModal({
           description: form.description.trim(),
           admin_level: form.admin_level,
           type: form.type,
-          indicator_id: form.indicator_id,
+          category: form.category,
+          is_baseline: form.is_baseline,
+          is_derived: form.is_derived,
         })
         .eq("id", dataset.id);
 
@@ -51,12 +41,10 @@ export default function EditDatasetModal({
 
       setSuccess(true);
       setTimeout(() => {
-        setSuccess(false);
-        onUpdated?.(); // refresh list in parent
+        onUpdated?.();
         onClose();
       }, 800);
     } catch (err: any) {
-      console.error(err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -66,69 +54,80 @@ export default function EditDatasetModal({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg">
-        <h2 className="text-xl font-serif mb-4">Edit Dataset Metadata</h2>
+        <h2 className="text-xl font-serif mb-4">Edit Dataset</h2>
 
-        {/* Form Fields */}
         <div className="space-y-3">
-          <div>
-            <label className="block text-sm mb-1">Name</label>
+          <input
+            type="text"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            className="border p-2 w-full rounded"
+            placeholder="Dataset name"
+          />
+          <textarea
+            rows={2}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            className="border p-2 w-full rounded"
+            placeholder="Description"
+          />
+
+          <select
+            value={form.admin_level}
+            onChange={(e) => setForm({ ...form, admin_level: e.target.value })}
+            className="border p-2 rounded w-full"
+          >
+            {["ADM0","ADM1","ADM2","ADM3","ADM4","ADM5"].map((level) => (
+              <option key={level} value={level}>{level}</option>
+            ))}
+          </select>
+
+          <select
+            value={form.type}
+            onChange={(e) => setForm({ ...form, type: e.target.value })}
+            className="border p-2 rounded w-full"
+          >
+            <option value="numeric">Numeric</option>
+            <option value="categorical">Categorical</option>
+          </select>
+
+          <select
+            value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            className="border p-2 rounded w-full"
+          >
+            <option value="">Select category</option>
+            <option value="SSC Framework - P1">SSC Framework – P1</option>
+            <option value="SSC Framework - P2">SSC Framework – P2</option>
+            <option value="SSC Framework - P3">SSC Framework – P3</option>
+            <option value="Hazard">Hazard</option>
+            <option value="Underlying Vulnerability">Underlying Vulnerability</option>
+          </select>
+
+          <label className="flex items-center space-x-2">
             <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="border p-2 w-full rounded"
+              type="checkbox"
+              checked={form.is_baseline}
+              onChange={(e) => setForm({ ...form, is_baseline: e.target.checked })}
             />
-          </div>
+            <span>Baseline dataset</span>
+          </label>
 
-          <div>
-            <label className="block text-sm mb-1">Description</label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={2}
-              className="border p-2 w-full rounded"
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={form.is_derived}
+              onChange={(e) => setForm({ ...form, is_derived: e.target.checked })}
             />
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Admin Level</label>
-            <select
-              value={form.admin_level}
-              onChange={(e) =>
-                setForm({ ...form, admin_level: Number(e.target.value) })
-              }
-              className="border p-2 rounded w-full"
-            >
-              <option value={0}>Admin Level 0 (National)</option>
-              <option value={1}>Admin Level 1 (Region)</option>
-              <option value={2}>Admin Level 2 (Province)</option>
-              <option value={3}>Admin Level 3 (Municipality)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm mb-1">Dataset Type</label>
-            <select
-              value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value })}
-              className="border p-2 rounded w-full"
-            >
-              <option value="numeric">Numeric</option>
-              <option value="categorical">Categorical</option>
-            </select>
-          </div>
+            <span>Derived dataset</span>
+          </label>
         </div>
 
-        {/* Status + Buttons */}
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         {success && <p className="text-green-600 text-sm mt-2">Saved successfully!</p>}
 
         <div className="flex justify-end mt-5 space-x-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1 border rounded hover:bg-gray-100"
-            disabled={loading}
-          >
+          <button onClick={onClose} className="px-3 py-1 border rounded hover:bg-gray-100">
             Cancel
           </button>
           <button
