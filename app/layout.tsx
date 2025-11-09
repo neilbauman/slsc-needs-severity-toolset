@@ -1,4 +1,4 @@
-import "./globals.css";
+import '../styles/globals.css'; // relative path from app/layout.tsx
 
 export const metadata = {
   title: "Philippines Shelter Severity Toolset (sandbox)",
