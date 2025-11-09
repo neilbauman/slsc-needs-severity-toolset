@@ -2,6 +2,12 @@
 
 import React, { useState } from "react";
 import Papa from "papaparse";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 interface Props {
   isOpen: boolean;
@@ -37,9 +43,44 @@ const UploadDatasetModal: React.FC<Props> = ({ isOpen, onClose, onSave }) => {
     });
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!file || !name || !columnAdminCode || !columnValue) return;
-    // Handle actual upload here if needed
+
+    const { data: datasetMeta, error: metaError } = await supabase
+      .from("datasets")
+      .insert({
+        name,
+        description,
+        source,
+        admin_level: adminLevel,
+        type,
+        column_admin_code: columnAdminCode,
+        column_value: columnValue,
+      })
+      .select()
+      .single();
+
+    if (metaError || !datasetMeta) {
+      console.error("Metadata upload failed:", metaError);
+      return;
+    }
+
+    const datasetId = datasetMeta.id;
+    const valueRows = csvData.map((row) => ({
+      dataset_id: datasetId,
+      admin_code: row[columnAdminCode],
+      value: row[columnValue],
+    }));
+
+    const { error: dataError } = await supabase
+      .from("dataset_values")
+      .insert(valueRows);
+
+    if (dataError) {
+      console.error("Value upload failed:", dataError);
+      return;
+    }
+
     onSave();
   };
 
@@ -53,7 +94,6 @@ const UploadDatasetModal: React.FC<Props> = ({ isOpen, onClose, onSave }) => {
           <button onClick={onClose} className="text-gray-600 hover:text-red-500">✕</button>
         </div>
 
-        {/* File Upload */}
         <div>
           <label className="block text-sm font-medium text-gray-700">Upload CSV</label>
           <input
@@ -64,7 +104,6 @@ const UploadDatasetModal: React.FC<Props> = ({ isOpen, onClose, onSave }) => {
           />
         </div>
 
-        {/* Metadata */}
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Dataset Name</label>
@@ -119,9 +158,7 @@ const UploadDatasetModal: React.FC<Props> = ({ isOpen, onClose, onSave }) => {
             >
               <option value="">Select column</option>
               {headers.map((header) => (
-                <option key={header} value={header}>
-                  {header}
-                </option>
+                <option key={header} value={header}>{header}</option>
               ))}
             </select>
           </div>
@@ -134,9 +171,7 @@ const UploadDatasetModal: React.FC<Props> = ({ isOpen, onClose, onSave }) => {
             >
               <option value="">Select column</option>
               {headers.map((header) => (
-                <option key={header} value={header}>
-                  {header}
-                </option>
+                <option key={header} value={header}>{header}</option>
               ))}
             </select>
           </div>
@@ -152,7 +187,6 @@ const UploadDatasetModal: React.FC<Props> = ({ isOpen, onClose, onSave }) => {
           />
         </div>
 
-        {/* Data Preview */}
         {csvData.length > 0 && (
           <div className="border rounded p-2 max-h-64 overflow-y-scroll text-sm font-mono bg-gray-50">
             <table className="table-auto w-full text-xs">
