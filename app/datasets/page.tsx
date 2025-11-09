@@ -26,14 +26,6 @@ export default function DatasetsPage() {
     }
   }
 
-  async function handleDelete(id: string) {
-    if (confirm("Are you sure you want to delete this dataset?")) {
-      const { error } = await supabase.from("datasets").delete().eq("id", id);
-      if (error) console.error("Delete failed:", error);
-      else fetchDatasets();
-    }
-  }
-
   useEffect(() => {
     fetchDatasets();
   }, []);
@@ -74,17 +66,12 @@ export default function DatasetsPage() {
               >
                 <span className="text-gray-800">{dataset.name}</span>
                 <div className="flex space-x-2 text-gray-500">
-                  <Link href={`/datasets/${dataset.id}`}>
-                    <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
-                  </Link>
+                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
                   <Pencil
                     className="w-4 h-4 cursor-pointer hover:text-yellow-500"
                     onClick={() => setEditDataset(dataset)}
                   />
-                  <Trash
-                    className="w-4 h-4 cursor-pointer hover:text-red-500"
-                    onClick={() => handleDelete(dataset.id)}
-                  />
+                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
                 </div>
               </div>
             ))}
@@ -93,6 +80,7 @@ export default function DatasetsPage() {
 
         {showUploadModal && (
           <UploadDatasetModal
+            isOpen={true}
             onClose={() => setShowUploadModal(false)}
             onSave={() => {
               setShowUploadModal(false);
