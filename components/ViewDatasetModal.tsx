@@ -23,24 +23,41 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     return isNaN(d.getTime()) ? "—" : d.toLocaleString();
   };
 
-  // 🧩 Load dataset rows when modal opens
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
+
         const supabase = createClient();
 
-        // Table name is usually derived from dataset name
-        // Adjust mapping as needed
-        const tableName = dataset.name
-          .toLowerCase()
-          .replace(/\s+/g, "_")
-          .replace(/[^\w_]/g, "");
+        // ✅ Determine correct value table based on dataset type
+        const valueTable =
+          dataset.type === "numeric"
+            ? "dataset_values_numeric"
+            : dataset.type === "categorical"
+            ? "dataset_values_categorical"
+            : null;
 
-        const { data, error } = await supabase.from(tableName).select("*").limit(50);
+        if (!valueTable) {
+          throw new Error(`Unsupported dataset type: ${dataset.type}`);
+        }
+
+        // ✅ Query by dataset_id
+        const { data, error } = await supabase
+          .from(valueTable)
+          .select("*")
+          .eq("dataset_id", dataset.id)
+          .limit(50);
+
         if (error) throw error;
-        setRows(data || []);
+
+        if (!data || data.length === 0) {
+          setError("No values found for this dataset.");
+          return;
+        }
+
+        setRows(data);
       } catch (err: any) {
         setError(err.message || "Failed to fetch dataset data");
       } finally {
