@@ -129,7 +129,6 @@ export default function DatasetTable({ datasets }: { datasets: any[] }) {
         <p className="text-gray-500">No datasets found.</p>
       )}
 
-      {/* ✅ Use your existing modals directly */}
       {viewDataset && (
         <ViewDatasetModal
           dataset={viewDataset}
