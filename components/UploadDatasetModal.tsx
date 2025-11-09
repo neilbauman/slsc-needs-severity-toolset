@@ -1,132 +1,66 @@
+// components/UploadDatasetModal.tsx
+
 'use client';
 
 import React, { useState } from 'react';
 import Papa from 'papaparse';
-import { Dialog, DialogTrigger, DialogContent } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 
-type CsvRow = Record<string, string>;
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+}
 
-export default function UploadDatasetModal() {
-  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
-  const [parsedData, setParsedData] = useState<CsvRow[]>([]);
-  const [adminPcodeCol, setAdminPcodeCol] = useState<string>();
-  const [valueCol, setValueCol] = useState<string>();
-  const [categoryCodeCol, setCategoryCodeCol] = useState<string>();
-  const [categoryScoreCol, setCategoryScoreCol] = useState<string>();
-  const [error, setError] = useState<string | null>(null);
+export default function UploadDatasetModal({ isOpen, onClose }: Props) {
+  const [file, setFile] = useState<File | null>(null);
+  const [parsedData, setParsedData] = useState<any[]>([]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFile = e.target.files?.[0];
+    setFile(uploadedFile || null);
 
-    Papa.parse<CsvRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const data = results.data;
-        if (data.length > 0) {
-          setParsedData(data);
-          setCsvHeaders(Object.keys(data[0]));
-        }
-      },
-      error: (err) => setError(err.message),
-    });
-  };
-
-  const handleSubmit = () => {
-    if (!adminPcodeCol) {
-      setError('Admin Pcode column is required.');
-      return;
+    if (uploadedFile) {
+      Papa.parse(uploadedFile, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (result) => {
+          setParsedData(result.data);
+          console.log('Parsed data:', result.data);
+        },
+      });
     }
-
-    const mappedData = parsedData.map((row) => ({
-      admin_pcode: row[adminPcodeCol || ''] || '',
-      value: valueCol ? row[valueCol] : undefined,
-      category_code: categoryCodeCol ? row[categoryCodeCol] : undefined,
-      category_score: categoryScoreCol ? row[categoryScoreCol] : undefined,
-    }));
-
-    // TODO: send `mappedData` to Supabase or API route
-    console.log('Uploading dataset:', mappedData);
-
-    setError(null);
-    alert('Upload simulated. Ready to send to database.');
   };
+
+  const handleClose = () => {
+    setFile(null);
+    setParsedData([]);
+    onClose();
+  };
+
+  if (!isOpen) return null;
 
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button>Upload Dataset</Button>
-      </DialogTrigger>
+    <div className="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center">
+      <div className="bg-white rounded-lg p-6 w-full max-w-xl shadow-lg">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Upload Dataset</h2>
 
-      <DialogContent className="max-w-2xl">
-        <h2 className="text-xl font-semibold mb-2">Upload New Dataset</h2>
+        <input type="file" accept=".csv" onChange={handleFileChange} className="mb-4" />
 
-        <input type="file" accept=".csv" onChange={handleFileUpload} className="mb-4" />
-
-        {csvHeaders.length > 0 && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Admin Pcode *</Label>
-                <Select onValueChange={setAdminPcodeCol}>
-                  <SelectTrigger><SelectValue placeholder="Select column" /></SelectTrigger>
-                  <SelectContent>
-                    {csvHeaders.map((col) => (
-                      <SelectItem key={col} value={col}>{col}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Value (numeric)</Label>
-                <Select onValueChange={setValueCol}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                  <SelectContent>
-                    {csvHeaders.map((col) => (
-                      <SelectItem key={col} value={col}>{col}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Category Code</Label>
-                <Select onValueChange={setCategoryCodeCol}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                  <SelectContent>
-                    {csvHeaders.map((col) => (
-                      <SelectItem key={col} value={col}>{col}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Category Score</Label>
-                <Select onValueChange={setCategoryScoreCol}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                  <SelectContent>
-                    {csvHeaders.map((col) => (
-                      <SelectItem key={col} value={col}>{col}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <Button className="mt-4" onClick={handleSubmit}>
-              Submit Dataset
-            </Button>
-
-            {error && <p className="text-red-600 text-sm">{error}</p>}
+        {parsedData.length > 0 && (
+          <div className="max-h-64 overflow-auto border border-gray-200 rounded p-2 text-xs text-gray-700">
+            <pre>{JSON.stringify(parsedData.slice(0, 5), null, 2)}</pre>
+            <p className="text-gray-400 mt-2">Showing first 5 records...</p>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+
+        <div className="mt-6 flex justify-end space-x-2">
+          <button onClick={handleClose} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+            Cancel
+          </button>
+          <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+            Upload
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
