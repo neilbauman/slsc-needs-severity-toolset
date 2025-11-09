@@ -10,6 +10,7 @@ interface ViewDatasetModalProps {
 
 export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalProps) {
   const [rows, setRows] = useState<any[]>([]);
+  const [adminNames, setAdminNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +24,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     return isNaN(d.getTime()) ? "—" : d.toLocaleString();
   };
 
-  // ✅ Allow ESC key to close modal
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -36,7 +36,7 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // ✅ Fetch dataset values
+  // Fetch dataset rows + admin names
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -55,19 +55,37 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           throw new Error(`Unsupported dataset type: ${dataset.type}`);
         }
 
-        const { data, error } = await supabase
+        // 1️⃣ Fetch dataset rows
+        const { data: valueData, error: valueError } = await supabase
           .from(valueTable)
           .select("*")
           .eq("dataset_id", dataset.id)
           .limit(50);
 
-        if (error) throw error;
-        if (!data || data.length === 0) {
+        if (valueError) throw valueError;
+        if (!valueData || valueData.length === 0) {
           setError("No values found for this dataset.");
           return;
         }
 
-        setRows(data);
+        // 2️⃣ Collect unique admin_pcodes
+        const pcodes = [...new Set(valueData.map((r) => r.admin_pcode))];
+
+        // 3️⃣ Fetch matching admin names
+        const { data: adminData, error: adminError } = await supabase
+          .from("admin_boundaries")
+          .select("admin_pcode, name")
+          .in("admin_pcode", pcodes);
+
+        if (adminError) throw adminError;
+
+        const lookup: Record<string, string> = {};
+        (adminData || []).forEach((a) => {
+          lookup[a.admin_pcode] = a.name;
+        });
+
+        setAdminNames(lookup);
+        setRows(valueData);
       } catch (err: any) {
         setError(err.message || "Failed to fetch dataset data");
       } finally {
@@ -78,7 +96,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     fetchData();
   }, [dataset]);
 
-  // ✅ Handle backdrop click to close modal
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose();
@@ -90,9 +107,7 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       onClick={handleBackdropClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40"
     >
-      <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-6 max-h-[90vh] overflow-y-auto"
-      >
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-6 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex justify-between items-start mb-4">
           <div>
@@ -126,7 +141,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           </div>
         </div>
 
-        {/* Divider */}
         <hr className="my-4" />
 
         {/* Dataset Data Section */}
@@ -143,24 +157,34 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-gray-100">
                 <tr>
-                  {Object.keys(rows[0]).map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2 border-b text-left font-semibold text-gray-700"
-                    >
-                      {col}
-                    </th>
-                  ))}
+                  {Object.keys(rows[0])
+                    .filter((col) => !["id", "dataset_id"].includes(col))
+                    .map((col) => (
+                      <th
+                        key={col}
+                        className="px-3 py-2 border-b text-left font-semibold text-gray-700"
+                      >
+                        {col === "admin_pcode" ? "Admin PCode" : col}
+                      </th>
+                    ))}
+                  <th className="px-3 py-2 border-b text-left font-semibold text-gray-700">
+                    Admin Name
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
-                    {Object.keys(row).map((col) => (
-                      <td key={col} className="px-3 py-2 border-b text-gray-700">
-                        {String(row[col] ?? "—")}
-                      </td>
-                    ))}
+                    {Object.keys(row)
+                      .filter((col) => !["id", "dataset_id"].includes(col))
+                      .map((col) => (
+                        <td key={col} className="px-3 py-2 border-b text-gray-700">
+                          {String(row[col] ?? "—")}
+                        </td>
+                      ))}
+                    <td className="px-3 py-2 border-b text-gray-700">
+                      {adminNames[row.admin_pcode] || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -168,7 +192,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           </div>
         )}
 
-        {/* Footer */}
         <div className="flex justify-end mt-6">
           <button
             onClick={onClose}
