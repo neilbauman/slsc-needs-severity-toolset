@@ -9,65 +9,71 @@ export default function ViewDatasetModal({
   dataset: any;
   onClose: () => void;
 }) {
+  if (!dataset) return null;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 relative overflow-y-auto max-h-[90vh]">
-        <h2 className="text-2xl font-semibold mb-2 text-gray-800">
-          {dataset.name}
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 relative">
+        <h2 className="text-2xl font-semibold text-gray-800 mb-1">
+          {dataset.name || "Untitled Dataset"}
         </h2>
-        <p className="text-gray-500 mb-4">
-          {dataset.description || "No description available."}
-        </p>
+        {dataset.description && (
+          <p className="text-gray-500 mb-4">{dataset.description}</p>
+        )}
 
-        <div className="grid grid-cols-2 gap-4 text-sm text-gray-700">
+        <div className="grid grid-cols-2 gap-y-2 text-sm text-gray-700 mb-4">
           <p>
-            <strong>Type:</strong> {dataset.type || "—"}
+            <span className="font-semibold">Type:</span> {dataset.type || "—"}
           </p>
           <p>
-            <strong>Admin Level:</strong>{" "}
-            {dataset.admin_level?.toUpperCase() || "N/A"}
+            <span className="font-semibold">Admin Level:</span>{" "}
+            {dataset.admin_level || "—"}
           </p>
           <p>
-            <strong>Category:</strong> {dataset.category || "—"}
+            <span className="font-semibold">Category:</span>{" "}
+            {dataset.category || "—"}
           </p>
           <p>
-            <strong>Source:</strong> {dataset.source || "—"}
+            <span className="font-semibold">Source:</span>{" "}
+            {dataset.source || "—"}
           </p>
           <p>
-            <strong>Year:</strong> {dataset.year || "—"}
+            <span className="font-semibold">Format:</span>{" "}
+            {dataset.format || "—"}
           </p>
           <p>
-            <strong>Format:</strong> {dataset.format || "—"}
+            <span className="font-semibold">Collected:</span>{" "}
+            {dataset.collected_at
+              ? new Date(dataset.collected_at).toLocaleDateString()
+              : "—"}
           </p>
           <p>
-            <strong>Created:</strong>{" "}
-            {new Date(dataset.created_at).toLocaleString()}
+            <span className="font-semibold">Created:</span>{" "}
+            {dataset.created_at
+              ? new Date(dataset.created_at).toLocaleString()
+              : "—"}
           </p>
           <p>
-            <strong>Updated:</strong>{" "}
+            <span className="font-semibold">Updated:</span>{" "}
             {dataset.updated_at
               ? new Date(dataset.updated_at).toLocaleString()
               : "—"}
           </p>
         </div>
 
-        {dataset.download_url && (
-          <div className="mt-6">
-            <a
-              href={dataset.download_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline text-sm"
-            >
-              Download dataset
-            </a>
+        {dataset.metadata && (
+          <div className="bg-gray-50 border rounded-md p-3 text-xs text-gray-600 mb-4">
+            <h3 className="font-semibold text-gray-700 mb-1">Metadata</h3>
+            <pre className="overflow-auto">
+              {JSON.stringify(dataset.metadata, null, 2)}
+            </pre>
           </div>
         )}
 
-        <div className="mt-6 flex justify-end">
+        <div className="flex justify-end mt-4">
           <button
             onClick={onClose}
-            className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
+            className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
           >
             Close
           </button>
