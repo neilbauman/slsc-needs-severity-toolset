@@ -17,18 +17,15 @@ export default function DatasetsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Modal states
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showDeriveModal, setShowDeriveModal] = useState(false);
   const [editDataset, setEditDataset] = useState<any | null>(null);
   const [viewDataset, setViewDataset] = useState<any | null>(null);
   const [deleteDataset, setDeleteDataset] = useState<any | null>(null);
 
-  // Load datasets from Supabase
+  // Load datasets
   const loadDatasets = async () => {
     setLoading(true);
-    setError(null);
-
     const { data, error } = await supabase
       .from("datasets")
       .select("*")
@@ -48,7 +45,7 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
-  // Helper: group datasets by category
+  // Group datasets by category
   const grouped = datasets.reduce((acc: any, ds: any) => {
     const cat = ds.category || "Uncategorized";
     if (!acc[cat]) acc[cat] = [];
@@ -56,6 +53,7 @@ export default function DatasetsPage() {
     return acc;
   }, {});
 
+  // ✅ This array must be properly closed before returning JSX
   const categoryOrder = [
     "Core",
     "SSC Framework - P1",
@@ -72,12 +70,11 @@ export default function DatasetsPage() {
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Page Title + Actions */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
           <div>
             <h1 className="text-xl font-semibold text-gray-800">Datasets</h1>
             <p className="text-sm text-gray-500">
-              View, upload, and derive datasets for Smart Safe Communities.
+              Manage, upload, and derive datasets for Smart Safe Communities.
             </p>
           </div>
           <div className="flex gap-2 mt-4 sm:mt-0">
@@ -96,13 +93,11 @@ export default function DatasetsPage() {
           </div>
         </div>
 
-        {/* Error or Loading */}
         {error && (
           <p className="text-red-600 text-sm mb-4">Error: {error}</p>
         )}
         {loading && <p className="text-gray-500 text-sm">Loading datasets...</p>}
 
-        {/* Dataset Tables by Category */}
         {!loading &&
           categoryOrder.map((cat) =>
             grouped[cat] ? (
@@ -133,7 +128,7 @@ export default function DatasetsPage() {
         <DeriveDatasetModal
           datasets={datasets}
           onClose={() => setShowDeriveModal(false)}
-          onCreated={loadDatasets} {/* ✅ Correct prop name fix */}
+          onCreated={loadDatasets} // ✅ fixed prop name
         />
       )}
 
