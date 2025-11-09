@@ -2,40 +2,31 @@
 
 import React from "react";
 
-export default function ViewDatasetModal({
-  dataset,
-  onClose,
-}: {
+interface ViewDatasetModalProps {
   dataset: any;
   onClose: () => void;
-}) {
+}
+
+export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalProps) {
   if (!dataset) return null;
 
-  // Normalize metadata safely
-  const metadata =
-    typeof dataset.metadata === "string"
-      ? safeParseJSON(dataset.metadata)
-      : dataset.metadata || {};
-
-  function safeParseJSON(str: string) {
-    try {
-      return JSON.parse(str);
-    } catch {
-      return {};
-    }
-  }
+  // Normalize metadata to prevent crashes or invalid dates
+  const metadata = dataset.metadata || {};
+  const getDate = (val: string | null | undefined) => {
+    if (!val) return "—";
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 relative">
-        <h2 className="text-2xl font-bold text-gray-800 mb-1">
-          {dataset.name}
-        </h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6">
+        <h2 className="text-2xl font-bold mb-1">{dataset.name}</h2>
         {dataset.description && (
           <p className="text-gray-500 mb-4">{dataset.description}</p>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2 text-sm text-gray-700">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
           <div>
             <p>
               <span className="font-semibold">Type:</span>{" "}
@@ -51,9 +42,7 @@ export default function ViewDatasetModal({
             </p>
             <p>
               <span className="font-semibold">Created At:</span>{" "}
-              {dataset.created_at
-                ? new Date(dataset.created_at).toLocaleString()
-                : "—"}
+              {getDate(dataset.created_at)}
             </p>
           </div>
 
@@ -68,37 +57,29 @@ export default function ViewDatasetModal({
             </p>
             <p>
               <span className="font-semibold">Collected At:</span>{" "}
-              {dataset.collected_at
-                ? new Date(dataset.collected_at).toLocaleDateString()
-                : metadata.collected_at
-                ? new Date(metadata.collected_at).toLocaleDateString()
-                : "—"}
+              {getDate(metadata.collected_at || dataset.collected_at)}
             </p>
             <p>
               <span className="font-semibold">Updated At:</span>{" "}
-              {metadata.updated_at
-                ? new Date(metadata.updated_at).toLocaleString()
-                : "—"}
+              {getDate(metadata.updated_at)}
             </p>
           </div>
         </div>
 
         {/* Divider */}
-        <div className="border-t my-4" />
-
-        {/* Metadata dump if present */}
-        {Object.keys(metadata).length > 0 && (
-          <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md overflow-x-auto">
-            <pre className="whitespace-pre-wrap break-all">
-              {JSON.stringify(metadata, null, 2)}
-            </pre>
-          </div>
+        {metadata && Object.keys(metadata).length > 0 && (
+          <>
+            <hr className="my-4" />
+            <div className="bg-gray-50 p-3 rounded-md text-xs text-gray-700 font-mono overflow-x-auto">
+              <pre>{JSON.stringify(metadata, null, 2)}</pre>
+            </div>
+          </>
         )}
 
         <div className="flex justify-end mt-6">
           <button
             onClick={onClose}
-            className="px-5 py-2 bg-gray-200 hover:bg-gray-300 rounded-md font-medium text-gray-700"
+            className="px-4 py-2 rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200"
           >
             Close
           </button>
