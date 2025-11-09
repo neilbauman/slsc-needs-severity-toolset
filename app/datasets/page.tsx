@@ -14,7 +14,7 @@ const supabase = createClient(
 
 export default function DatasetsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [editDataset, setEditDataset] = useState<any | null>(null);
+  const [editDatasetId, setEditDatasetId] = useState<string | null>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
 
   async function fetchDatasets() {
@@ -69,7 +69,7 @@ export default function DatasetsPage() {
                   <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
                   <Pencil
                     className="w-4 h-4 cursor-pointer hover:text-yellow-500"
-                    onClick={() => setEditDataset(dataset)}
+                    onClick={() => setEditDatasetId(dataset.id)}
                   />
                   <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
                 </div>
@@ -80,7 +80,7 @@ export default function DatasetsPage() {
 
         {showUploadModal && (
           <UploadDatasetModal
-            isOpen={true}
+            isOpen={showUploadModal}
             onClose={() => setShowUploadModal(false)}
             onSave={() => {
               setShowUploadModal(false);
@@ -89,12 +89,12 @@ export default function DatasetsPage() {
           />
         )}
 
-        {editDataset && (
+        {editDatasetId && (
           <EditDatasetModal
-            datasetId={editDataset.id}
-            onClose={() => setEditDataset(null)}
+            datasetId={editDatasetId}
+            onClose={() => setEditDatasetId(null)}
             onSave={() => {
-              setEditDataset(null);
+              setEditDatasetId(null);
               fetchDatasets();
             }}
           />
