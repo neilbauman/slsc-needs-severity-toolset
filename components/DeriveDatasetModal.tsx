@@ -1,169 +1,218 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 
 interface DeriveDatasetModalProps {
+  datasets: any[];
   onClose: () => void;
-  onDerived: () => void;
+  onCreated: () => void;
 }
 
-export default function DeriveDatasetModal({ onClose, onDerived }: DeriveDatasetModalProps) {
+export default function DeriveDatasetModal({
+  datasets,
+  onClose,
+  onCreated,
+}: DeriveDatasetModalProps) {
   const supabase = createClient();
-  const [datasets, setDatasets] = useState<any[]>([]);
-  const [sourceId, setSourceId] = useState("");
-  const [scalar, setScalar] = useState<number>(1);
+
+  const [mode, setMode] = useState<"scalar" | "join">("scalar");
+  const [sourceA, setSourceA] = useState("");
+  const [sourceB, setSourceB] = useState("");
+  const [scalar, setScalar] = useState<number | null>(null);
+  const [joinType, setJoinType] = useState("multiply");
   const [newName, setNewName] = useState("");
-  const [newCategory, setNewCategory] = useState("Core");
+  const [category, setCategory] = useState("Derived");
   const [targetLevel, setTargetLevel] = useState("ADM3");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadDatasets = async () => {
-      const { data, error } = await supabase
-        .from("datasets")
-        .select("id, name, admin_level, type")
-        .eq("type", "numeric");
-      if (!error) setDatasets(data);
-    };
-    loadDatasets();
-  }, []);
-
-  const handleDerive = async () => {
-    if (!sourceId || !newName) {
-      setError("Please select a source dataset and provide a name.");
+  const handleSubmit = async () => {
+    if (!sourceA) {
+      setMessage("Please select at least one dataset.");
       return;
     }
-    setError(null);
     setLoading(true);
+    setMessage(null);
 
-    const res = await fetch("/api/deriveDataset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source_id: sourceId,
-        scalar,
-        new_name: newName,
-        new_category: newCategory,
-        target_admin_level: targetLevel,
-      }),
+    const { data, error } = await supabase.rpc("derive_dataset_unified", {
+      source_a: sourceA,
+      source_b: mode === "join" ? sourceB : null,
+      scalar: mode === "scalar" ? scalar : null,
+      join_type: joinType,
+      new_name: newName || "Derived Dataset",
+      new_category: category || "Derived",
+      target_admin_level: targetLevel,
     });
 
-    const result = await res.json();
     setLoading(false);
 
-    if (!res.ok) {
-      setError(result.error || "Failed to derive dataset.");
+    if (error) {
+      console.error("Derivation error:", error);
+      setMessage(`❌ Error: ${error.message}`);
       return;
     }
 
-    onDerived();
-    onClose();
+    setMessage("✅ Derived dataset created successfully!");
+    onCreated();
+    setTimeout(onClose, 1200);
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
-        {/* Header */}
-        <div className="flex justify-between items-start border-b px-4 py-3">
-          <div>
-            <h2 className="text-base font-semibold text-gray-800">Derive New Dataset</h2>
-            <p className="text-xs text-gray-500">Create a dataset derived from an existing one.</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6 relative">
+        <h2 className="text-lg font-semibold mb-4">Create Derived Dataset</h2>
+
+        {/* Mode Selection */}
+        <div className="flex gap-4 mb-4">
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              checked={mode === "scalar"}
+              onChange={() => setMode("scalar")}
+            />
+            Scalar Mode
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              checked={mode === "join"}
+              onChange={() => setMode("join")}
+            />
+            Join Mode
+          </label>
         </div>
 
-        {/* Body */}
-        <div className="p-4 space-y-4 text-sm">
+        {/* Source Dataset(s) */}
+        <div className="space-y-3">
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Source Dataset</label>
+            <label className="text-sm font-medium">Primary Dataset</label>
             <select
-              className="w-full border border-gray-300 rounded p-2 text-sm"
-              value={sourceId}
-              onChange={(e) => setSourceId(e.target.value)}
+              className="w-full border rounded p-2 text-sm mt-1"
+              value={sourceA}
+              onChange={(e) => setSourceA(e.target.value)}
             >
-              <option value="">Select source dataset</option>
+              <option value="">-- Select dataset --</option>
               {datasets.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.name} ({d.admin_level})
+                  {d.name} ({d.category})
                 </option>
               ))}
             </select>
           </div>
 
-          <div>
-            <label className="block text-gray-700 font-medium mb-1">Scalar Value</label>
-            <input
-              type="number"
-              className="w-full border border-gray-300 rounded p-2 text-sm"
-              value={scalar}
-              step="0.0001"
-              onChange={(e) => setScalar(parseFloat(e.target.value))}
-            />
-            <p className="text-xs text-gray-500 mt-1">Example: 0.2083 for population-to-household conversion.</p>
-          </div>
+          {mode === "join" && (
+            <div>
+              <label className="text-sm font-medium">Secondary Dataset</label>
+              <select
+                className="w-full border rounded p-2 text-sm mt-1"
+                value={sourceB}
+                onChange={(e) => setSourceB(e.target.value)}
+              >
+                <option value="">-- Select dataset --</option>
+                {datasets.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.category})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {mode === "scalar" && (
+            <div>
+              <label className="text-sm font-medium">Scalar Value</label>
+              <input
+                type="number"
+                className="w-full border rounded p-2 text-sm mt-1"
+                placeholder="e.g. 0.25"
+                value={scalar ?? ""}
+                onChange={(e) => setScalar(parseFloat(e.target.value))}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Operation & Metadata */}
+        <div className="mt-4 space-y-3">
+          {mode === "join" && (
+            <div>
+              <label className="text-sm font-medium">Join Operation</label>
+              <select
+                className="w-full border rounded p-2 text-sm mt-1"
+                value={joinType}
+                onChange={(e) => setJoinType(e.target.value)}
+              >
+                <option value="multiply">Multiply</option>
+                <option value="add">Add</option>
+                <option value="subtract">Subtract</option>
+                <option value="divide">Divide</option>
+              </select>
+            </div>
+          )}
 
           <div>
-            <label className="block text-gray-700 font-medium mb-1">New Dataset Name</label>
+            <label className="text-sm font-medium">New Dataset Name</label>
             <input
               type="text"
-              className="w-full border border-gray-300 rounded p-2 text-sm"
-              placeholder="e.g., Estimated Households 2020"
+              className="w-full border rounded p-2 text-sm mt-1"
+              placeholder="e.g. Exposed Population"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
           </div>
 
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Category</label>
-            <select
-              className="w-full border border-gray-300 rounded p-2 text-sm"
-              value={newCategory}
-              onChange={(e) => setNewCategory(e.target.value)}
-            >
-              <option>Core</option>
-              <option>SSC Framework - P1</option>
-              <option>SSC Framework - P2</option>
-              <option>SSC Framework - P3</option>
-              <option>Underlying Vulnerability</option>
-            </select>
+            <label className="text-sm font-medium">Category</label>
+            <input
+              type="text"
+              className="w-full border rounded p-2 text-sm mt-1"
+              placeholder="e.g. Underlying Vulnerability"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            />
           </div>
 
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Target Admin Level</label>
+            <label className="text-sm font-medium">Target Admin Level</label>
             <select
-              className="w-full border border-gray-300 rounded p-2 text-sm"
+              className="w-full border rounded p-2 text-sm mt-1"
               value={targetLevel}
               onChange={(e) => setTargetLevel(e.target.value)}
             >
-              <option>ADM0</option>
-              <option>ADM1</option>
-              <option>ADM2</option>
-              <option>ADM3</option>
-              <option>ADM4</option>
+              <option value="ADM4">ADM4</option>
+              <option value="ADM3">ADM3</option>
+              <option value="ADM2">ADM2</option>
             </select>
           </div>
-
-          {error && <p className="text-red-600 text-xs">{error}</p>}
         </div>
 
-        {/* Footer */}
-        <div className="border-t px-4 py-3 flex justify-end space-x-2">
+        {/* Actions */}
+        <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="border border-gray-300 hover:bg-gray-100 text-gray-700 font-medium px-3 py-1.5 rounded text-sm"
+            className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50"
           >
             Cancel
           </button>
           <button
-            onClick={handleDerive}
+            onClick={handleSubmit}
             disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-1.5 rounded text-sm"
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? "Deriving..." : "Create Derived Dataset"}
+            {loading ? "Creating..." : "Create"}
           </button>
         </div>
+
+        {message && (
+          <p
+            className={`mt-3 text-sm ${
+              message.startsWith("✅") ? "text-green-600" : "text-red-600"
+            }`}
+          >
+            {message}
+          </p>
+        )}
       </div>
     </div>
   );
