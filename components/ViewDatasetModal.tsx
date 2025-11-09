@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabaseClient";
 
 interface ViewDatasetModalProps {
@@ -23,6 +23,20 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     return isNaN(d.getTime()) ? "—" : d.toLocaleString();
   };
 
+  // ✅ Allow ESC key to close modal
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    },
+    [onClose]
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
+  // ✅ Fetch dataset values
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -30,8 +44,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
         setError(null);
 
         const supabase = createClient();
-
-        // ✅ Determine correct value table based on dataset type
         const valueTable =
           dataset.type === "numeric"
             ? "dataset_values_numeric"
@@ -43,7 +55,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           throw new Error(`Unsupported dataset type: ${dataset.type}`);
         }
 
-        // ✅ Query by dataset_id
         const { data, error } = await supabase
           .from(valueTable)
           .select("*")
@@ -51,7 +62,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           .limit(50);
 
         if (error) throw error;
-
         if (!data || data.length === 0) {
           setError("No values found for this dataset.");
           return;
@@ -68,14 +78,37 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     fetchData();
   }, [dataset]);
 
+  // ✅ Handle backdrop click to close modal
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-6 max-h-[90vh] overflow-y-auto">
-        {/* Title + Description */}
-        <h2 className="text-2xl font-bold mb-1">{dataset.name}</h2>
-        {dataset.description && (
-          <p className="text-gray-500 mb-4">{dataset.description}</p>
-        )}
+    <div
+      onClick={handleBackdropClick}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40"
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-6 max-h-[90vh] overflow-y-auto"
+      >
+        {/* Header */}
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="text-2xl font-bold">{dataset.name}</h2>
+            {dataset.description && (
+              <p className="text-gray-500">{dataset.description}</p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-gray-500 hover:text-gray-800 text-2xl leading-none font-semibold"
+          >
+            ×
+          </button>
+        </div>
 
         {/* Metadata Grid */}
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm mb-6">
