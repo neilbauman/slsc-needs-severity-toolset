@@ -13,8 +13,8 @@
     "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "@types/react": "^18.2.43",
-    "@types/node": "^20.11.30"
+    "typescript": "^5.0.0",
+    "@types/react": "^18.0.28",
+    "@types/node": "^20.0.0"
   }
 }
