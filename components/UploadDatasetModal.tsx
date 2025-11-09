@@ -1,66 +1,89 @@
-// components/UploadDatasetModal.tsx
+"use client";
 
-'use client';
+import React, { useState, useEffect } from "react";
+import Link from "next/link";
+import { ArrowRight, Eye, Pencil, Trash } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+import UploadDatasetModal from "@/components/UploadDatasetModal";
 
-import React, { useState } from 'react';
-import Papa from 'papaparse';
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-interface Props {
-  isOpen: boolean;
-  onClose: () => void;
-}
+export default function DatasetsPage() {
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [datasets, setDatasets] = useState<any[]>([]);
 
-export default function UploadDatasetModal({ isOpen, onClose }: Props) {
-  const [file, setFile] = useState<File | null>(null);
-  const [parsedData, setParsedData] = useState<any[]>([]);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadedFile = e.target.files?.[0];
-    setFile(uploadedFile || null);
-
-    if (uploadedFile) {
-      Papa.parse(uploadedFile, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (result) => {
-          setParsedData(result.data);
-          console.log('Parsed data:', result.data);
-        },
-      });
+  const fetchDatasets = async () => {
+    const { data, error } = await supabase.from("datasets").select("*");
+    if (error) {
+      console.error("Error fetching datasets:", error);
+    } else {
+      setDatasets(data);
     }
   };
 
-  const handleClose = () => {
-    setFile(null);
-    setParsedData([]);
-    onClose();
-  };
-
-  if (!isOpen) return null;
+  useEffect(() => {
+    fetchDatasets();
+  }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center">
-      <div className="bg-white rounded-lg p-6 w-full max-w-xl shadow-lg">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Upload Dataset</h2>
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-slate-800 px-6 py-4 text-white">
+        <h1 className="text-2xl font-semibold">
+          Philippines Shelter Severity Toolset <span className="text-yellow-400">(sandbox)</span>
+        </h1>
+        <nav className="text-sm mt-1 text-gray-300">
+          <Link href="/" className="hover:underline">
+            Dashboard
+          </Link>
+          <span className="mx-2">»</span>
+          <span className="text-white">Datasets</span>
+        </nav>
+      </header>
 
-        <input type="file" accept=".csv" onChange={handleFileChange} className="mb-4" />
-
-        {parsedData.length > 0 && (
-          <div className="max-h-64 overflow-auto border border-gray-200 rounded p-2 text-xs text-gray-700">
-            <pre>{JSON.stringify(parsedData.slice(0, 5), null, 2)}</pre>
-            <p className="text-gray-400 mt-2">Showing first 5 records...</p>
-          </div>
-        )}
-
-        <div className="mt-6 flex justify-end space-x-2">
-          <button onClick={handleClose} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">
-            Cancel
-          </button>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
-            Upload
+      <main className="p-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-semibold text-gray-800">Datasets</h2>
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            onClick={() => setShowUploadModal(true)}
+          >
+            Upload New Dataset
           </button>
         </div>
-      </div>
+
+        <section>
+          <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
+          <div className="space-y-3">
+            {datasets.map((dataset) => (
+              <div
+                key={dataset.id}
+                className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
+              >
+                <span className="text-gray-800">{dataset.name}</span>
+                <div className="flex space-x-2 text-gray-500">
+                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
+                  <Pencil className="w-4 h-4 cursor-pointer hover:text-yellow-500" />
+                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {showUploadModal && (
+          <UploadDatasetModal
+            isOpen={showUploadModal}
+            onClose={() => setShowUploadModal(false)}
+            onSave={() => {
+              setShowUploadModal(false);
+              fetchDatasets();
+            }}
+          />
+        )}
+      </main>
     </div>
   );
 }
