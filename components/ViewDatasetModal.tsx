@@ -29,7 +29,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           ? "dataset_values_numeric"
           : "dataset_values_categorical";
 
-      // Fetch dataset values
       const { data: values, error: fetchError } = await supabase
         .from(table)
         .select("*")
@@ -38,7 +37,7 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
       if (fetchError) throw fetchError;
 
-      // Fetch admin names (via admin_boundaries)
+      // Fetch boundaries and map pcode → name
       const { data: boundaries } = await supabase
         .from("admin_boundaries")
         .select("admin_pcode, name");
@@ -47,13 +46,16 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
         (boundaries || []).map((b: any) => [b.admin_pcode, b.name])
       );
 
-      const enriched = (values || []).map((v: any) => ({
-        ...v,
-        admin_name:
+      // Try direct or prefix-based matching
+      const enriched = (values || []).map((v: any) => {
+        const adminName =
           nameMap.get(v.admin_pcode) ||
-          nameMap.get(v.admin_pcode?.padEnd(11, "0")) ||
-          "—",
-      }));
+          nameMap.get(v.admin_pcode.slice(0, 9)) ||
+          nameMap.get(v.admin_pcode.slice(0, 7)) ||
+          nameMap.get(v.admin_pcode.slice(0, 4)) ||
+          "—";
+        return { ...v, admin_name: adminName };
+      });
 
       setData(enriched);
     } catch (err: any) {
@@ -82,13 +84,13 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl relative max-h-[85vh] flex flex-col">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl relative max-h-[70vh] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex justify-between items-start p-4 border-b">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">{dataset.name}</h2>
+            <h2 className="text-base font-semibold text-gray-800">{dataset.name}</h2>
             {dataset.description && (
-              <p className="text-sm text-gray-500">{dataset.description}</p>
+              <p className="text-xs text-gray-500">{dataset.description}</p>
             )}
           </div>
           <button
@@ -100,11 +102,10 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
         </div>
 
         {/* Metadata */}
-        <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 px-4 py-2 border-b">
+        <div className="grid grid-cols-2 gap-x-4 text-[11px] text-gray-600 px-4 py-2 border-b">
           <div>
             <p>
-              <span className="font-semibold text-gray-700">Type:</span>{" "}
-              {dataset.type}
+              <span className="font-semibold text-gray-700">Type:</span> {dataset.type}
             </p>
             <p>
               <span className="font-semibold text-gray-700">Category:</span>{" "}
@@ -142,15 +143,11 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
         </div>
 
         {/* Dataset Preview */}
-        <div className="flex-grow overflow-y-auto p-3 text-xs">
-          <h3 className="text-sm font-semibold text-gray-800 mb-2">
-            Dataset Preview
-          </h3>
+        <div className="flex-grow overflow-y-auto p-3 text-[11px] max-h-[50vh]">
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">Dataset Preview</h3>
 
           {loading ? (
-            <p className="text-gray-500 text-center py-6 text-sm">
-              Loading data…
-            </p>
+            <p className="text-gray-500 text-center py-6 text-sm">Loading data…</p>
           ) : error ? (
             <p className="text-red-600 text-center py-4">{error}</p>
           ) : data.length === 0 ? (
@@ -164,22 +161,22 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
                   <tr>
                     <th
                       onClick={() => handleSort("admin_pcode")}
-                      className="text-left py-1.5 px-2 border-b cursor-pointer hover:bg-gray-100"
+                      className="text-left py-1 px-2 border-b cursor-pointer hover:bg-gray-100"
                     >
                       Admin PCode
                     </th>
-                    <th className="text-left py-1.5 px-2 border-b">Admin Name</th>
+                    <th className="text-left py-1 px-2 border-b">Admin Name</th>
                     {dataset.type === "categorical" && (
                       <th
                         onClick={() => handleSort("category")}
-                        className="text-left py-1.5 px-2 border-b cursor-pointer hover:bg-gray-100"
+                        className="text-left py-1 px-2 border-b cursor-pointer hover:bg-gray-100"
                       >
                         Category
                       </th>
                     )}
                     <th
                       onClick={() => handleSort("value")}
-                      className="text-left py-1.5 px-2 border-b cursor-pointer hover:bg-gray-100"
+                      className="text-left py-1 px-2 border-b cursor-pointer hover:bg-gray-100"
                     >
                       Value
                     </th>
