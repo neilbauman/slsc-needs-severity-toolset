@@ -8,182 +8,180 @@ interface ViewDatasetModalProps {
   onClose: () => void;
 }
 
-interface DatasetRow {
-  admin_pcode: string;
-  value?: number | string | null;
-  category?: string | null;
-}
-
 export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalProps) {
   const supabase = createClient();
-
-  const [data, setData] = useState<DatasetRow[]>([]);
-  const [adminMap, setAdminMap] = useState<Record<string, string>>({});
+  const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<"admin_pcode" | "admin_name" | "value">("admin_pcode");
-  const [sortAsc, setSortAsc] = useState(true);
 
   useEffect(() => {
-    const loadData = async () => {
-      if (!dataset) return;
+    if (!dataset) return;
+    loadDatasetData();
+  }, [dataset]);
 
-      try {
-        setLoading(true);
-        setError(null);
+  const loadDatasetData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const table =
+        dataset.type === "numeric"
+          ? "dataset_values_numeric"
+          : "dataset_values_categorical";
 
-        // 1. Load admin boundaries for name lookups
-        const { data: boundaries, error: boundariesError } = await supabase
-          .from("admin_boundaries")
-          .select("admin_pcode, name");
+      // Fetch dataset values
+      const { data: values, error: fetchError } = await supabase
+        .from(table)
+        .select("*")
+        .eq("dataset_id", dataset.id)
+        .limit(1000);
 
-        if (boundariesError) throw boundariesError;
+      if (fetchError) throw fetchError;
 
-        const map: Record<string, string> = {};
-        boundaries?.forEach((b) => {
-          map[b.admin_pcode] = b.name;
-        });
-        setAdminMap(map);
+      // Fetch admin names (via admin_boundaries)
+      const { data: boundaries } = await supabase
+        .from("admin_boundaries")
+        .select("admin_pcode, name");
 
-        // 2. Load dataset values
-        const table =
-          dataset.type === "numeric"
-            ? "dataset_values_numeric"
-            : "dataset_values_categorical";
+      const nameMap = new Map(
+        (boundaries || []).map((b: any) => [b.admin_pcode, b.name])
+      );
 
-        const { data: datasetValues, error: datasetError } = await supabase
-          .from(table)
-          .select("*")
-          .eq("dataset_id", dataset.id)
-          .limit(1000);
+      const enriched = (values || []).map((v: any) => ({
+        ...v,
+        admin_name:
+          nameMap.get(v.admin_pcode) ||
+          nameMap.get(v.admin_pcode?.padEnd(11, "0")) ||
+          "—",
+      }));
 
-        if (datasetError) throw datasetError;
-
-        setData(datasetValues || []);
-      } catch (err: any) {
-        console.error(err);
-        setError(err.message || "Error loading dataset.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, [dataset, supabase]);
-
-  const resolveAdminName = (pcode: string): string => {
-    if (!pcode) return "—";
-    if (adminMap[pcode]) return adminMap[pcode];
-
-    // Try truncated versions (for adm roll-ups)
-    for (let i = pcode.length; i >= 2; i--) {
-      const prefix = pcode.slice(0, i);
-      if (adminMap[prefix]) return adminMap[prefix];
+      setData(enriched);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Error loading dataset preview");
+    } finally {
+      setLoading(false);
     }
-
-    // Try padded versions (for shorter pcodes)
-    for (let i = pcode.length; i <= 11; i++) {
-      const padded = pcode.padEnd(i, "0");
-      if (adminMap[padded]) return adminMap[padded];
-    }
-
-    return "—";
   };
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return "—";
-    const d = new Date(dateString);
-    return isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
-  };
-
-  const sortData = (key: "admin_pcode" | "admin_name" | "value") => {
-    const newAsc = sortKey === key ? !sortAsc : true;
-    setSortKey(key);
-    setSortAsc(newAsc);
-
-    setData((prev) => {
-      const sorted = [...prev].sort((a, b) => {
-        let aVal: any;
-        let bVal: any;
-
-        if (key === "admin_name") {
-          aVal = resolveAdminName(a.admin_pcode);
-          bVal = resolveAdminName(b.admin_pcode);
-        } else {
-          aVal = (a as any)[key];
-          bVal = (b as any)[key];
-        }
-
-        if (aVal < bVal) return newAsc ? -1 : 1;
-        if (aVal > bVal) return newAsc ? 1 : -1;
-        return 0;
-      });
-      return sorted;
+  const handleSort = (key: string) => {
+    let direction: "asc" | "desc" = "asc";
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === "asc") {
+      direction = "desc";
+    }
+    setSortConfig({ key, direction });
+    const sorted = [...data].sort((a, b) => {
+      if (a[key] < b[key]) return direction === "asc" ? -1 : 1;
+      if (a[key] > b[key]) return direction === "asc" ? 1 : -1;
+      return 0;
     });
+    setData(sorted);
   };
 
   if (!dataset) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl mx-4 my-8 relative flex flex-col">
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-4 text-gray-500 hover:text-gray-700 text-2xl font-light"
-        >
-          ×
-        </button>
-
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl relative max-h-[85vh] flex flex-col">
         {/* Header */}
-        <div className="p-6 border-b">
-          <h2 className="text-xl font-semibold text-gray-800">{dataset.name}</h2>
-          <p className="text-xs text-gray-500 mt-1">{dataset.description || "—"}</p>
+        <div className="flex justify-between items-start p-4 border-b">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">{dataset.name}</h2>
+            {dataset.description && (
+              <p className="text-sm text-gray-500">{dataset.description}</p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl font-light"
+          >
+            ×
+          </button>
         </div>
 
         {/* Metadata */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600 px-6 py-3 border-b bg-gray-50">
-          <div><strong>Type:</strong> {dataset.type || "—"}</div>
-          <div><strong>Category:</strong> {dataset.category || "—"}</div>
-          <div><strong>Admin Level:</strong> {dataset.admin_level || "—"}</div>
-          <div><strong>Collected At:</strong> {formatDate(dataset.collected_at)}</div>
-          <div><strong>Source:</strong> {dataset.metadata?.source || "—"}</div>
-          <div><strong>Created:</strong> {formatDate(dataset.created_at)}</div>
+        <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 px-4 py-2 border-b">
+          <div>
+            <p>
+              <span className="font-semibold text-gray-700">Type:</span>{" "}
+              {dataset.type}
+            </p>
+            <p>
+              <span className="font-semibold text-gray-700">Category:</span>{" "}
+              {dataset.category || "—"}
+            </p>
+            <p>
+              <span className="font-semibold text-gray-700">Format:</span>{" "}
+              {dataset.metadata?.format || "—"}
+            </p>
+            <p>
+              <span className="font-semibold text-gray-700">Created At:</span>{" "}
+              {new Date(dataset.created_at).toLocaleString()}
+            </p>
+          </div>
+          <div>
+            <p>
+              <span className="font-semibold text-gray-700">Admin Level:</span>{" "}
+              {dataset.admin_level}
+            </p>
+            <p>
+              <span className="font-semibold text-gray-700">Source:</span>{" "}
+              {dataset.source || dataset.metadata?.source || "—"}
+            </p>
+            <p>
+              <span className="font-semibold text-gray-700">Collected At:</span>{" "}
+              {dataset.collected_at || "—"}
+            </p>
+            <p>
+              <span className="font-semibold text-gray-700">Updated At:</span>{" "}
+              {dataset.metadata?.updated_at
+                ? new Date(dataset.metadata.updated_at).toLocaleString()
+                : "—"}
+            </p>
+          </div>
         </div>
 
-        {/* Dataset Table */}
-        <div className="flex-1 overflow-y-auto max-h-[70vh] p-4">
+        {/* Dataset Preview */}
+        <div className="flex-grow overflow-y-auto p-3 text-xs">
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">
+            Dataset Preview
+          </h3>
+
           {loading ? (
-            <p className="text-gray-500 text-sm text-center mt-10">Loading data...</p>
+            <p className="text-gray-500 text-center py-6 text-sm">
+              Loading data…
+            </p>
           ) : error ? (
-            <p className="text-red-600 text-sm">{error}</p>
+            <p className="text-red-600 text-center py-4">{error}</p>
           ) : data.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center mt-10">No data found.</p>
+            <p className="text-gray-500 text-center py-6 text-sm">
+              No records found for this dataset.
+            </p>
           ) : (
             <div className="overflow-x-auto border rounded-md">
-              <table className="min-w-full text-xs border-collapse">
-                <thead className="bg-gray-100 text-gray-700">
+              <table className="w-full border-collapse text-[11px]">
+                <thead className="bg-gray-50 border-b text-gray-700">
                   <tr>
                     <th
-                      className="text-left p-2 border cursor-pointer select-none"
-                      onClick={() => sortData("admin_pcode")}
+                      onClick={() => handleSort("admin_pcode")}
+                      className="text-left py-1.5 px-2 border-b cursor-pointer hover:bg-gray-100"
                     >
-                      Admin PCode {sortKey === "admin_pcode" ? (sortAsc ? "▲" : "▼") : ""}
+                      Admin PCode
                     </th>
-                    <th
-                      className="text-left p-2 border cursor-pointer select-none"
-                      onClick={() => sortData("admin_name")}
-                    >
-                      Admin Name {sortKey === "admin_name" ? (sortAsc ? "▲" : "▼") : ""}
-                    </th>
+                    <th className="text-left py-1.5 px-2 border-b">Admin Name</th>
                     {dataset.type === "categorical" && (
-                      <th className="text-left p-2 border">Category</th>
+                      <th
+                        onClick={() => handleSort("category")}
+                        className="text-left py-1.5 px-2 border-b cursor-pointer hover:bg-gray-100"
+                      >
+                        Category
+                      </th>
                     )}
                     <th
-                      className="text-left p-2 border cursor-pointer select-none"
-                      onClick={() => sortData("value")}
+                      onClick={() => handleSort("value")}
+                      className="text-left py-1.5 px-2 border-b cursor-pointer hover:bg-gray-100"
                     >
-                      Value {sortKey === "value" ? (sortAsc ? "▲" : "▼") : ""}
+                      Value
                     </th>
                   </tr>
                 </thead>
@@ -191,36 +189,22 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
                   {data.map((row, i) => (
                     <tr
                       key={i}
-                      className={`hover:bg-gray-50 ${i % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
+                      className={`${
+                        i % 2 === 0 ? "bg-white" : "bg-gray-50"
+                      } hover:bg-gray-100`}
                     >
-                      <td className="p-2 border font-mono text-[11px]">{row.admin_pcode}</td>
-                      <td className="p-2 border text-[11px]">
-                        {resolveAdminName(row.admin_pcode)}
-                      </td>
+                      <td className="py-1 px-2 border-b">{row.admin_pcode}</td>
+                      <td className="py-1 px-2 border-b">{row.admin_name}</td>
                       {dataset.type === "categorical" && (
-                        <td className="p-2 border text-[11px]">
-                          {row.category || "—"}
-                        </td>
+                        <td className="py-1 px-2 border-b">{row.category || "—"}</td>
                       )}
-                      <td className="p-2 border text-[11px] text-right">
-                        {row.value ?? "—"}
-                      </td>
+                      <td className="py-1 px-2 border-b">{row.value ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t text-right">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-md text-sm bg-gray-200 hover:bg-gray-300 text-gray-700"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>
