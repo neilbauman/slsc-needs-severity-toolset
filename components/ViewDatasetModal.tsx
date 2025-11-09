@@ -1,80 +1,43 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import React from "react";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-export default function ViewDatasetModal({
-  datasetId,
-  onClose,
-}: {
-  datasetId: string;
+interface Props {
+  dataset: any;
+  isOpen: boolean;
   onClose: () => void;
-}) {
-  const [rows, setRows] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+}
 
-  useEffect(() => {
-    async function fetchPreview() {
-      const { data, error } = await supabase
-        .from("dataset_values")
-        .select("*")
-        .eq("dataset_id", datasetId)
-        .limit(10);
-
-      if (error) console.error("Error loading data preview", error);
-      else setRows(data ?? []);
-
-      setLoading(false);
-    }
-
-    fetchPreview();
-  }, [datasetId]);
+export default function ViewDatasetModal({ dataset, isOpen, onClose }: Props) {
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center">
-      <div className="bg-white rounded shadow-lg p-6 max-w-3xl w-full overflow-auto max-h-[90vh]">
-        <h2 className="text-xl font-semibold mb-4">Dataset Preview</h2>
-        {loading ? (
-          <p className="text-gray-500">Loading...</p>
-        ) : rows.length === 0 ? (
-          <p className="text-gray-500">No data found for this dataset.</p>
-        ) : (
-          <table className="min-w-full text-sm border">
-            <thead>
-              <tr>
-                {Object.keys(rows[0]).map((key) => (
-                  <th
-                    key={key}
-                    className="text-left border px-2 py-1 bg-gray-100"
-                  >
-                    {key}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, idx) => (
-                <tr key={idx}>
-                  {Object.values(row).map((val, i) => (
-                    <td key={i} className="border px-2 py-1">
-                      {String(val)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <div className="mt-4 text-right">
-          <button
-            onClick={onClose}
-            className="text-sm text-gray-600 hover:text-black"
-          >
+    <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center">
+      <div className="bg-white rounded p-6 w-full max-w-xl">
+        <h2 className="text-xl font-semibold mb-4">View Dataset</h2>
+        <div className="space-y-2">
+          <div>
+            <span className="font-medium">Name:</span> {dataset.name}
+          </div>
+          <div>
+            <span className="font-medium">Description:</span> {dataset.description}
+          </div>
+          <div>
+            <span className="font-medium">Type:</span> {dataset.data_type}
+          </div>
+          <div>
+            <span className="font-medium">Admin Level:</span> {dataset.admin_level}
+          </div>
+          <div>
+            <span className="font-medium">Source:</span> {dataset.source || "—"}
+          </div>
+          <div>
+            <span className="font-medium">Created At:</span>{" "}
+            {new Date(dataset.created_at).toLocaleString()}
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end">
+          <button className="bg-gray-300 text-gray-800 px-4 py-2 rounded" onClick={onClose}>
             Close
           </button>
         </div>
