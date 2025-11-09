@@ -6,6 +6,7 @@ import UploadDatasetModal from "@/components/UploadDatasetModal";
 import EditDatasetModal from "@/components/EditDatasetModal";
 import DeleteDatasetModal from "@/components/DeleteDatasetModal";
 import ViewDatasetModal from "@/components/ViewDatasetModal";
+import DeriveDatasetModal from "@/components/DeriveDatasetModal";
 
 export default function DatasetsPage() {
   const supabase = createClient();
@@ -13,6 +14,8 @@ export default function DatasetsPage() {
   const [loading, setLoading] = useState(true);
 
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showDeriveModal, setShowDeriveModal] = useState(false);
+
   const [editDataset, setEditDataset] = useState<any | null>(null);
   const [viewDataset, setViewDataset] = useState<any | null>(null);
   const [deleteDataset, setDeleteDataset] = useState<any | null>(null);
@@ -23,7 +26,6 @@ export default function DatasetsPage() {
       .from("datasets")
       .select("*")
       .order("created_at", { ascending: false });
-
     if (!error) setDatasets(data || []);
     setLoading(false);
   };
@@ -33,34 +35,45 @@ export default function DatasetsPage() {
   }, []);
 
   const categories = [
-    { label: "Core", match: (d: any) => d.category === "Core" },
+    { label: "Core Datasets", match: (d: any) => d.category === "Core" },
     { label: "SSC Framework — Pillar 1 (The Shelter)", match: (d: any) => d.category === "SSC Framework - P1" },
-    { label: "SSC Framework — Pillar 2 (The Safety Net)", match: (d: any) => d.category === "SSC Framework - P2" },
+    { label: "SSC Framework — Pillar 2 (Living Conditions)", match: (d: any) => d.category === "SSC Framework - P2" },
     { label: "SSC Framework — Pillar 3 (The Settlement)", match: (d: any) => d.category === "SSC Framework - P3" },
+    { label: "Hazard Datasets", match: (d: any) => d.category === "Hazard" },
     { label: "Underlying Vulnerabilities", match: (d: any) => d.category === "Underlying Vulnerability" },
   ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Datasets</h1>
           <p className="text-sm text-gray-500">
-            Manage, view, and derive baseline data across SSC Framework categories.
+            Manage baseline and derived datasets across the SSC framework.
           </p>
         </div>
-        <button
-          onClick={() => setShowUploadModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded text-sm"
-        >
-          + Add Dataset
-        </button>
+        <div className="mt-3 sm:mt-0 flex space-x-2">
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded text-sm"
+          >
+            + Add Dataset
+          </button>
+          <button
+            onClick={() => setShowDeriveModal(true)}
+            className="border border-blue-600 text-blue-600 hover:bg-blue-50 font-medium px-4 py-2 rounded text-sm"
+          >
+            + Derive Dataset
+          </button>
+        </div>
       </div>
 
+      {/* Datasets Table */}
       {loading ? (
         <p className="text-gray-500 text-sm">Loading datasets...</p>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-8">
           {categories.map((group) => {
             const groupDatasets = datasets.filter(group.match);
             if (groupDatasets.length === 0) return null;
@@ -74,10 +87,10 @@ export default function DatasetsPage() {
                       <tr>
                         <th className="px-4 py-2 text-left w-[25%]">Name</th>
                         <th className="px-3 py-2 text-left w-[12%]">Type</th>
-                        <th className="px-3 py-2 text-left w-[12%]">Admin Level</th>
+                        <th className="px-3 py-2 text-left w-[10%]">Admin Level</th>
                         <th className="px-3 py-2 text-left w-[16%]">Source</th>
-                        <th className="px-3 py-2 text-left w-[16%]">Collected</th>
-                        <th className="px-3 py-2 text-left w-[19%]">Actions</th>
+                        <th className="px-3 py-2 text-left w-[15%]">Collected</th>
+                        <th className="px-3 py-2 text-left w-[22%]">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -137,6 +150,12 @@ export default function DatasetsPage() {
         <UploadDatasetModal
           onClose={() => setShowUploadModal(false)}
           onUploaded={loadDatasets}
+        />
+      )}
+      {showDeriveModal && (
+        <DeriveDatasetModal
+          onClose={() => setShowDeriveModal(false)}
+          onDerived={loadDatasets}
         />
       )}
       {editDataset && (
