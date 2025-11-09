@@ -1,24 +1,30 @@
-import React, { useState } from "react";
+"use client";
+
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { ArrowRight, Eye, Pencil, Trash } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
 
-const coreDatasets = [
-  { id: 1, name: "Population (ADM1–ADM4)" },
-  { id: 2, name: "Administrative Boundaries (ADM0–ADM4)" },
-  { id: 3, name: "GIS Layers (Buildings, Roads, Elevation)" },
-];
-
-const otherDatasets = [
-  { id: 4, name: "Building Typology by Barangay" },
-  { id: 5, name: "Evacuation Centers (Partial)" },
-];
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function DatasetsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [selectedDataset, setSelectedDataset] = useState(null);
+  const [datasets, setDatasets] = useState<any[]>([]);
 
-  const handleView = (dataset) => setSelectedDataset(dataset);
-  const handleCloseView = () => setSelectedDataset(null);
+  useEffect(() => {
+    async function fetchDatasets() {
+      const { data, error } = await supabase.from("datasets").select("*");
+      if (error) {
+        console.error("Error fetching datasets:", error);
+      } else {
+        setDatasets(data);
+      }
+    }
+    fetchDatasets();
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -46,36 +52,17 @@ export default function DatasetsPage() {
           </button>
         </div>
 
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Core Datasets</h3>
-          <div className="space-y-3">
-            {coreDatasets.map((dataset) => (
-              <div
-                key={dataset.id}
-                className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
-              >
-                <span className="text-gray-800">{dataset.name}</span>
-                <div className="flex space-x-2 text-gray-500">
-                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" onClick={() => handleView(dataset)} />
-                  <Pencil className="w-4 h-4 cursor-pointer hover:text-yellow-500" />
-                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
         <section>
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Other Uploaded Datasets</h3>
+          <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
           <div className="space-y-3">
-            {otherDatasets.map((dataset) => (
+            {datasets.map((dataset) => (
               <div
                 key={dataset.id}
                 className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
               >
                 <span className="text-gray-800">{dataset.name}</span>
                 <div className="flex space-x-2 text-gray-500">
-                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" onClick={() => handleView(dataset)} />
+                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
                   <Pencil className="w-4 h-4 cursor-pointer hover:text-yellow-500" />
                   <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
                 </div>
@@ -94,22 +81,6 @@ export default function DatasetsPage() {
                 className="mt-4 text-sm text-gray-600 hover:text-gray-800"
               >
                 Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {selectedDataset && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded shadow w-full max-w-2xl">
-              <h2 className="text-xl font-semibold mb-4">View Dataset</h2>
-              <p className="text-gray-800 font-medium">Name: {selectedDataset.name}</p>
-              <p className="text-gray-600 mt-2">(Preview and metadata will be shown here in the next step)</p>
-              <button
-                onClick={handleCloseView}
-                className="mt-4 text-sm text-gray-600 hover:text-gray-800"
-              >
-                Close
               </button>
             </div>
           </div>
