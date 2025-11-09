@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import DashboardHeader from "@/components/DashboardHeader";
+
 import EditDatasetModal from "@/components/EditDatasetModal";
 
 const supabase = createClient(
