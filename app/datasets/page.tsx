@@ -14,8 +14,8 @@ const supabase = createClient(
 
 export default function DatasetsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [datasets, setDatasets] = useState<any[]>([]);
   const [editDataset, setEditDataset] = useState<any | null>(null);
+  const [datasets, setDatasets] = useState<any[]>([]);
 
   async function fetchDatasets() {
     const { data, error } = await supabase.from("datasets").select("*");
