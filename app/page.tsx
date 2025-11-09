@@ -2,52 +2,61 @@
 
 import Link from 'next/link';
 
-export default function HomePage() {
+export default function DashboardPage() {
   return (
-    <main className="p-6 space-y-8 bg-gray-50 min-h-screen">
-      <header className="border-b pb-4">
-        <h1 className="text-3xl font-bold text-gray-800">
-          Philippines Shelter Severity Toolset <span className="text-gray-500">(sandbox)</span>
+    <main className="min-h-screen bg-gray-50 text-gray-800">
+      {/* Header with title and breadcrumbs */}
+      <header className="bg-white shadow px-6 py-4">
+        <div className="text-sm text-gray-400">Home</div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Philippines Shelter Severity Toolset <span className="text-sm text-gray-500">(sandbox)</span>
         </h1>
-        <p className="text-sm text-gray-500 mt-1">Rapid dashboard for data and instance management</p>
+        <p className="text-sm text-gray-500">Rapid dashboard for data and instance management</p>
       </header>
 
-      <section className="bg-white rounded-xl shadow p-4">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Core Datasets</h2>
-        <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-          <li>Population (ADM1–ADM4)</li>
-          <li>Evacuation Centers</li>
-          <li>Building Typology</li>
-        </ul>
-        <div className="mt-3">
-          <Link
-            href="/datasets"
-            className="inline-block text-blue-600 text-sm underline hover:text-blue-800"
-          >
-            Manage Datasets →
-          </Link>
-        </div>
-      </section>
+      <div className="p-6 space-y-6 max-w-5xl mx-auto">
+        {/* Core Datasets */}
+        <section className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-lg font-medium text-gray-700">Core Datasets</h2>
+          <ul className="list-disc list-inside text-sm text-gray-600 mt-2 space-y-1">
+            <li>Population (ADM1–ADM4)</li>
+            <li>Evacuation Centers</li>
+            <li>Building Typology</li>
+          </ul>
+          <div className="mt-4">
+            <Link
+              href="/datasets"
+              className="inline-block bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm"
+            >
+              Manage Datasets
+            </Link>
+          </div>
+        </section>
 
-      <section className="bg-white rounded-xl shadow p-4">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Baseline Instance</h2>
-        <p className="text-sm text-gray-600 mb-2">
-          Composed of selected core datasets used to compute SSC index.
-        </p>
-        <Link
-          href="/instances"
-          className="text-blue-600 text-sm underline hover:text-blue-800"
-        >
-          View Instances →
-        </Link>
-      </section>
+        {/* Baseline Instance */}
+        <section className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-lg font-medium text-gray-700">Baseline Instance</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Composed of selected core datasets used to compute the SSC index.
+          </p>
+          <div className="mt-4">
+            <Link
+              href="/instances"
+              className="inline-block bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 text-sm"
+            >
+              View Instances
+            </Link>
+          </div>
+        </section>
 
-      <section className="bg-white rounded-xl shadow p-4">
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Map Viewer</h2>
-        <p className="text-sm text-gray-600">
-          Will support ADM-level toggles and scored dataset overlays
-        </p>
-      </section>
+        {/* Map Viewer */}
+        <section className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="text-lg font-medium text-gray-700">Map Viewer</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Will support ADM-level toggles and scored dataset overlays.
+          </p>
+        </section>
+      </div>
     </main>
   );
 }
