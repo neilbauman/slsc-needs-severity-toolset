@@ -13,6 +13,10 @@ export async function POST(req: Request) {
     target_admin_level,
   });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ id: data });
+  if (error) {
+    console.error("RPC derive_dataset error:", error.message);
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  return NextResponse.json({ derived_id: data });
 }
