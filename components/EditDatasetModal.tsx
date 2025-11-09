@@ -1,105 +1,96 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from "react";
-import Link from "next/link";
-import { ArrowRight, Eye, Pencil, Trash } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
-import UploadDatasetModal from "@/components/UploadDatasetModal";
-import EditDatasetModal from "@/components/EditDatasetModal";
+import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function DatasetsPage() {
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [editDataset, setEditDataset] = useState<any | null>(null);
-  const [datasets, setDatasets] = useState<any[]>([]);
+type Props = {
+  datasetId: string;
+  onClose: () => void;
+  onSave: () => void;
+};
+
+export default function EditDatasetModal({ datasetId, onClose, onSave }: Props) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [type, setType] = useState('');
 
   useEffect(() => {
-    fetchDatasets();
-  }, []);
+    async function load() {
+      const { data } = await supabase.from('datasets').select('*').eq('id', datasetId).single();
+      if (data) {
+        setName(data.name || '');
+        setDescription(data.description || '');
+        setType(data.type || '');
+      }
+    }
+    load();
+  }, [datasetId]);
 
-  async function fetchDatasets() {
-    const { data, error } = await supabase.from("datasets").select("*");
+  async function handleSave() {
+    const { error } = await supabase
+      .from('datasets')
+      .update({ name, description, type })
+      .eq('id', datasetId);
+
     if (error) {
-      console.error("Error fetching datasets:", error);
+      console.error('Update failed:', error.message);
     } else {
-      setDatasets(data);
+      onSave();
+      onClose();
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-slate-800 px-6 py-4 text-white">
-        <h1 className="text-2xl font-semibold">
-          Philippines Shelter Severity Toolset <span className="text-yellow-400">(sandbox)</span>
-        </h1>
-        <nav className="text-sm mt-1 text-gray-300">
-          <Link href="/" className="hover:underline">
-            Dashboard
-          </Link>
-          <span className="mx-2">»</span>
-          <span className="text-white">Datasets</span>
-        </nav>
-      </header>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white p-6 rounded shadow w-full max-w-lg">
+        <h2 className="text-xl font-semibold mb-4">Edit Dataset</h2>
 
-      <main className="p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold text-gray-800">Datasets</h2>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+        <input
+          className="w-full border px-3 py-2 rounded mb-4"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+
+        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <textarea
+          className="w-full border px-3 py-2 rounded mb-4"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+
+        <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+        <select
+          className="w-full border px-3 py-2 rounded mb-4"
+          value={type}
+          onChange={(e) => setType(e.target.value)}
+        >
+          <option value="">Select type</option>
+          <option value="numeric">Numeric</option>
+          <option value="categorical">Categorical</option>
+          <option value="gradient">Gradient</option>
+        </select>
+
+        <div className="flex justify-end space-x-2">
           <button
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            onClick={() => setShowUploadModal(true)}
+            onClick={onClose}
+            className="text-sm text-gray-600 hover:text-gray-800"
           >
-            Upload New Dataset
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          >
+            Save
           </button>
         </div>
-
-        <section>
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
-          <div className="space-y-3">
-            {datasets.map((dataset) => (
-              <div
-                key={dataset.id}
-                className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
-              >
-                <span className="text-gray-800">{dataset.name}</span>
-                <div className="flex space-x-2 text-gray-500">
-                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
-                  <Pencil
-                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
-                    onClick={() => setEditDataset(dataset)}
-                  />
-                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {showUploadModal && (
-          <UploadDatasetModal
-            isOpen={showUploadModal}
-            onClose={() => setShowUploadModal(false)}
-            onSave={() => {
-              setShowUploadModal(false);
-              fetchDatasets();
-            }}
-          />
-        )}
-
-        {editDataset && (
-          <EditDatasetModal
-            dataset={editDataset}
-            onClose={() => setEditDataset(null)}
-            onSave={() => {
-              setEditDataset(null);
-              fetchDatasets();
-            }}
-          />
-        )}
-      </main>
+      </div>
     </div>
   );
 }
