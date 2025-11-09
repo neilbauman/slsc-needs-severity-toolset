@@ -1,277 +1,300 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import Papa from "papaparse";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabaseClient";
 
-export default function UploadDatasetModal({ onClose, onSuccess }: any) {
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [headers, setHeaders] = useState<string[]>([]);
+interface UploadDatasetModalProps {
+  onClose: () => void;
+  onUploaded: () => void;
+}
+
+const CATEGORY_OPTIONS = [
+  "Core",
+  "SSC Framework - P1",
+  "SSC Framework - P2",
+  "SSC Framework - P3",
+  "Hazards",
+  "Underlying Vulnerability",
+];
+
+const ADMIN_LEVELS = ["ADM0", "ADM1", "ADM2", "ADM3", "ADM4"];
+const DATA_TYPES = ["numeric", "categorical"];
+
+export default function UploadDatasetModal({
+  onClose,
+  onUploaded,
+}: UploadDatasetModalProps) {
+  const supabase = createClient();
+
+  const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<any[]>([]);
-  const [datasetType, setDatasetType] = useState<"numeric" | "categorical" | "">("");
-  const [mapping, setMapping] = useState<any>({ pcode: "", value: "", category: "" });
-  const [metadata, setMetadata] = useState({
+  const [form, setForm] = useState({
     name: "",
     description: "",
-    admin_level: "ADM2",
+    source: "",
+    type: "",
     category: "",
-    is_baseline: false,
-    is_derived: false,
+    admin_level: "",
+    collected_at: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  // Parse CSV
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setCsvFile(file);
-    Papa.parse(file, {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0] || null;
+    setFile(selectedFile);
+    setPreview([]);
+    if (!selectedFile) return;
+
+    Papa.parse(selectedFile, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const data = results.data as any[];
-        if (!data.length) return setError("CSV appears empty.");
-        setHeaders(Object.keys(data[0]));
-        setPreview(data.slice(0, 10));
+        setPreview(results.data.slice(0, 5));
       },
     });
   };
 
-  // Save dataset
-  const handleSave = async () => {
-    setError(null);
-    if (!csvFile || !datasetType || !mapping.pcode) {
-      setError("Please complete all required fields before saving.");
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleUpload = async () => {
+    if (!file) {
+      setError("Please select a CSV file.");
       return;
     }
+    if (!form.name || !form.type || !form.category || !form.admin_level) {
+      setError("Please complete all required fields.");
+      return;
+    }
+
     setLoading(true);
+    setError(null);
+    setSuccess(false);
+
     try {
-      const { data: dataset, error: insertError } = await supabase
+      // Upload CSV to Supabase Storage
+      const filePath = `datasets/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
         .from("datasets")
-        .insert({
-          name: metadata.name.trim(),
-          description: metadata.description.trim(),
-          admin_level: metadata.admin_level,
-          type: datasetType,
-          category: metadata.category || null,
-          is_baseline: metadata.is_baseline,
-          is_derived: metadata.is_derived,
-        })
-        .select()
-        .single();
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Insert metadata record
+      const { data, error: insertError } = await supabase
+        .from("datasets")
+        .insert([
+          {
+            name: form.name,
+            description: form.description,
+            source: form.source,
+            collected_at: form.collected_at || null,
+            type: form.type,
+            category: form.category,
+            admin_level: form.admin_level,
+            is_baseline: true,
+            is_derived: false,
+            metadata: {
+              original_filename: file.name,
+              storage_path: filePath,
+              source: form.source,
+            },
+          },
+        ])
+        .select();
 
       if (insertError) throw insertError;
 
-      Papa.parse(csvFile, {
-        header: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          const data = results.data as any[];
-          let formatted: any[] = [];
-          if (datasetType === "numeric") {
-            formatted = data
-              .filter((r) => r[mapping.pcode] && r[mapping.value])
-              .map((r) => ({
-                dataset_id: dataset.id,
-                admin_pcode: String(r[mapping.pcode]),
-                value: Number(String(r[mapping.value]).replace(/,/g, "")),
-              }));
-            if (formatted.length)
-              await supabase.from("dataset_values_numeric").insert(formatted);
-          } else {
-            formatted = data
-              .filter((r) => r[mapping.pcode] && r[mapping.category])
-              .map((r) => ({
-                dataset_id: dataset.id,
-                admin_pcode: String(r[mapping.pcode]),
-                category: String(r[mapping.category]),
-                value: r[mapping.value]
-                  ? Number(String(r[mapping.value]).replace(/,/g, ""))
-                  : null,
-              }));
-            if (formatted.length)
-              await supabase.from("dataset_values_categorical").insert(formatted);
-          }
-          setLoading(false);
-          onSuccess?.();
-          onClose?.();
-        },
-      });
+      console.log("Inserted dataset:", data);
+      setSuccess(true);
+      onUploaded();
+      setTimeout(() => {
+        setSuccess(false);
+        onClose();
+      }, 1200);
     } catch (err: any) {
       console.error(err);
-      setError(err.message);
+      setError(err.message || "Upload failed");
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-lg">
-        <h2 className="text-xl font-serif mb-4">Upload New Dataset</h2>
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4 my-8 p-6 relative">
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-4 text-gray-500 hover:text-gray-700 text-2xl font-light"
+        >
+          ×
+        </button>
 
-        {/* File */}
-        <input type="file" accept=".csv" onChange={handleFileUpload} className="mb-4" />
+        {/* Header */}
+        <h2 className="text-xl font-semibold text-gray-800 mb-1">
+          Upload New Dataset
+        </h2>
+        <p className="text-sm text-gray-500 mb-6">
+          Upload a CSV file and provide metadata for registration.
+        </p>
 
-        {/* Metadata */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <input
-            type="text"
-            placeholder="Dataset name"
-            value={metadata.name}
-            onChange={(e) => setMetadata({ ...metadata, name: e.target.value })}
-            className="border p-2 rounded"
-          />
-          <input
-            type="text"
-            placeholder="Description"
-            value={metadata.description}
-            onChange={(e) =>
-              setMetadata({ ...metadata, description: e.target.value })
-            }
-            className="border p-2 rounded"
-          />
-          <select
-            value={metadata.admin_level}
-            onChange={(e) =>
-              setMetadata({ ...metadata, admin_level: e.target.value })
-            }
-            className="border p-2 rounded"
-          >
-            <option value="ADM0">Admin Level 0 (National)</option>
-            <option value="ADM1">Admin Level 1 (Region)</option>
-            <option value="ADM2">Admin Level 2 (Province)</option>
-            <option value="ADM3">Admin Level 3 (Municipality)</option>
-            <option value="ADM4">Admin Level 4 (Barangay)</option>
-            <option value="ADM5">Admin Level 5 (Sitio / Locality)</option>
-          </select>
-          <select
-            value={metadata.category}
-            onChange={(e) =>
-              setMetadata({ ...metadata, category: e.target.value })
-            }
-            className="border p-2 rounded"
-          >
-            <option value="">Select category</option>
-            <option value="SSC Framework - P1">SSC Framework – P1</option>
-            <option value="SSC Framework - P2">SSC Framework – P2</option>
-            <option value="SSC Framework - P3">SSC Framework – P3</option>
-            <option value="Hazard">Hazard</option>
-            <option value="Underlying Vulnerability">Underlying Vulnerability</option>
-          </select>
-          <label className="flex items-center space-x-2">
+        {/* Form */}
+        <div className="space-y-3 text-sm">
+          {/* File Upload */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">
+              Dataset File (CSV)
+            </label>
             <input
-              type="checkbox"
-              checked={metadata.is_baseline}
-              onChange={(e) =>
-                setMetadata({ ...metadata, is_baseline: e.target.checked })
-              }
+              type="file"
+              accept=".csv"
+              onChange={handleFileChange}
+              className="w-full text-sm text-gray-700 border rounded-md p-1.5"
             />
-            <span>Baseline Dataset</span>
-          </label>
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={metadata.is_derived}
-              onChange={(e) =>
-                setMetadata({ ...metadata, is_derived: e.target.checked })
-              }
-            />
-            <span>Derived Dataset</span>
-          </label>
-        </div>
+            {preview.length > 0 && (
+              <div className="mt-2 border rounded bg-gray-50 p-2 text-xs overflow-x-auto">
+                <div className="font-semibold mb-1">Preview (first 5 rows)</div>
+                <pre className="whitespace-pre-wrap text-[11px]">
+                  {JSON.stringify(preview, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
 
-        {/* Column Mapping */}
-        {headers.length > 0 && (
-          <>
-            <h3 className="font-semibold mb-2">Map CSV Columns</h3>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              {["pcode", "value", "category"].map((key) => (
-                <div key={key}>
-                  <label className="block text-sm capitalize">
-                    {key === "pcode"
-                      ? "Admin Pcode"
-                      : key === "value"
-                      ? "Value Column (numeric)"
-                      : "Category Column (if categorical)"}
-                  </label>
-                  <select
-                    value={mapping[key]}
-                    onChange={(e) =>
-                      setMapping({ ...mapping, [key]: e.target.value })
-                    }
-                    className="border p-2 rounded w-full"
-                  >
-                    <option value="">Select column</option>
-                    {headers.map((h) => (
-                      <option key={h}>{h}</option>
-                    ))}
-                  </select>
-                </div>
+          {/* Name */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">Name *</label>
+            <input
+              type="text"
+              name="name"
+              value={form.name}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">
+              Description
+            </label>
+            <textarea
+              name="description"
+              value={form.description}
+              onChange={handleChange}
+              rows={2}
+              className="w-full border rounded-md p-2"
+            />
+          </div>
+
+          {/* Source */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">Source</label>
+            <input
+              type="text"
+              name="source"
+              value={form.source}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            />
+          </div>
+
+          {/* Collected Date */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">
+              Collected At
+            </label>
+            <input
+              type="date"
+              name="collected_at"
+              value={form.collected_at}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            />
+          </div>
+
+          {/* Type */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">Type *</label>
+            <select
+              name="type"
+              value={form.type}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select type</option>
+              {DATA_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
               ))}
-            </div>
+            </select>
+          </div>
 
-            <div className="mb-4">
-              <label className="mr-4">
-                <input
-                  type="radio"
-                  name="type"
-                  value="numeric"
-                  checked={datasetType === "numeric"}
-                  onChange={() => setDatasetType("numeric")}
-                />{" "}
-                Numeric dataset
-              </label>
-              <label className="ml-4">
-                <input
-                  type="radio"
-                  name="type"
-                  value="categorical"
-                  checked={datasetType === "categorical"}
-                  onChange={() => setDatasetType("categorical")}
-                />{" "}
-                Categorical dataset
-              </label>
-            </div>
+          {/* Category */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">
+              Category *
+            </label>
+            <select
+              name="category"
+              value={form.category}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select category</option>
+              {CATEGORY_OPTIONS.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div className="border rounded max-h-64 overflow-y-auto text-sm">
-              <table className="w-full border-collapse">
-                <thead className="bg-gray-100">
-                  <tr>
-                    {headers.map((h) => (
-                      <th key={h} className="border p-1">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((row, i) => (
-                    <tr key={i}>
-                      {headers.map((h) => (
-                        <td key={h} className="border p-1">{row[h]}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-
-        {/* Actions */}
-        <div className="flex justify-end mt-4 space-x-2">
-          <button onClick={onClose} className="px-3 py-1 border rounded hover:bg-gray-100">
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            {loading ? "Saving..." : "Save Dataset"}
-          </button>
+          {/* Admin Level */}
+          <div>
+            <label className="block font-medium text-gray-700 mb-1">
+              Admin Level *
+            </label>
+            <select
+              name="admin_level"
+              value={form.admin_level}
+              onChange={handleChange}
+              className="w-full border rounded-md p-2"
+            >
+              <option value="">Select admin level</option>
+              {ADMIN_LEVELS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
+        {/* Error / Success / Actions */}
+        <div className="mt-6 flex justify-between items-center">
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+          {success && <p className="text-green-600 text-sm">Upload complete!</p>}
+
+          <button
+            onClick={handleUpload}
+            disabled={loading}
+            className={`px-4 py-2 rounded-md text-white ${
+              loading ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {loading ? "Uploading..." : "Upload Dataset"}
+          </button>
+        </div>
       </div>
     </div>
   );
