@@ -1,154 +1,161 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import Header from "@/components/Header";
-import DerivedDatasetModal from "@/components/DerivedDatasetModal"; // safe placeholder (renders null if stubbed)
+import { createClient } from "@/lib/supabaseClient";
 import ViewDatasetModal from "@/components/ViewDatasetModal";
 import EditDatasetModal from "@/components/EditDatasetModal";
 import DeleteDatasetModal from "@/components/DeleteDatasetModal";
-import UploadDatasetModal from "@/components/UploadDatasetModal";
-import { createClient } from "@/lib/supabaseClient";
 
 export default function DatasetsPage() {
-  const [datasets, setDatasets] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedDataset, setSelectedDataset] = useState<any>(null);
-  const [modalType, setModalType] = useState<
-    "view" | "edit" | "delete" | "upload" | "derived" | null
-  >(null);
-
   const supabase = createClient();
 
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [selectedDataset, setSelectedDataset] = useState<any | null>(null);
+  const [editDataset, setEditDataset] = useState<any | null>(null);
+  const [deleteDataset, setDeleteDataset] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // fetch datasets
   useEffect(() => {
     const fetchDatasets = async () => {
-      try {
-        const { data, error } = await supabase.from("datasets").select("*");
-        if (error) throw error;
-        setDatasets(data || []);
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("datasets")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching datasets:", error);
+        setDatasets([]);
+      } else {
+        // parse metadata safely
+        const parsed = (data || []).map((d) => ({
+          ...d,
+          metadata:
+            typeof d.metadata === "string"
+              ? safeParseJSON(d.metadata)
+              : d.metadata || {},
+        }));
+        setDatasets(parsed);
       }
+
+      setLoading(false);
     };
+
     fetchDatasets();
-  }, [supabase]);
+  }, []);
 
-  const grouped = {
-    Core: datasets.filter((d) => d.category?.toLowerCase() === "core"),
-    "SSC Framework - P1": datasets.filter((d) =>
-      d.category?.toLowerCase().includes("p1")
-    ),
-    "SSC Framework - P2": datasets.filter((d) =>
-      d.category?.toLowerCase().includes("p2")
-    ),
-    "SSC Framework - P3": datasets.filter((d) =>
-      d.category?.toLowerCase().includes("p3")
-    ),
-    Hazards: datasets.filter((d) =>
-      d.category?.toLowerCase().includes("hazard")
-    ),
-    "Underlying Vulnerabilities": datasets.filter((d) =>
-      d.category?.toLowerCase().includes("vulnerability")
-    ),
-    Uncategorized: datasets.filter((d) => !d.category),
+  const safeParseJSON = (str: string) => {
+    try {
+      return JSON.parse(str);
+    } catch {
+      return {};
+    }
   };
 
-  const handleAction = (type: "view" | "edit" | "delete", dataset: any) => {
-    setSelectedDataset(dataset);
-    setModalType(type);
+  // helper to group datasets logically
+  const groupDatasets = (datasets: any[]) => {
+    const groups: Record<string, any[]> = {
+      Core: [],
+      "SSC Framework - P1": [],
+      "SSC Framework - P2": [],
+      "SSC Framework - P3": [],
+      Hazard: [],
+      "Underlying Vulnerability": [],
+    };
+
+    datasets.forEach((d) => {
+      const cat = d.category || "Other";
+      if (groups[cat]) groups[cat].push(d);
+      else {
+        if (!groups["Other"]) groups["Other"] = [];
+        groups["Other"].push(d);
+      }
+    });
+
+    return groups;
   };
 
-  if (loading)
-    return (
-      <div className="p-6 text-gray-600 animate-pulse">
-        Loading datasets...
-      </div>
-    );
+  const groups = groupDatasets(datasets);
 
-  if (error)
+  if (loading) {
     return (
-      <div className="p-6 text-red-600">
-        Error loading datasets: {error}
-      </div>
+      <div className="p-8 text-center text-gray-500">Loading datasets...</div>
     );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
+    <div className="p-8 space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
+        <p className="text-gray-500">
+          Manage, view, and derive baseline data
+        </p>
+      </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
-          <div className="flex space-x-3">
-            <button
-              onClick={() => setModalType("upload")}
-              className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
-            >
-              Upload Dataset
-            </button>
-            <button
-              onClick={() => setModalType("derived")}
-              className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-1"
-            >
-              Create Derived Dataset
-            </button>
-          </div>
-        </div>
-
-        {Object.entries(grouped).map(([group, groupDatasets]) => (
-          <div key={group} className="mb-8">
-            <h2 className="text-xl font-semibold text-gray-700 mb-3 border-b border-gray-200 pb-1">
-              {group}
+      {Object.entries(groups).map(([groupName, items]) =>
+        items.length > 0 ? (
+          <section key={groupName}>
+            <h2 className="text-lg font-semibold text-gray-700 mb-2">
+              {groupName === "Underlying Vulnerability"
+                ? "Underlying Vulnerabilities"
+                : groupName === "Hazard"
+                ? "Hazards / Risks"
+                : groupName === "SSC Framework - P1"
+                ? "SSC Framework — Pillar 1 (The Shelter)"
+                : groupName === "SSC Framework - P2"
+                ? "SSC Framework — Pillar 2 (Living Conditions)"
+                : groupName === "SSC Framework - P3"
+                ? "SSC Framework — Pillar 3 (The Settlement)"
+                : groupName}
             </h2>
 
-            {groupDatasets.length === 0 ? (
-              <p className="text-sm text-gray-500 italic">
-                No datasets available in this category.
-              </p>
-            ) : (
-              <table className="min-w-full border border-gray-200 bg-white rounded shadow-sm">
-                <thead className="bg-gray-100 text-gray-700 text-sm uppercase">
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="min-w-full text-sm text-gray-700">
+                <thead className="bg-gray-100 text-gray-600 uppercase text-xs">
                   <tr>
                     <th className="px-4 py-2 text-left">Name</th>
                     <th className="px-4 py-2 text-left">Type</th>
                     <th className="px-4 py-2 text-left">Admin Level</th>
                     <th className="px-4 py-2 text-left">Source</th>
                     <th className="px-4 py-2 text-left">Collected</th>
-                    <th className="px-4 py-2 text-right">Actions</th>
+                    <th className="px-4 py-2 text-left">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {groupDatasets.map((dataset) => (
+                  {items.map((dataset) => (
                     <tr
                       key={dataset.id}
-                      className="border-t hover:bg-gray-50 text-sm"
+                      className="border-t hover:bg-gray-50 transition"
                     >
-                      <td className="px-4 py-2">{dataset.name}</td>
-                      <td className="px-4 py-2">{dataset.type}</td>
-                      <td className="px-4 py-2">{dataset.admin_level}</td>
-                      <td className="px-4 py-2">{dataset.source}</td>
+                      <td className="px-4 py-2 font-medium text-gray-800">
+                        {dataset.name}
+                      </td>
+                      <td className="px-4 py-2">{dataset.type || "—"}</td>
+                      <td className="px-4 py-2">{dataset.admin_level || "—"}</td>
+                      <td className="px-4 py-2">
+                        {dataset.metadata?.source || "—"}
+                      </td>
                       <td className="px-4 py-2">
                         {dataset.collected_at
                           ? new Date(dataset.collected_at).toLocaleDateString()
                           : "—"}
                       </td>
-                      <td className="px-4 py-2 text-right space-x-2">
+                      <td className="px-4 py-2 space-x-3">
                         <button
-                          onClick={() => handleAction("view", dataset)}
+                          onClick={() => setSelectedDataset(dataset)}
                           className="text-blue-600 hover:underline"
                         >
                           View
                         </button>
                         <button
-                          onClick={() => handleAction("edit", dataset)}
-                          className="text-gray-600 hover:underline"
+                          onClick={() => setEditDataset(dataset)}
+                          className="text-yellow-600 hover:underline"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={() => handleAction("delete", dataset)}
+                          onClick={() => setDeleteDataset(dataset)}
                           className="text-red-600 hover:underline"
                         >
                           Delete
@@ -158,34 +165,32 @@ export default function DatasetsPage() {
                   ))}
                 </tbody>
               </table>
-            )}
-          </div>
-        ))}
-      </div>
+            </div>
+          </section>
+        ) : null
+      )}
 
-      {modalType === "view" && selectedDataset && (
+      {selectedDataset && (
         <ViewDatasetModal
           dataset={selectedDataset}
-          onClose={() => setModalType(null)}
+          onClose={() => setSelectedDataset(null)}
         />
       )}
-      {modalType === "edit" && selectedDataset && (
+
+      {editDataset && (
         <EditDatasetModal
-          dataset={selectedDataset}
-          onClose={() => setModalType(null)}
+          dataset={editDataset}
+          onClose={() => setEditDataset(null)}
+          onSaved={() => window.location.reload()}
         />
       )}
-      {modalType === "delete" && selectedDataset && (
+
+      {deleteDataset && (
         <DeleteDatasetModal
-          dataset={selectedDataset}
-          onClose={() => setModalType(null)}
+          dataset={deleteDataset}
+          onClose={() => setDeleteDataset(null)}
+          onDeleted={() => window.location.reload()}
         />
-      )}
-      {modalType === "upload" && (
-        <UploadDatasetModal onClose={() => setModalType(null)} />
-      )}
-      {modalType === "derived" && (
-        <DerivedDatasetModal onClose={() => setModalType(null)} />
       )}
     </div>
   );
