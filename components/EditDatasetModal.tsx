@@ -6,22 +6,27 @@ import { createClient } from "@/lib/supabaseClient";
 export default function EditDatasetModal({
   dataset,
   onClose,
+  onSaved,
 }: {
   dataset: any;
   onClose: () => void;
+  onSaved?: () => void;
 }) {
+  const supabase = createClient();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     name: dataset?.name || "",
     description: dataset?.description || "",
     category: dataset?.category || "",
     admin_level: dataset?.admin_level || "",
-    source: dataset?.source || "",
-    format: dataset?.format || "",
-    collected_at: dataset?.collected_at || "",
+    source: dataset?.source || dataset?.metadata?.source || "",
+    format: dataset?.metadata?.format || "",
+    collected_at: dataset?.collected_at
+      ? dataset.collected_at.slice(0, 10)
+      : "",
   });
-
-  const [saving, setSaving] = useState(false);
-  const supabase = createClient();
 
   const handleChange = (e: any) => {
     const { name, value } = e.target;
@@ -30,12 +35,37 @@ export default function EditDatasetModal({
 
   const handleSave = async () => {
     setSaving(true);
+    setError(null);
+
+    // Clean up payload
+    const payload = {
+      name: formData.name.trim(),
+      description: formData.description.trim(),
+      category: formData.category || null,
+      admin_level: formData.admin_level || null,
+      collected_at: formData.collected_at || null,
+      metadata: {
+        ...(dataset.metadata || {}),
+        source: formData.source || null,
+        format: formData.format || null,
+      },
+      updated_at: new Date().toISOString(),
+    };
+
     const { error } = await supabase
       .from("datasets")
-      .update(formData)
+      .update(payload)
       .eq("id", dataset.id);
+
     setSaving(false);
-    if (!error) onClose();
+
+    if (error) {
+      console.error("Supabase update failed:", error);
+      setError(error.message);
+    } else {
+      if (onSaved) onSaved();
+      onClose();
+    }
   };
 
   const categoryOptions = [
@@ -82,68 +112,70 @@ export default function EditDatasetModal({
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Category
-            </label>
-            <select
-              name="category"
-              value={formData.category}
-              onChange={handleChange}
-              className="w-full border rounded p-2 text-sm"
-            >
-              <option value="">Select category</option>
-              {categoryOptions.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category
+              </label>
+              <select
+                name="category"
+                value={formData.category}
+                onChange={handleChange}
+                className="w-full border rounded p-2 text-sm"
+              >
+                <option value="">Select</option>
+                {categoryOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Admin Level
+              </label>
+              <select
+                name="admin_level"
+                value={formData.admin_level}
+                onChange={handleChange}
+                className="w-full border rounded p-2 text-sm"
+              >
+                <option value="">Select</option>
+                {adminLevelOptions.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Admin Level
-            </label>
-            <select
-              name="admin_level"
-              value={formData.admin_level}
-              onChange={handleChange}
-              className="w-full border rounded p-2 text-sm"
-            >
-              <option value="">Select level</option>
-              {adminLevelOptions.map((level) => (
-                <option key={level} value={level}>
-                  {level}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Source
-            </label>
-            <input
-              type="text"
-              name="source"
-              value={formData.source}
-              onChange={handleChange}
-              className="w-full border rounded p-2 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Format
-            </label>
-            <input
-              type="text"
-              name="format"
-              value={formData.format}
-              onChange={handleChange}
-              className="w-full border rounded p-2 text-sm"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Source
+              </label>
+              <input
+                type="text"
+                name="source"
+                value={formData.source}
+                onChange={handleChange}
+                className="w-full border rounded p-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Format
+              </label>
+              <input
+                type="text"
+                name="format"
+                value={formData.format}
+                onChange={handleChange}
+                className="w-full border rounded p-2 text-sm"
+              />
+            </div>
           </div>
 
           <div>
@@ -153,18 +185,16 @@ export default function EditDatasetModal({
             <input
               type="date"
               name="collected_at"
-              value={
-                formData.collected_at
-                  ? formData.collected_at.slice(0, 10)
-                  : ""
-              }
+              value={formData.collected_at}
               onChange={handleChange}
               className="w-full border rounded p-2 text-sm"
             />
           </div>
+
+          {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         </div>
 
-        <div className="flex justify-end space-x-2 mt-6">
+        <div className="flex justify-end mt-6 space-x-2">
           <button
             onClick={onClose}
             className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
