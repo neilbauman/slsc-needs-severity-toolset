@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import UploadDatasetModal from '@/components/UploadDatasetModal';
+import UploadDatasetModal from '../../components/UploadDatasetModal';
 
 export default function DatasetsPage() {
   const [modalOpen, setModalOpen] = useState(false);
