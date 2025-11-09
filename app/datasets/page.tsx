@@ -14,13 +14,13 @@ const supabase = createClient(
 );
 
 export default function DatasetsPage() {
-  const [datasets, setDatasets] = useState<any[]>([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [editDataset, setEditDataset] = useState<any | null>(null);
   const [viewDataset, setViewDataset] = useState<any | null>(null);
+  const [datasets, setDatasets] = useState<any[]>([]);
 
   async function fetchDatasets() {
-    const { data, error } = await supabase.from("datasets").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("datasets").select("*");
     if (error) {
       console.error("Error fetching datasets:", error);
     } else {
@@ -31,19 +31,6 @@ export default function DatasetsPage() {
   useEffect(() => {
     fetchDatasets();
   }, []);
-
-  async function handleDelete(datasetId: string) {
-    const confirmed = confirm("Are you sure you want to delete this dataset?");
-    if (!confirmed) return;
-
-    const { error } = await supabase.from("datasets").delete().eq("id", datasetId);
-    if (error) {
-      alert("Error deleting dataset.");
-      console.error(error);
-    } else {
-      fetchDatasets();
-    }
-  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -74,36 +61,28 @@ export default function DatasetsPage() {
         <section>
           <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
           <div className="space-y-3">
-            {datasets.length === 0 && (
-              <div className="text-gray-500">No datasets found.</div>
-            )}
-
             {datasets.map((dataset) => (
               <div
                 key={dataset.id}
                 className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
               >
-                <span className="text-gray-800 font-medium">{dataset.name}</span>
-                <div className="flex space-x-3 text-gray-500">
+                <span className="text-gray-800">{dataset.name}</span>
+                <div className="flex space-x-2 text-gray-500">
                   <Eye
-                    className="w-5 h-5 cursor-pointer hover:text-blue-600"
+                    className="w-4 h-4 cursor-pointer hover:text-blue-600"
                     onClick={() => setViewDataset(dataset)}
                   />
                   <Pencil
-                    className="w-5 h-5 cursor-pointer hover:text-yellow-500"
+                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
                     onClick={() => setEditDataset(dataset)}
                   />
-                  <Trash
-                    className="w-5 h-5 cursor-pointer hover:text-red-500"
-                    onClick={() => handleDelete(dataset.id)}
-                  />
+                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
                 </div>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Modals */}
         {showUploadModal && (
           <UploadDatasetModal
             isOpen={true}
