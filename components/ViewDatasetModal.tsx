@@ -36,7 +36,6 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // Fetch dataset rows + admin names
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -51,11 +50,9 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
             ? "dataset_values_categorical"
             : null;
 
-        if (!valueTable) {
-          throw new Error(`Unsupported dataset type: ${dataset.type}`);
-        }
+        if (!valueTable) throw new Error(`Unsupported dataset type: ${dataset.type}`);
 
-        // 1️⃣ Fetch dataset rows
+        // Fetch dataset rows
         const { data: valueData, error: valueError } = await supabase
           .from(valueTable)
           .select("*")
@@ -68,24 +65,38 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           return;
         }
 
-        // 2️⃣ Collect unique admin_pcodes
-        const pcodes = [...new Set(valueData.map((r) => r.admin_pcode))];
+        // Normalize admin_pcodes for lookup (pad/truncate to 11 digits)
+        const normalizeCode = (pcode: string) => {
+          if (!pcode) return null;
+          if (pcode.length < 11) return pcode.padEnd(11, "0");
+          if (pcode.length > 11) return pcode.slice(0, 11);
+          return pcode;
+        };
 
-        // 3️⃣ Fetch matching admin names
+        const pcodes = [
+          ...new Set(valueData.map((r) => normalizeCode(r.admin_pcode)).filter(Boolean)),
+        ];
+
+        // Fetch admin names
         const { data: adminData, error: adminError } = await supabase
           .from("admin_boundaries")
-          .select("admin_pcode, name")
-          .in("admin_pcode", pcodes);
+          .select("admin_pcode, name");
 
         if (adminError) throw adminError;
 
         const lookup: Record<string, string> = {};
         (adminData || []).forEach((a) => {
-          lookup[a.admin_pcode] = a.name;
+          const normalized = normalizeCode(a.admin_pcode);
+          lookup[normalized] = a.name;
         });
 
         setAdminNames(lookup);
-        setRows(valueData);
+        setRows(
+          valueData.map((r) => ({
+            ...r,
+            admin_name: lookup[normalizeCode(r.admin_pcode)] || "—",
+          }))
+        );
       } catch (err: any) {
         setError(err.message || "Failed to fetch dataset data");
       } finally {
@@ -125,7 +136,7 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
           </button>
         </div>
 
-        {/* Metadata Grid */}
+        {/* Metadata */}
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm mb-6">
           <div>
             <p><span className="font-semibold">Type:</span> {dataset.type || "—"}</p>
@@ -143,9 +154,8 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
         <hr className="my-4" />
 
-        {/* Dataset Data Section */}
+        {/* Dataset Table */}
         <h3 className="text-lg font-semibold mb-2">Dataset Preview</h3>
-
         {loading ? (
           <p className="text-sm text-gray-500">Loading data…</p>
         ) : error ? (
@@ -157,34 +167,36 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-gray-100">
                 <tr>
+                  <th className="px-3 py-2 border-b text-left font-semibold text-gray-700">
+                    Admin PCode
+                  </th>
+                  <th className="px-3 py-2 border-b text-left font-semibold text-gray-700">
+                    Admin Name
+                  </th>
                   {Object.keys(rows[0])
-                    .filter((col) => !["id", "dataset_id"].includes(col))
+                    .filter((col) => !["id", "dataset_id", "admin_pcode", "admin_name"].includes(col))
                     .map((col) => (
                       <th
                         key={col}
                         className="px-3 py-2 border-b text-left font-semibold text-gray-700"
                       >
-                        {col === "admin_pcode" ? "Admin PCode" : col}
+                        {col}
                       </th>
                     ))}
-                  <th className="px-3 py-2 border-b text-left font-semibold text-gray-700">
-                    Admin Name
-                  </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 border-b text-gray-700">{row.admin_pcode}</td>
+                    <td className="px-3 py-2 border-b text-gray-700">{row.admin_name}</td>
                     {Object.keys(row)
-                      .filter((col) => !["id", "dataset_id"].includes(col))
+                      .filter((col) => !["id", "dataset_id", "admin_pcode", "admin_name"].includes(col))
                       .map((col) => (
                         <td key={col} className="px-3 py-2 border-b text-gray-700">
                           {String(row[col] ?? "—")}
                         </td>
                       ))}
-                    <td className="px-3 py-2 border-b text-gray-700">
-                      {adminNames[row.admin_pcode] || "—"}
-                    </td>
                   </tr>
                 ))}
               </tbody>
