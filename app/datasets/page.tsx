@@ -15,7 +15,6 @@ export default function DatasetsPage() {
   const [deleteDataset, setDeleteDataset] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // fetch datasets
   useEffect(() => {
     const fetchDatasets = async () => {
       setLoading(true);
@@ -28,7 +27,6 @@ export default function DatasetsPage() {
         console.error("Error fetching datasets:", error);
         setDatasets([]);
       } else {
-        // parse metadata safely
         const parsed = (data || []).map((d) => ({
           ...d,
           metadata:
@@ -38,7 +36,6 @@ export default function DatasetsPage() {
         }));
         setDatasets(parsed);
       }
-
       setLoading(false);
     };
 
@@ -53,7 +50,7 @@ export default function DatasetsPage() {
     }
   };
 
-  // helper to group datasets logically
+  // Helper to group datasets
   const groupDatasets = (datasets: any[]) => {
     const groups: Record<string, any[]> = {
       Core: [],
@@ -62,15 +59,13 @@ export default function DatasetsPage() {
       "SSC Framework - P3": [],
       Hazard: [],
       "Underlying Vulnerability": [],
+      Other: [],
     };
 
     datasets.forEach((d) => {
       const cat = d.category || "Other";
       if (groups[cat]) groups[cat].push(d);
-      else {
-        if (!groups["Other"]) groups["Other"] = [];
-        groups["Other"].push(d);
-      }
+      else groups["Other"].push(d);
     });
 
     return groups;
@@ -188,8 +183,10 @@ export default function DatasetsPage() {
       {deleteDataset && (
         <DeleteDatasetModal
           dataset={deleteDataset}
-          onClose={() => setDeleteDataset(null)}
-          onDeleted={() => window.location.reload()}
+          onClose={() => {
+            setDeleteDataset(null);
+            window.location.reload(); // ✅ moved here to avoid onDeleted prop mismatch
+          }}
         />
       )}
     </div>
