@@ -29,34 +29,36 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch all data
   useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
 
+      // Parallel fetch from Supabase
       const [
-        { data: admins },
-        { data: gis },
-        { data: pop },
-        { data: dsets },
+        { data: adminsData, error: adminErr },
+        { data: gis, error: gisErr },
+        { data: pop, error: popErr },
+        { data: dsets, error: dsErr },
       ] = await Promise.all([
-        supabase
-  .from("admin_boundaries")
-  .select("admin_level")
-  .then(({ data, error }) => {
-    if (error) throw error;
-    const grouped = (data || []).reduce((acc: Record<string, number>, row: any) => {
-      acc[row.admin_level] = (acc[row.admin_level] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(grouped).map(([level, count]) => ({ admin_level: level, count }));
-  }),
+        supabase.from("admin_boundaries").select("admin_level"),
         supabase.from("gis_layers").select("*").order("created_at", { ascending: false }),
         supabase.from("population_data").select("admin_level, source").limit(1),
         supabase.from("datasets").select("*").order("created_at", { ascending: false }),
       ]);
 
-      setAdminStats(admins || []);
+      if (adminErr || gisErr || popErr || dsErr) console.error(adminErr, gisErr, popErr, dsErr);
+
+      // Group admin levels manually
+      const groupedAdmins = (adminsData || []).reduce((acc: Record<string, number>, row: any) => {
+        acc[row.admin_level] = (acc[row.admin_level] || 0) + 1;
+        return acc;
+      }, {});
+      const adminStatsArr = Object.entries(groupedAdmins).map(([level, count]) => ({
+        admin_level: level,
+        count,
+      }));
+
+      setAdminStats(adminStatsArr);
       setGisLayers(gis || []);
       setPopulation(pop || []);
       setDatasets(dsets || []);
@@ -68,8 +70,14 @@ export default function DatasetsPage() {
 
   if (loading) return <div className="p-10 text-center text-gray-500">Loading datasets...</div>;
 
-  // Group baseline datasets by category
-  const categories = ["SSC Framework - P1", "SSC Framework - P2", "SSC Framework - P3", "Hazard", "Underlying Vulnerability"];
+  // Group baseline datasets by SSC categories
+  const categories = [
+    "SSC Framework - P1",
+    "SSC Framework - P2",
+    "SSC Framework - P3",
+    "Hazard",
+    "Underlying Vulnerability",
+  ];
   const grouped = categories.map((cat) => ({
     name: cat,
     items: datasets.filter((d) => d.category === cat),
@@ -79,20 +87,24 @@ export default function DatasetsPage() {
     <div className="p-6">
       {/* Breadcrumbs */}
       <nav className="text-sm text-gray-600 mb-6">
-        <Link href="/" className="hover:underline">Home</Link> / <span className="text-gray-800 font-semibold">Datasets</span>
+        <Link href="/" className="hover:underline">
+          Home
+        </Link>{" "}
+        / <span className="text-gray-800 font-semibold">Datasets</span>
       </nav>
 
       {/* Page Header */}
       <h1 className="text-2xl font-semibold mb-2">Datasets & Core Spatial Data</h1>
       <p className="text-gray-600 mb-6">
-        Explore baseline datasets, core administrative boundaries, population data, and GIS layers used across SSC Framework analyses.
+        Explore baseline datasets, core administrative boundaries, population data, and GIS layers used
+        across SSC Framework analyses.
       </p>
 
       {/* CORE DATA */}
       <section className="mb-10">
         <h2 className="text-xl font-semibold mb-3 border-b pb-1">Core Data</h2>
 
-        {/* Admin Boundaries */}
+        {/* Administrative Boundaries */}
         <div className="border rounded p-4 mb-4 bg-gray-50">
           <h3 className="font-semibold mb-2">Administrative Boundaries</h3>
           <table className="w-full text-sm border-collapse mb-2">
@@ -153,7 +165,12 @@ export default function DatasetsPage() {
                     </td>
                     <td className="border p-1">
                       {l.data_url ? (
-                        <a href={l.data_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                        <a
+                          href={l.data_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
                           View
                         </a>
                       ) : (
