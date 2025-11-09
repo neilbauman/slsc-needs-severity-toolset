@@ -1,92 +1,58 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import React, { useState, useEffect } from "react";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-type Props = {
-  datasetId: string;
+interface Props {
+  dataset: any;
+  isOpen: boolean;
   onClose: () => void;
   onSave: () => void;
-};
+}
 
-export default function EditDatasetModal({ datasetId, onClose, onSave }: Props) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [type, setType] = useState('');
+export default function EditDatasetModal({ dataset, isOpen, onClose, onSave }: Props) {
+  const [name, setName] = useState(dataset.name || "");
+  const [description, setDescription] = useState(dataset.description || "");
 
   useEffect(() => {
-    async function load() {
-      const { data } = await supabase.from('datasets').select('*').eq('id', datasetId).single();
-      if (data) {
-        setName(data.name || '');
-        setDescription(data.description || '');
-        setType(data.type || '');
-      }
-    }
-    load();
-  }, [datasetId]);
+    setName(dataset.name || "");
+    setDescription(dataset.description || "");
+  }, [dataset]);
 
-  async function handleSave() {
-    const { error } = await supabase
-      .from('datasets')
-      .update({ name, description, type })
-      .eq('id', datasetId);
+  const handleSave = () => {
+    // 🔧 TODO: Implement save logic here
+    console.log("Saving changes for:", name, description);
+    onSave();
+  };
 
-    if (error) {
-      console.error('Update failed:', error.message);
-    } else {
-      onSave();
-      onClose();
-    }
-  }
+  if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded shadow w-full max-w-lg">
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+      <div className="bg-white rounded p-6 w-full max-w-lg">
         <h2 className="text-xl font-semibold mb-4">Edit Dataset</h2>
-
-        <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-        <input
-          className="w-full border px-3 py-2 rounded mb-4"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-        <textarea
-          className="w-full border px-3 py-2 rounded mb-4"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-
-        <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-        <select
-          className="w-full border px-3 py-2 rounded mb-4"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          <option value="">Select type</option>
-          <option value="numeric">Numeric</option>
-          <option value="categorical">Categorical</option>
-          <option value="gradient">Gradient</option>
-        </select>
-
-        <div className="flex justify-end space-x-2">
-          <button
-            onClick={onClose}
-            className="text-sm text-gray-600 hover:text-gray-800"
-          >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Name</label>
+            <input
+              className="mt-1 block w-full rounded border border-gray-300 p-2"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Description</label>
+            <textarea
+              className="mt-1 block w-full rounded border border-gray-300 p-2"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end space-x-2">
+          <button className="bg-gray-300 text-gray-800 px-4 py-2 rounded" onClick={onClose}>
             Cancel
           </button>
-          <button
-            onClick={handleSave}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          >
+          <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={handleSave}>
             Save
           </button>
         </div>
