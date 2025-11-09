@@ -6,6 +6,7 @@ import { ArrowRight, Eye, Pencil, Trash } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import UploadDatasetModal from "@/components/UploadDatasetModal";
 import EditDatasetModal from "@/components/EditDatasetModal";
+import ViewDatasetModal from "@/components/ViewDatasetModal";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,12 +14,13 @@ const supabase = createClient(
 );
 
 export default function DatasetsPage() {
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [editDataset, setEditDataset] = useState<any | null>(null);
-  const [datasets, setDatasets] = useState<any[]>([]);
+  const [viewDataset, setViewDataset] = useState<any | null>(null);
 
   async function fetchDatasets() {
-    const { data, error } = await supabase.from("datasets").select("*");
+    const { data, error } = await supabase.from("datasets").select("*").order("created_at", { ascending: false });
     if (error) {
       console.error("Error fetching datasets:", error);
     } else {
@@ -26,18 +28,22 @@ export default function DatasetsPage() {
     }
   }
 
-  async function deleteDataset(id: string) {
-    const { error } = await supabase.from("datasets").delete().eq("id", id);
-    if (error) console.error("Failed to delete dataset:", error);
-    else fetchDatasets();
-  }
-
   useEffect(() => {
     fetchDatasets();
   }, []);
 
-  const coreDatasets = datasets.filter((d) => d.category === "core");
-  const rawDatasets = datasets.filter((d) => d.category !== "core");
+  async function handleDelete(datasetId: string) {
+    const confirmed = confirm("Are you sure you want to delete this dataset?");
+    if (!confirmed) return;
+
+    const { error } = await supabase.from("datasets").delete().eq("id", datasetId);
+    if (error) {
+      alert("Error deleting dataset.");
+      console.error(error);
+    } else {
+      fetchDatasets();
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -65,55 +71,31 @@ export default function DatasetsPage() {
           </button>
         </div>
 
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Core Datasets</h3>
-          <div className="space-y-3">
-            {coreDatasets.map((dataset) => (
-              <div
-                key={dataset.id}
-                className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
-              >
-                <div>
-                  <p className="text-gray-800 font-medium">{dataset.name}</p>
-                  <p className="text-sm text-gray-500">Admin Level: {dataset.admin_level}, Type: {dataset.type}</p>
-                </div>
-                <div className="flex space-x-2 text-gray-500">
-                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
-                  <Pencil
-                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
-                    onClick={() => setEditDataset(dataset)}
-                  />
-                  <Trash
-                    className="w-4 h-4 cursor-pointer hover:text-red-500"
-                    onClick={() => deleteDataset(dataset.id)}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
         <section>
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Other Datasets</h3>
+          <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
           <div className="space-y-3">
-            {rawDatasets.map((dataset) => (
+            {datasets.length === 0 && (
+              <div className="text-gray-500">No datasets found.</div>
+            )}
+
+            {datasets.map((dataset) => (
               <div
                 key={dataset.id}
                 className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
               >
-                <div>
-                  <p className="text-gray-800 font-medium">{dataset.name}</p>
-                  <p className="text-sm text-gray-500">Admin Level: {dataset.admin_level}, Type: {dataset.type}</p>
-                </div>
-                <div className="flex space-x-2 text-gray-500">
-                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
+                <span className="text-gray-800 font-medium">{dataset.name}</span>
+                <div className="flex space-x-3 text-gray-500">
+                  <Eye
+                    className="w-5 h-5 cursor-pointer hover:text-blue-600"
+                    onClick={() => setViewDataset(dataset)}
+                  />
                   <Pencil
-                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
+                    className="w-5 h-5 cursor-pointer hover:text-yellow-500"
                     onClick={() => setEditDataset(dataset)}
                   />
                   <Trash
-                    className="w-4 h-4 cursor-pointer hover:text-red-500"
-                    onClick={() => deleteDataset(dataset.id)}
+                    className="w-5 h-5 cursor-pointer hover:text-red-500"
+                    onClick={() => handleDelete(dataset.id)}
                   />
                 </div>
               </div>
@@ -121,6 +103,7 @@ export default function DatasetsPage() {
           </div>
         </section>
 
+        {/* Modals */}
         {showUploadModal && (
           <UploadDatasetModal
             isOpen={true}
@@ -141,6 +124,14 @@ export default function DatasetsPage() {
               setEditDataset(null);
               fetchDatasets();
             }}
+          />
+        )}
+
+        {viewDataset && (
+          <ViewDatasetModal
+            dataset={viewDataset}
+            isOpen={true}
+            onClose={() => setViewDataset(null)}
           />
         )}
       </main>
