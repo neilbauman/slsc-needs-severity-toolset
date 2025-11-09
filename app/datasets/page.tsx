@@ -1,56 +1,42 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { createClient } from '@/utils/supabase/client';
-import { Panel } from '@/components/Panel';
-import Header from '@/components/Header';
+import UploadDatasetModal from '@/components/UploadDatasetModal';
 
 export default function DatasetsPage() {
-  const [datasets, setDatasets] = useState<any[]>([]);
-
-  useEffect(() => {
-    const fetchDatasets = async () => {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from('datasets')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!error && data) setDatasets(data);
-    };
-
-    fetchDatasets();
-  }, []);
-
   return (
-    <main className="p-6 space-y-8">
-      <Header title="Datasets" breadcrumb={[{ label: 'Dashboard', href: '/' }, { label: 'Datasets' }]} />
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <header className="border-b pb-4 mb-4">
+        <nav className="text-sm text-gray-500 mb-2">
+          <Link href="/" className="hover:underline">Dashboard</Link> / <span>Datasets</span>
+        </nav>
+        <h1 className="text-2xl font-bold text-gray-800">Datasets</h1>
+      </header>
 
-      <Panel title="Core Datasets">
-        <ul className="list-disc list-inside">
-          <li>Administrative Boundaries</li>
+      {/* Upload button */}
+      <div className="flex justify-end">
+        <UploadDatasetModal />
+      </div>
+
+      {/* Core datasets */}
+      <section className="bg-white rounded-xl shadow p-6">
+        <h2 className="text-lg font-semibold mb-3 text-gray-700">Core Datasets</h2>
+        <ul className="list-disc list-inside text-gray-600 space-y-1">
+          <li>Administrative Boundaries (ADM0–ADM4)</li>
           <li>Population Data</li>
           <li>GIS Layers</li>
         </ul>
-      </Panel>
+      </section>
 
-      <Panel title="Uploaded Datasets">
-        {datasets.length === 0 ? (
-          <p className="text-gray-500">No datasets uploaded yet.</p>
-        ) : (
-          <ul className="space-y-2">
-            {datasets.map((d) => (
-              <li key={d.id} className="border p-4 rounded-lg hover:bg-gray-50">
-                <Link href={`/datasets/${d.id}`} className="text-blue-600 font-semibold hover:underline">
-                  {d.name || 'Untitled Dataset'}
-                </Link>
-                <p className="text-sm text-gray-600">Admin Level: {d.admin_level || 'N/A'}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-    </main>
+      {/* Uploaded datasets */}
+      <section className="bg-white rounded-xl shadow p-6">
+        <h2 className="text-lg font-semibold mb-3 text-gray-700">Uploaded Datasets</h2>
+        <p className="text-sm text-gray-500 mb-2">These are datasets added to enrich the baseline analysis.</p>
+
+        {/* Placeholder */}
+        <div className="text-sm text-gray-600 italic">No datasets uploaded yet.</div>
+      </section>
+    </div>
   );
 }
