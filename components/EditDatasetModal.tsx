@@ -1,104 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabaseClient";
 
 interface EditDatasetModalProps {
   dataset: any;
   onClose: () => void;
-  onUpdated?: () => void;
-  onSaved?: () => void; // ✅ backward compatibility
+  onSaved: () => void;
 }
 
-const CATEGORY_OPTIONS = [
-  "Core",
-  "SSC Framework - P1",
-  "SSC Framework - P2",
-  "SSC Framework - P3",
-  "Hazards",
-  "Underlying Vulnerability",
-];
-
-const ADMIN_LEVELS = ["ADM0", "ADM1", "ADM2", "ADM3", "ADM4"];
-const DATA_TYPES = ["numeric", "categorical"];
-
-export default function EditDatasetModal({
-  dataset,
-  onClose,
-  onUpdated,
-  onSaved,
-}: EditDatasetModalProps) {
+export default function EditDatasetModal({ dataset, onClose, onSaved }: EditDatasetModalProps) {
   const supabase = createClient();
-
-  const [form, setForm] = useState({
-    name: "",
-    description: "",
-    source: "",
-    collected_at: "",
-    type: "",
-    category: "",
-    admin_level: "",
-  });
-
-  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState(dataset?.name || "");
+  const [description, setDescription] = useState(dataset?.description || "");
+  const [source, setSource] = useState(dataset?.source || "");
+  const [collectedAt, setCollectedAt] = useState(dataset?.collected_at || "");
+  const [type, setType] = useState(dataset?.type || "");
+  const [category, setCategory] = useState(dataset?.category || "");
+  const [adminLevel, setAdminLevel] = useState(dataset?.admin_level || "");
+  const [format, setFormat] = useState(dataset?.metadata?.format || "");
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (dataset) {
-      setForm({
-        name: dataset.name || "",
-        description: dataset.description || "",
-        source: dataset.source || dataset.metadata?.source || "",
-        collected_at: dataset.collected_at || "",
-        type: dataset.type || "",
-        category: dataset.category || "",
-        admin_level: dataset.admin_level || "",
-      });
+      setName(dataset.name || "");
+      setDescription(dataset.description || "");
+      setSource(dataset.source || "");
+      setCollectedAt(dataset.collected_at || "");
+      setType(dataset.type || "");
+      setCategory(dataset.category || "");
+      setAdminLevel(dataset.admin_level || "");
+      setFormat(dataset.metadata?.format || "");
     }
   }, [dataset]);
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
-  };
-
   const handleSave = async () => {
-    if (!dataset?.id) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(false);
+    if (!name || !type || !category || !adminLevel) {
+      setError("Please complete all required fields.");
+      return;
+    }
 
     try {
+      setSaving(true);
+      setError(null);
+
       const { error: updateError } = await supabase
         .from("datasets")
         .update({
-          name: form.name,
-          description: form.description,
-          source: form.source,
-          collected_at: form.collected_at || null,
-          type: form.type,
-          category: form.category,
-          admin_level: form.admin_level,
-          metadata: { ...(dataset.metadata || {}), source: form.source },
+          name,
+          description,
+          source,
+          collected_at: collectedAt || null,
+          type,
+          category,
+          admin_level: adminLevel,
+          metadata: { format },
+          updated_at: new Date().toISOString(),
         })
         .eq("id", dataset.id);
 
       if (updateError) throw updateError;
 
-      setSuccess(true);
-      if (onUpdated) onUpdated();
-      if (onSaved) onSaved();
-
-      setTimeout(() => {
-        setSuccess(false);
-        onClose();
-      }, 1200);
+      onSaved();
+      onClose();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Error saving changes");
+      setError(err.message || "Failed to save dataset");
     } finally {
       setSaving(false);
     }
@@ -107,139 +75,140 @@ export default function EditDatasetModal({
   if (!dataset) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center overflow-y-auto">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 my-8 p-6 relative">
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 text-xl"
-        >
-          ×
-        </button>
-
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl relative max-h-[80vh] overflow-y-auto">
         {/* Header */}
-        <h2 className="text-2xl font-bold mb-1">Edit Dataset</h2>
-        <p className="text-gray-500 mb-6">{dataset.name}</p>
-
-        {/* Form */}
-        <div className="space-y-4 text-sm">
-          {/* Name */}
+        <div className="flex justify-between items-start p-4 border-b">
           <div>
-            <label className="block font-medium text-gray-700 mb-1">Name</label>
-            <input
-              type="text"
-              name="name"
-              value={form.name}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            />
+            <h2 className="text-base font-semibold text-gray-800">Edit Dataset</h2>
+            <p className="text-xs text-gray-500">Modify dataset metadata and settings.</p>
           </div>
-
-          {/* Description */}
-          <div>
-            <label className="block font-medium text-gray-700 mb-1">Description</label>
-            <textarea
-              name="description"
-              value={form.description}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-              rows={3}
-            />
-          </div>
-
-          {/* Source */}
-          <div>
-            <label className="block font-medium text-gray-700 mb-1">Source</label>
-            <input
-              type="text"
-              name="source"
-              value={form.source}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            />
-          </div>
-
-          {/* Collected At */}
-          <div>
-            <label className="block font-medium text-gray-700 mb-1">Collected At</label>
-            <input
-              type="date"
-              name="collected_at"
-              value={form.collected_at || ""}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            />
-          </div>
-
-          {/* Type */}
-          <div>
-            <label className="block font-medium text-gray-700 mb-1">Type</label>
-            <select
-              name="type"
-              value={form.type}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
-              <option value="">Select type</option>
-              {DATA_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Category */}
-          <div>
-            <label className="block font-medium text-gray-700 mb-1">Category</label>
-            <select
-              name="category"
-              value={form.category}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
-              <option value="">Select category</option>
-              {CATEGORY_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Admin Level */}
-          <div>
-            <label className="block font-medium text-gray-700 mb-1">Admin Level</label>
-            <select
-              name="admin_level"
-              value={form.admin_level}
-              onChange={handleChange}
-              className="w-full border rounded-md p-2"
-            >
-              <option value="">Select level</option>
-              {ADMIN_LEVELS.map((l) => (
-                <option key={l} value={l}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl font-light"
+          >
+            ×
+          </button>
         </div>
 
-        {/* Error / Success / Actions */}
-        <div className="mt-6 flex justify-between items-center">
-          {error && <p className="text-red-600 text-sm">{error}</p>}
-          {success && <p className="text-green-600 text-sm">Saved!</p>}
+        {/* Form */}
+        <div className="p-4 space-y-3 text-sm text-gray-700">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-medium mb-1">Name *</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block font-medium mb-1">Source</label>
+              <input
+                type="text"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+            </div>
+          </div>
 
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className={`px-4 py-2 rounded-md text-white ${
-              saving ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
-            {saving ? "Saving..." : "Save Changes"}
-          </button>
+          <div>
+            <label className="block font-medium mb-1">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              className="w-full border rounded px-2 py-1 text-sm"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block font-medium mb-1">Collected At</label>
+              <input
+                type="date"
+                value={collectedAt}
+                onChange={(e) => setCollectedAt(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium mb-1">Type *</label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              >
+                <option value="">Select type</option>
+                <option value="numeric">Numeric</option>
+                <option value="categorical">Categorical</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-medium mb-1">Category *</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              >
+                <option value="">Select category</option>
+                <option value="Core">Core</option>
+                <option value="SSC Framework - P1">SSC Framework - P1</option>
+                <option value="SSC Framework - P2">SSC Framework - P2</option>
+                <option value="SSC Framework - P3">SSC Framework - P3</option>
+                <option value="Underlying Vulnerability">Underlying Vulnerability</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block font-medium mb-1">Admin Level *</label>
+              <select
+                value={adminLevel}
+                onChange={(e) => setAdminLevel(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              >
+                <option value="">Select admin level</option>
+                <option value="ADM0">ADM0</option>
+                <option value="ADM1">ADM1</option>
+                <option value="ADM2">ADM2</option>
+                <option value="ADM3">ADM3</option>
+                <option value="ADM4">ADM4</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-medium mb-1">Format</label>
+              <input
+                type="text"
+                value={format}
+                onChange={(e) => setFormat(e.target.value)}
+                className="w-full border rounded px-2 py-1 text-sm"
+              />
+            </div>
+          </div>
+
+          {error && <p className="text-red-600 text-xs">{error}</p>}
+
+          <div className="flex justify-end mt-4 space-x-2">
+            <button
+              onClick={onClose}
+              className="border border-gray-300 hover:bg-gray-100 text-gray-700 font-medium px-3 py-1.5 rounded text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-1.5 rounded text-sm"
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
