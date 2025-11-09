@@ -1,77 +1,72 @@
 'use client';
-
-import React, { useState } from 'react';
-import UploadDatasetModal from '../../components/UploadDatasetModal';
+import Link from 'next/link';
 
 export default function DatasetsPage() {
-  const [modalOpen, setModalOpen] = useState(false);
-
-  // Placeholder static data — replace with dynamic fetch
-  const coreDatasets = [
-    { id: 'population', name: 'Population (ADM1–ADM4)' },
-    { id: 'admins', name: 'Administrative Boundaries (ADM0–ADM4)' },
-    { id: 'gis', name: 'GIS Layers (Buildings, Roads, Elevation)' },
-  ];
-
-  const otherDatasets = [
-    { id: 'building_typology', name: 'Building Typology by Barangay' },
-    { id: 'evac_centers', name: 'Evacuation Centers (Partial)' },
-  ];
-
   return (
-    <main className="p-6 space-y-8 max-w-5xl mx-auto">
-      {/* HEADER */}
-      <header className="border-b pb-4">
-        <h1 className="text-2xl font-bold text-gray-800 mb-1">
-          Datasets
-        </h1>
-        <nav className="text-sm text-gray-500">
-          <span className="text-blue-600 hover:underline cursor-pointer">Dashboard</span> &raquo; Datasets
-        </nav>
-      </header>
+    <main className="min-h-screen bg-gray-50 px-6 py-8">
+      <div className="max-w-5xl mx-auto space-y-8">
+        {/* Header */}
+        <header className="border-b pb-4 mb-4">
+          <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
+          <nav className="text-sm text-gray-500 mt-1">
+            <Link href="/" className="text-blue-600 hover:underline">
+              Dashboard
+            </Link>{' '}
+            &raquo; Datasets
+          </nav>
+        </header>
 
-      {/* UPLOAD BUTTON */}
-      <div className="flex justify-end">
-        <button
-          onClick={() => setModalOpen(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm"
-        >
-          Upload New Dataset
-        </button>
+        {/* Upload Button */}
+        <div className="flex justify-end">
+          <Link
+            href="/datasets/upload"
+            className="inline-block bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded hover:bg-blue-700 transition"
+          >
+            Upload New Dataset
+          </Link>
+        </div>
+
+        {/* Core Datasets */}
+        <section className="space-y-4">
+          <h2 className="text-lg font-semibold text-gray-700">
+            Core Datasets
+          </h2>
+          <div className="space-y-2">
+            {[
+              'Population (ADM1–ADM4)',
+              'Administrative Boundaries (ADM0–ADM4)',
+              'GIS Layers (Buildings, Roads, Elevation)',
+            ].map((title) => (
+              <div
+                key={title}
+                className="bg-white rounded-xl shadow px-4 py-3 text-sm text-gray-700"
+              >
+                {title}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Other Datasets */}
+        <section className="space-y-4 pt-6">
+          <h2 className="text-lg font-semibold text-gray-700">
+            Other Uploaded Datasets
+          </h2>
+          <div className="space-y-2">
+            {[
+              'Building Typology by Barangay',
+              'Evacuation Centers (Partial)',
+            ].map((title) => (
+              <div
+                key={title}
+                className="bg-white rounded-xl shadow px-4 py-3 text-sm text-gray-700"
+              >
+                {title}
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
-
-      {/* CORE DATASETS */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Core Datasets</h2>
-        <ul className="space-y-2">
-          {coreDatasets.map((ds) => (
-            <li
-              key={ds.id}
-              className="bg-gray-100 border border-gray-300 rounded p-4 shadow-sm"
-            >
-              <div className="text-sm font-medium text-gray-800">{ds.name}</div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* OTHER DATASETS */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-700 mb-2">Other Uploaded Datasets</h2>
-        <ul className="space-y-2">
-          {otherDatasets.map((ds) => (
-            <li
-              key={ds.id}
-              className="bg-white border border-gray-200 rounded p-4 shadow-sm"
-            >
-              <div className="text-sm text-gray-800 font-medium">{ds.name}</div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* MODAL */}
-      <UploadDatasetModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </main>
   );
 }
