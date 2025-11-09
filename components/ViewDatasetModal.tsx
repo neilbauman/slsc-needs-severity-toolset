@@ -1,81 +1,86 @@
-"use client";
-
-import React, { useEffect, useState } from "react";
-import Papa from "papaparse";
+import React from "react";
 
 interface ViewDatasetModalProps {
   dataset: any;
-  isOpen: boolean;
   onClose: () => void;
 }
 
-const ViewDatasetModal: React.FC<ViewDatasetModalProps> = ({ dataset, isOpen, onClose }) => {
-  const [previewData, setPreviewData] = useState<string[][]>([]);
+const ViewDatasetModal: React.FC<ViewDatasetModalProps> = ({ dataset, onClose }) => {
+  const previewData = dataset.preview || [];
+  const interpretationType = dataset.interpretation_type;
 
-  useEffect(() => {
-    const fetchPreview = async () => {
-      if (!dataset || !dataset.file_url) return;
-      const res = await fetch(dataset.file_url);
-      const text = await res.text();
-      Papa.parse(text, {
-        header: false,
-        preview: 10,
-        complete: (results: any) => {
-          setPreviewData(results.data);
-        },
+  const getColumns = () => {
+    if (interpretationType === "categorical") {
+      // Get unique category values across all rows for columns
+      const categories = new Set<string>();
+      previewData.forEach((row: any) => {
+        Object.keys(row).forEach((key) => {
+          categories.add(key);
+        });
       });
-    };
+      return Array.from(categories);
+    } else {
+      // For numeric datasets, use first row's keys
+      return previewData.length > 0 ? Object.keys(previewData[0]) : [];
+    }
+  };
 
-    fetchPreview();
-  }, [dataset]);
-
-  if (!isOpen || !dataset) return null;
+  const columns = getColumns();
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white w-full max-w-3xl mx-4 p-6 rounded shadow-lg overflow-y-auto max-h-[80vh]">
-        <h2 className="text-xl font-bold mb-4">View Dataset</h2>
-
-        <div className="mb-4 space-y-1 text-sm">
-          <p><strong>Name:</strong> {dataset.name}</p>
-          <p><strong>Description:</strong> {dataset.description || "N/A"}</p>
-          <p><strong>Type:</strong> {dataset.type || "N/A"}</p>
-          <p><strong>Admin Level:</strong> {dataset.admin_level || "N/A"}</p>
-          <p><strong>Source:</strong> {dataset.source || "N/A"}</p>
-          <p><strong>Created At:</strong> {new Date(dataset.created_at).toLocaleString()}</p>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded shadow-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="flex justify-between items-center px-6 py-4 border-b">
+          <h2 className="text-xl font-semibold">Dataset Preview</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-600 hover:text-black"
+          >
+            ×
+          </button>
         </div>
 
-        <div className="border rounded overflow-x-auto max-h-64">
-          <table className="text-xs table-auto w-full">
-            <thead className="bg-gray-100">
-              {previewData.length > 0 && (
-                <tr>
-                  {previewData[0].map((header, i) => (
-                    <th key={i} className="px-2 py-1 border-b border-gray-300 text-left whitespace-nowrap">
-                      {header}
+        {/* Metadata */}
+        <div className="p-4 border-b text-sm text-gray-700 bg-gray-50">
+          <p><strong>Name:</strong> {dataset.name}</p>
+          <p><strong>Interpretation Type:</strong> {dataset.interpretation_type}</p>
+          <p><strong>Admin Level:</strong> {dataset.admin_level}</p>
+        </div>
+
+        {/* Table Preview */}
+        <div className="flex-1 overflow-auto p-4">
+          {columns.length > 0 ? (
+            <table className="table-auto w-full text-sm border">
+              <thead>
+                <tr className="bg-gray-200 text-left">
+                  {columns.map((col) => (
+                    <th key={col} className="px-3 py-2 border-b border-gray-300">
+                      {col}
                     </th>
                   ))}
                 </tr>
-              )}
-            </thead>
-            <tbody>
-              {previewData.slice(1).map((row, i) => (
-                <tr key={i} className="odd:bg-white even:bg-gray-50">
-                  {row.map((cell, j) => (
-                    <td key={j} className="px-2 py-1 border-b border-gray-200 whitespace-nowrap">
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {previewData.map((row: any, idx: number) => (
+                  <tr key={idx} className="hover:bg-gray-50">
+                    {columns.map((col) => (
+                      <td key={col} className="px-3 py-2 border-b border-gray-100">
+                        {row[col] ?? ""}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-gray-500">No data available for preview.</p>
+          )}
         </div>
 
-        <div className="text-right mt-4">
+        <div className="p-4 border-t bg-gray-100 text-right">
           <button
-            className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300 text-sm"
             onClick={onClose}
+            className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700"
           >
             Close
           </button>
