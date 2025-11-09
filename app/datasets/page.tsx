@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { ArrowRight, Eye, Pencil, Trash } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
+import UploadDatasetModal from "@/components/UploadDatasetModal";
 import EditDatasetModal from "@/components/EditDatasetModal";
 
 const supabase = createClient(
@@ -13,20 +14,21 @@ const supabase = createClient(
 
 export default function DatasetsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDataset, setEditDataset] = useState<any | null>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
 
   useEffect(() => {
-    async function fetchDatasets() {
-      const { data, error } = await supabase.from("datasets").select("*");
-      if (error) {
-        console.error("Error fetching datasets:", error);
-      } else {
-        setDatasets(data);
-      }
-    }
     fetchDatasets();
   }, []);
+
+  async function fetchDatasets() {
+    const { data, error } = await supabase.from("datasets").select("*");
+    if (error) {
+      console.error("Error fetching datasets:", error);
+    } else {
+      setDatasets(data);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -64,12 +66,12 @@ export default function DatasetsPage() {
               >
                 <span className="text-gray-800">{dataset.name}</span>
                 <div className="flex space-x-2 text-gray-500">
-                  <Eye className="w-5 h-5 cursor-pointer hover:text-blue-600" />
+                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
                   <Pencil
-                    className="w-5 h-5 cursor-pointer hover:text-yellow-500"
-                    onClick={() => setEditingId(dataset.id)}
+                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
+                    onClick={() => setEditDataset(dataset)}
                   />
-                  <Trash className="w-5 h-5 cursor-pointer hover:text-red-500" />
+                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
                 </div>
               </div>
             ))}
@@ -77,27 +79,23 @@ export default function DatasetsPage() {
         </section>
 
         {showUploadModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white p-6 rounded shadow w-full max-w-lg">
-              <h2 className="text-xl font-semibold mb-4">Upload Dataset</h2>
-              {/* Upload form will go here */}
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="mt-4 text-sm text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <UploadDatasetModal
+            isOpen={showUploadModal}
+            onClose={() => setShowUploadModal(false)}
+            onSave={() => {
+              setShowUploadModal(false);
+              fetchDatasets();
+            }}
+          />
         )}
 
-        {editingId && (
+        {editDataset && (
           <EditDatasetModal
-            datasetId={editingId}
-            onClose={() => setEditingId(null)}
-            onSave={async () => {
-              const { data } = await supabase.from("datasets").select("*");
-              setDatasets(data || []);
+            dataset={editDataset}
+            onClose={() => setEditDataset(null)}
+            onSave={() => {
+              setEditDataset(null);
+              fetchDatasets();
             }}
           />
         )}
