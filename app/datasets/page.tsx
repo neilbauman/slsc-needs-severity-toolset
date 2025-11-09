@@ -1,130 +1,152 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import Link from "next/link";
-import { ArrowRight, Eye, Pencil, Trash } from "lucide-react";
-import { createClient } from "@supabase/supabase-js";
+import React, { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 import UploadDatasetModal from "@/components/UploadDatasetModal";
-import EditDatasetModal from "@/components/EditDatasetModal";
 import ViewDatasetModal from "@/components/ViewDatasetModal";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import EditDatasetModal from "@/components/EditDatasetModal";
 
 export default function DatasetsPage() {
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [editDataset, setEditDataset] = useState<any | null>(null);
-  const [viewDataset, setViewDataset] = useState<any | null>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function fetchDatasets() {
-    const { data, error } = await supabase.from("datasets").select("*");
-    if (error) {
-      console.error("Error fetching datasets:", error);
-    } else {
-      setDatasets(data);
-    }
-  }
+  const [showUpload, setShowUpload] = useState(false);
+  const [selectedView, setSelectedView] = useState<any | null>(null);
+  const [selectedEdit, setSelectedEdit] = useState<any | null>(null);
 
-  async function deleteDataset(id: string) {
-    const { error } = await supabase.from("datasets").delete().eq("id", id);
-    if (error) {
-      console.error("Error deleting dataset:", error);
-    } else {
-      fetchDatasets();
+  const fetchDatasets = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error } = await supabase
+        .from("datasets")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setDatasets(data || []);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
     fetchDatasets();
   }, []);
 
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this dataset? This action cannot be undone.")) return;
+    try {
+      const { error } = await supabase.from("datasets").delete().eq("id", id);
+      if (error) throw error;
+      await fetchDatasets();
+    } catch (err: any) {
+      alert("Error deleting: " + err.message);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-slate-800 px-6 py-4 text-white">
-        <h1 className="text-2xl font-semibold">
-          Philippines Shelter Severity Toolset <span className="text-yellow-400">(sandbox)</span>
-        </h1>
-        <nav className="text-sm mt-1 text-gray-300">
-          <Link href="/" className="hover:underline">
-            Dashboard
-          </Link>
-          <span className="mx-2">»</span>
-          <span className="text-white">Datasets</span>
-        </nav>
-      </header>
+    <div className="p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-serif">Datasets</h1>
+        <button
+          onClick={() => setShowUpload(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          + Upload Dataset
+        </button>
+      </div>
 
-      <main className="p-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold text-gray-800">Datasets</h2>
-          <button
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-            onClick={() => setShowUploadModal(true)}
-          >
-            Upload New Dataset
-          </button>
+      {loading && <p className="text-sm text-gray-500">Loading datasets...</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {!loading && datasets.length === 0 && (
+        <p className="text-sm text-gray-600">No datasets available yet.</p>
+      )}
+
+      {!loading && datasets.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="border p-2 text-left">Name</th>
+                <th className="border p-2 text-left">Description</th>
+                <th className="border p-2 text-left">Type</th>
+                <th className="border p-2 text-left">Admin Level</th>
+                <th className="border p-2 text-left">Created</th>
+                <th className="border p-2 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datasets.map((d) => (
+                <tr key={d.id} className="odd:bg-gray-50">
+                  <td className="border p-2">{d.name}</td>
+                  <td className="border p-2 text-gray-600">
+                    {d.description || "-"}
+                  </td>
+                  <td className="border p-2">{d.type}</td>
+                  <td className="border p-2 text-center">{d.admin_level}</td>
+                  <td className="border p-2 text-gray-500">
+                    {d.created_at
+                      ? new Date(d.created_at).toLocaleDateString()
+                      : "-"}
+                  </td>
+                  <td className="border p-2 text-center space-x-2">
+                    <button
+                      onClick={() => setSelectedView(d)}
+                      className="px-2 py-1 border rounded hover:bg-gray-100"
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => setSelectedEdit(d)}
+                      className="px-2 py-1 border rounded hover:bg-gray-100"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(d.id)}
+                      className="px-2 py-1 border rounded text-red-600 hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      )}
 
-        <section>
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
-          <div className="space-y-3">
-            {datasets.map((dataset) => (
-              <div
-                key={dataset.id}
-                className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
-              >
-                <span className="text-gray-800">{dataset.name}</span>
-                <div className="flex space-x-2 text-gray-500">
-                  <Eye
-                    className="w-4 h-4 cursor-pointer hover:text-blue-600"
-                    onClick={() => setViewDataset(dataset)}
-                  />
-                  <Pencil
-                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
-                    onClick={() => setEditDataset(dataset)}
-                  />
-                  <Trash
-                    className="w-4 h-4 cursor-pointer hover:text-red-500"
-                    onClick={() => deleteDataset(dataset.id)}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+      {/* Modals */}
+      {showUpload && (
+        <UploadDatasetModal
+          onClose={() => setShowUpload(false)}
+          onSuccess={() => {
+            setShowUpload(false);
+            fetchDatasets();
+          }}
+        />
+      )}
 
-        {showUploadModal && (
-          <UploadDatasetModal
-            isOpen={true}
-            onClose={() => setShowUploadModal(false)}
-            onSave={() => {
-              setShowUploadModal(false);
-              fetchDatasets();
-            }}
-          />
-        )}
+      {selectedView && (
+        <ViewDatasetModal
+          dataset={selectedView}
+          onClose={() => setSelectedView(null)}
+        />
+      )}
 
-        {editDataset && (
-          <EditDatasetModal
-            dataset={editDataset}
-            isOpen={true}
-            onClose={() => setEditDataset(null)}
-            onSave={() => {
-              setEditDataset(null);
-              fetchDatasets();
-            }}
-          />
-        )}
-
-        {viewDataset && (
-  <ViewDatasetModal
-    dataset={viewDataset}
-    onClose={() => setViewDataset(null)}
-  />
-)}
-      </main>
+      {selectedEdit && (
+        <EditDatasetModal
+          dataset={selectedEdit}
+          onClose={() => setSelectedEdit(null)}
+          onUpdated={() => fetchDatasets()}
+        />
+      )}
     </div>
   );
 }
