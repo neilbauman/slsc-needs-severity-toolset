@@ -43,7 +43,7 @@ export default function EditDatasetModal({ dataset, onClose, onUpdated }: any) {
       setTimeout(() => {
         onUpdated?.();
         onClose();
-      }, 800);
+      }, 1000);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -54,7 +54,7 @@ export default function EditDatasetModal({ dataset, onClose, onUpdated }: any) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg">
-        <h2 className="text-xl font-serif mb-4">Edit Dataset</h2>
+        <h2 className="text-xl font-serif mb-4">Edit Dataset Metadata</h2>
 
         <div className="space-y-3">
           <input
@@ -72,16 +72,23 @@ export default function EditDatasetModal({ dataset, onClose, onUpdated }: any) {
             placeholder="Description"
           />
 
+          {/* Admin Level */}
+          <label className="block text-sm font-medium">Admin Level</label>
           <select
             value={form.admin_level}
             onChange={(e) => setForm({ ...form, admin_level: e.target.value })}
             className="border p-2 rounded w-full"
           >
-            {["ADM0","ADM1","ADM2","ADM3","ADM4","ADM5"].map((level) => (
-              <option key={level} value={level}>{level}</option>
-            ))}
+            <option value="ADM0">Admin Level 0 (National)</option>
+            <option value="ADM1">Admin Level 1 (Region)</option>
+            <option value="ADM2">Admin Level 2 (Province)</option>
+            <option value="ADM3">Admin Level 3 (Municipality)</option>
+            <option value="ADM4">Admin Level 4 (Barangay)</option>
+            <option value="ADM5">Admin Level 5 (Sitio / Locality)</option>
           </select>
 
+          {/* Dataset Type */}
+          <label className="block text-sm font-medium">Dataset Type</label>
           <select
             value={form.type}
             onChange={(e) => setForm({ ...form, type: e.target.value })}
@@ -91,6 +98,8 @@ export default function EditDatasetModal({ dataset, onClose, onUpdated }: any) {
             <option value="categorical">Categorical</option>
           </select>
 
+          {/* Category */}
+          <label className="block text-sm font-medium">Dataset Category</label>
           <select
             value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })}
@@ -104,30 +113,35 @@ export default function EditDatasetModal({ dataset, onClose, onUpdated }: any) {
             <option value="Underlying Vulnerability">Underlying Vulnerability</option>
           </select>
 
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={form.is_baseline}
-              onChange={(e) => setForm({ ...form, is_baseline: e.target.checked })}
-            />
-            <span>Baseline dataset</span>
-          </label>
-
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={form.is_derived}
-              onChange={(e) => setForm({ ...form, is_derived: e.target.checked })}
-            />
-            <span>Derived dataset</span>
-          </label>
+          {/* Baseline / Derived Flags */}
+          <div className="space-y-1 mt-2">
+            <label className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={form.is_baseline}
+                onChange={(e) => setForm({ ...form, is_baseline: e.target.checked })}
+              />
+              <span>Baseline dataset</span>
+            </label>
+            <label className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={form.is_derived}
+                onChange={(e) => setForm({ ...form, is_derived: e.target.checked })}
+              />
+              <span>Derived dataset</span>
+            </label>
+          </div>
         </div>
 
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         {success && <p className="text-green-600 text-sm mt-2">Saved successfully!</p>}
 
         <div className="flex justify-end mt-5 space-x-2">
-          <button onClick={onClose} className="px-3 py-1 border rounded hover:bg-gray-100">
+          <button
+            onClick={onClose}
+            className="px-3 py-1 border rounded hover:bg-gray-100"
+          >
             Cancel
           </button>
           <button
