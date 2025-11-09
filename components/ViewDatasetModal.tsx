@@ -11,47 +11,40 @@ export default function ViewDatasetModal({
 }) {
   if (!dataset) return null;
 
-  const metadata = dataset.metadata || {};
+  const metadata =
+    typeof dataset.metadata === "string"
+      ? JSON.parse(dataset.metadata)
+      : dataset.metadata || {};
+
   const formatDate = (d?: string) =>
     d ? new Date(d).toLocaleString() : "—";
+
+  const fields = {
+    Type: dataset.type || "—",
+    "Admin Level": dataset.admin_level || "—",
+    Category: dataset.category || "—",
+    Source: metadata.source || "—",
+    Format: metadata.format || "—",
+    "Collected At": formatDate(dataset.collected_at),
+    "Created At": formatDate(dataset.created_at),
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-2">
+        <h2 className="text-2xl font-semibold text-gray-800 mb-1">
           {dataset.name}
         </h2>
-        <p className="text-gray-500 mb-4">{dataset.description || "—"}</p>
+        <p className="text-gray-500 mb-4">
+          {dataset.description || "—"}
+        </p>
 
-        <div className="grid grid-cols-2 gap-y-2 text-sm text-gray-700 mb-4">
-          <p>
-            <span className="font-semibold">Type:</span>{" "}
-            {dataset.type || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Admin Level:</span>{" "}
-            {dataset.admin_level || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Category:</span>{" "}
-            {dataset.category || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Source:</span>{" "}
-            {metadata.source || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Format:</span>{" "}
-            {metadata.format || "—"}
-          </p>
-          <p>
-            <span className="font-semibold">Collected At:</span>{" "}
-            {formatDate(dataset.collected_at)}
-          </p>
-          <p>
-            <span className="font-semibold">Created At:</span>{" "}
-            {formatDate(dataset.created_at)}
-          </p>
+        <div className="grid grid-cols-2 gap-y-2 text-sm text-gray-700 mb-6">
+          {Object.entries(fields).map(([label, value]) => (
+            <p key={label}>
+              <span className="font-semibold">{label}:</span> {value}
+            </p>
+          ))}
         </div>
 
         {Object.keys(metadata).length > 0 && (
