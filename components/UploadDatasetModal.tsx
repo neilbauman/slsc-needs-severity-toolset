@@ -17,49 +17,59 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
   const [metadata, setMetadata] = useState({
     name: "",
     description: "",
-    admin_level: 2,
+    admin_level: "ADM2",
     indicator_id: null,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 📂 Parse uploaded CSV
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setCsvFile(file);
+
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
         const data = results.data as any[];
-        setPreview(data.slice(0, 10)); // show only 10-row preview
+        if (data.length === 0) {
+          setError("CSV file appears empty.");
+          return;
+        }
+        setPreview(data.slice(0, 10));
         setHeaders(Object.keys(data[0]));
       },
     });
   };
 
+  // 💾 Save to Supabase
   const handleSave = async () => {
+    setError(null);
     if (!csvFile || !datasetType || !mapping.pcode) {
-      setError("Please complete all required fields before saving.");
+      setError("Please complete all required fields.");
       return;
     }
+
     setLoading(true);
     try {
-      // Step 1: Insert metadata into datasets table
+      // Insert metadata
       const { data: dataset, error: datasetError } = await supabase
         .from("datasets")
         .insert({
-          name: metadata.name,
-          description: metadata.description,
+          name: metadata.name.trim(),
+          description: metadata.description.trim(),
           admin_level: metadata.admin_level,
           type: datasetType,
           indicator_id: metadata.indicator_id,
         })
         .select()
         .single();
+
       if (datasetError) throw datasetError;
 
-      // Step 2: Parse full CSV again
+      // Parse full CSV for values
       Papa.parse(csvFile, {
         header: true,
         skipEmptyLines: true,
@@ -69,23 +79,27 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
 
           if (datasetType === "numeric") {
             formatted = data
-              .filter((row) => row[mapping.pcode] && row[mapping.value])
-              .map((row) => ({
+              .filter((r) => r[mapping.pcode] && r[mapping.value])
+              .map((r) => ({
                 dataset_id: dataset.id,
-                admin_pcode: String(row[mapping.pcode]),
-                value: Number(row[mapping.value]),
+                admin_pcode: String(r[mapping.pcode]),
+                value: Number(String(r[mapping.value]).replace(/,/g, "")),
               }));
-            await supabase.from("dataset_values_numeric").insert(formatted);
-          } else if (datasetType === "categorical") {
+            if (formatted.length > 0)
+              await supabase.from("dataset_values_numeric").insert(formatted);
+          } else {
             formatted = data
-              .filter((row) => row[mapping.pcode] && row[mapping.category])
-              .map((row) => ({
+              .filter((r) => r[mapping.pcode] && r[mapping.category])
+              .map((r) => ({
                 dataset_id: dataset.id,
-                admin_pcode: String(row[mapping.pcode]),
-                category: String(row[mapping.category]),
-                value: row[mapping.value] ? Number(row[mapping.value]) : null,
+                admin_pcode: String(r[mapping.pcode]),
+                category: String(r[mapping.category]),
+                value: r[mapping.value]
+                  ? Number(String(r[mapping.value]).replace(/,/g, ""))
+                  : null,
               }));
-            await supabase.from("dataset_values_categorical").insert(formatted);
+            if (formatted.length > 0)
+              await supabase.from("dataset_values_categorical").insert(formatted);
           }
 
           setLoading(false);
@@ -105,40 +119,52 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
       <div className="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-lg">
         <h2 className="text-xl font-serif mb-4">Upload New Dataset</h2>
 
-        {/* Step 1: File Upload */}
-        <input type="file" accept=".csv" onChange={handleFileUpload} className="mb-3" />
+        {/* 📁 File Upload */}
+        <input
+          type="file"
+          accept=".csv"
+          onChange={handleFileUpload}
+          className="mb-4"
+        />
 
-        {/* Step 2: Metadata Form */}
+        {/* 📝 Metadata */}
         <div className="grid grid-cols-2 gap-4 mb-4">
           <input
             type="text"
             placeholder="Dataset name"
             value={metadata.name}
-            onChange={(e) => setMetadata({ ...metadata, name: e.target.value })}
+            onChange={(e) =>
+              setMetadata({ ...metadata, name: e.target.value })
+            }
             className="border p-2 rounded"
           />
           <input
             type="text"
             placeholder="Description"
             value={metadata.description}
-            onChange={(e) => setMetadata({ ...metadata, description: e.target.value })}
+            onChange={(e) =>
+              setMetadata({ ...metadata, description: e.target.value })
+            }
             className="border p-2 rounded"
           />
+
           <select
             value={metadata.admin_level}
             onChange={(e) =>
-              setMetadata({ ...metadata, admin_level: Number(e.target.value) })
+              setMetadata({ ...metadata, admin_level: e.target.value })
             }
             className="border p-2 rounded"
           >
-            <option value={0}>Admin Level 0 (National)</option>
-            <option value={1}>Admin Level 1 (Region)</option>
-            <option value={2}>Admin Level 2 (Province)</option>
-            <option value={3}>Admin Level 3 (Municipality)</option>
+            <option value="ADM0">Admin Level 0 (National)</option>
+            <option value="ADM1">Admin Level 1 (Region)</option>
+            <option value="ADM2">Admin Level 2 (Province)</option>
+            <option value="ADM3">Admin Level 3 (Municipality)</option>
+            <option value="ADM4">Admin Level 4 (Barangay)</option>
+            <option value="ADM5">Admin Level 5 (Sitio / Locality)</option>
           </select>
         </div>
 
-        {/* Step 3: Column Mapping */}
+        {/* 🔗 Column Mapping */}
         {headers.length > 0 && (
           <>
             <h3 className="font-semibold mb-2">Map CSV Columns</h3>
@@ -147,7 +173,9 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
                 <label className="block text-sm">Admin Pcode</label>
                 <select
                   value={mapping.pcode}
-                  onChange={(e) => setMapping({ ...mapping, pcode: e.target.value })}
+                  onChange={(e) =>
+                    setMapping({ ...mapping, pcode: e.target.value })
+                  }
                   className="border p-2 rounded w-full"
                 >
                   <option value="">Select column</option>
@@ -160,7 +188,9 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
                 <label className="block text-sm">Value Column (numeric)</label>
                 <select
                   value={mapping.value}
-                  onChange={(e) => setMapping({ ...mapping, value: e.target.value })}
+                  onChange={(e) =>
+                    setMapping({ ...mapping, value: e.target.value })
+                  }
                   className="border p-2 rounded w-full"
                 >
                   <option value="">Select column</option>
@@ -170,10 +200,14 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
                 </select>
               </div>
               <div>
-                <label className="block text-sm">Category Column (if categorical)</label>
+                <label className="block text-sm">
+                  Category Column (if categorical)
+                </label>
                 <select
                   value={mapping.category}
-                  onChange={(e) => setMapping({ ...mapping, category: e.target.value })}
+                  onChange={(e) =>
+                    setMapping({ ...mapping, category: e.target.value })
+                  }
                   className="border p-2 rounded w-full"
                 >
                   <option value="">Select column</option>
@@ -183,6 +217,7 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
                 </select>
               </div>
             </div>
+
             <div className="mb-4">
               <label className="mr-4">
                 <input
@@ -194,7 +229,7 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
                 />{" "}
                 Numeric dataset
               </label>
-              <label>
+              <label className="ml-4">
                 <input
                   type="radio"
                   name="type"
@@ -206,13 +241,15 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
               </label>
             </div>
 
-            {/* Step 4: Preview */}
+            {/* 👁️ CSV Preview */}
             <div className="border rounded max-h-64 overflow-y-auto text-sm">
               <table className="w-full border-collapse">
                 <thead className="bg-gray-100">
                   <tr>
                     {headers.map((h) => (
-                      <th key={h} className="border p-1">{h}</th>
+                      <th key={h} className="border p-1">
+                        {h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -232,15 +269,18 @@ export default function UploadDatasetModal({ onClose, onSuccess }: any) {
           </>
         )}
 
-        {/* Step 5: Actions */}
+        {/* 🧭 Actions */}
         <div className="flex justify-end mt-4 space-x-2">
-          <button onClick={onClose} className="px-3 py-1 border rounded">
+          <button
+            onClick={onClose}
+            className="px-3 py-1 border rounded hover:bg-gray-100"
+          >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={loading}
-            className="px-3 py-1 bg-blue-600 text-white rounded"
+            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
             {loading ? "Saving..." : "Save Dataset"}
           </button>
