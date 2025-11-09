@@ -28,6 +28,15 @@ export default function DatasetsPage() {
     }
   }
 
+  async function deleteDataset(id: string) {
+    const { error } = await supabase.from("datasets").delete().eq("id", id);
+    if (error) {
+      console.error("Error deleting dataset:", error);
+    } else {
+      fetchDatasets();
+    }
+  }
+
   useEffect(() => {
     fetchDatasets();
   }, []);
@@ -76,7 +85,10 @@ export default function DatasetsPage() {
                     className="w-4 h-4 cursor-pointer hover:text-yellow-500"
                     onClick={() => setEditDataset(dataset)}
                   />
-                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
+                  <Trash
+                    className="w-4 h-4 cursor-pointer hover:text-red-500"
+                    onClick={() => deleteDataset(dataset.id)}
+                  />
                 </div>
               </div>
             ))}
