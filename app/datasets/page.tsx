@@ -41,9 +41,16 @@ export default function DatasetsPage() {
         { data: dsets },
       ] = await Promise.all([
         supabase
-          .from("admin_boundaries")
-          .select("admin_level, count:count(*)")
-          .group("admin_level"),
+  .from("admin_boundaries")
+  .select("admin_level")
+  .then(({ data, error }) => {
+    if (error) throw error;
+    const grouped = (data || []).reduce((acc: Record<string, number>, row: any) => {
+      acc[row.admin_level] = (acc[row.admin_level] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(grouped).map(([level, count]) => ({ admin_level: level, count }));
+  }),
         supabase.from("gis_layers").select("*").order("created_at", { ascending: false }),
         supabase.from("population_data").select("admin_level, source").limit(1),
         supabase.from("datasets").select("*").order("created_at", { ascending: false }),
