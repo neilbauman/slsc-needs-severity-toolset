@@ -119,12 +119,11 @@ export default function DatasetsPage() {
         )}
 
         {viewDataset && (
-          <ViewDatasetModal
-            dataset={viewDataset}
-            isOpen={true}
-            onClose={() => setViewDataset(null)}
-          />
-        )}
+  <ViewDatasetModal
+    dataset={viewDataset}
+    onClose={() => setViewDataset(null)}
+  />
+)}
       </main>
     </div>
   );
