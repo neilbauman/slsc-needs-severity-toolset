@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PAGE_TITLES } from "@/lib/pageConfig";
+import { PAGE_TITLES } from "../lib/pageConfig";
 
 export default function Header() {
   const pathname = usePathname();
