@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabaseClient";
 interface EditDatasetModalProps {
   dataset: any;
   onClose: () => void;
-  onUpdated: () => void;
+  onUpdated?: () => void;
+  onSaved?: () => void; // ✅ backward compatibility
 }
 
 const CATEGORY_OPTIONS = [
@@ -25,6 +26,7 @@ export default function EditDatasetModal({
   dataset,
   onClose,
   onUpdated,
+  onSaved,
 }: EditDatasetModalProps) {
   const supabase = createClient();
 
@@ -87,7 +89,9 @@ export default function EditDatasetModal({
       if (updateError) throw updateError;
 
       setSuccess(true);
-      onUpdated();
+      if (onUpdated) onUpdated();
+      if (onSaved) onSaved();
+
       setTimeout(() => {
         setSuccess(false);
         onClose();
@@ -133,9 +137,7 @@ export default function EditDatasetModal({
 
           {/* Description */}
           <div>
-            <label className="block font-medium text-gray-700 mb-1">
-              Description
-            </label>
+            <label className="block font-medium text-gray-700 mb-1">Description</label>
             <textarea
               name="description"
               value={form.description}
@@ -159,9 +161,7 @@ export default function EditDatasetModal({
 
           {/* Collected At */}
           <div>
-            <label className="block font-medium text-gray-700 mb-1">
-              Collected At
-            </label>
+            <label className="block font-medium text-gray-700 mb-1">Collected At</label>
             <input
               type="date"
               name="collected_at"
@@ -209,9 +209,7 @@ export default function EditDatasetModal({
 
           {/* Admin Level */}
           <div>
-            <label className="block font-medium text-gray-700 mb-1">
-              Admin Level
-            </label>
+            <label className="block font-medium text-gray-700 mb-1">Admin Level</label>
             <select
               name="admin_level"
               value={form.admin_level}
