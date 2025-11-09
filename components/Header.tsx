@@ -3,7 +3,10 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PAGE_TITLES } from "@/lib/pageConfig";
+import path from "path";
+
+// ✅ Absolute import resolution compatible with Vercel
+const PAGE_TITLES = require(path.join(process.cwd(), "lib/pageConfig")).PAGE_TITLES;
 
 export default function Header() {
   const pathname = usePathname();
@@ -22,7 +25,6 @@ export default function Header() {
           )}
         </div>
 
-        {/* Breadcrumb */}
         <nav className="text-sm text-gray-500 mt-3 sm:mt-0">
           <Link href="/" className="hover:underline text-gray-600">
             Home
