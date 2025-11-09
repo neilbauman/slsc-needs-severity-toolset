@@ -4,8 +4,6 @@ import DatasetTable from "@/components/DatasetTable";
 
 export default async function DatasetsPage() {
   const supabase = createClient();
-
-  // Fetch all datasets from Supabase
   const { data: datasets, error } = await supabase
     .from("datasets")
     .select("*")
