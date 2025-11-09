@@ -4,12 +4,16 @@ import DatasetTable from "@/components/DatasetTable";
 
 export default async function DatasetsPage() {
   const supabase = createClient();
+
   const { data: datasets, error } = await supabase
     .from("datasets")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("category", { ascending: true })
+    .order("admin_level", { ascending: true });
 
-  if (error) console.error("❌ Supabase fetch error:", error);
+  if (error) {
+    console.error("❌ Supabase error:", error);
+  }
 
   return (
     <div>
