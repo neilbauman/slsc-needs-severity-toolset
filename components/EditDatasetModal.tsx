@@ -21,7 +21,7 @@ export default function EditDatasetModal({
     description: dataset?.description || "",
     category: dataset?.category || "",
     admin_level: dataset?.admin_level || "",
-    source: dataset?.source || dataset?.metadata?.source || "",
+    source: dataset?.metadata?.source || "",
     format: dataset?.metadata?.format || "",
     collected_at: dataset?.collected_at
       ? dataset.collected_at.slice(0, 10)
@@ -37,7 +37,7 @@ export default function EditDatasetModal({
     setSaving(true);
     setError(null);
 
-    // Clean up payload
+    // Sanitize and build payload
     const payload = {
       name: formData.name.trim(),
       description: formData.description.trim(),
@@ -49,7 +49,6 @@ export default function EditDatasetModal({
         source: formData.source || null,
         format: formData.format || null,
       },
-      updated_at: new Date().toISOString(),
     };
 
     const { error } = await supabase
@@ -87,30 +86,32 @@ export default function EditDatasetModal({
         </h2>
 
         <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Name
-            </label>
-            <input
-              type="text"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              className="w-full border rounded p-2 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
-            </label>
-            <textarea
-              name="description"
-              value={formData.description}
-              onChange={handleChange}
-              className="w-full border rounded p-2 text-sm"
-            />
-          </div>
+          {[
+            { label: "Name", name: "name", type: "text" },
+            { label: "Description", name: "description", type: "textarea" },
+          ].map((f) => (
+            <div key={f.name}>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {f.label}
+              </label>
+              {f.type === "textarea" ? (
+                <textarea
+                  name={f.name}
+                  value={(formData as any)[f.name]}
+                  onChange={handleChange}
+                  className="w-full border rounded p-2 text-sm"
+                />
+              ) : (
+                <input
+                  type="text"
+                  name={f.name}
+                  value={(formData as any)[f.name]}
+                  onChange={handleChange}
+                  className="w-full border rounded p-2 text-sm"
+                />
+              )}
+            </div>
+          ))}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -125,9 +126,7 @@ export default function EditDatasetModal({
               >
                 <option value="">Select</option>
                 {categoryOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
+                  <option key={c}>{c}</option>
                 ))}
               </select>
             </div>
@@ -143,9 +142,7 @@ export default function EditDatasetModal({
               >
                 <option value="">Select</option>
                 {adminLevelOptions.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
+                  <option key={a}>{a}</option>
                 ))}
               </select>
             </div>
