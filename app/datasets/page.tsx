@@ -91,13 +91,13 @@ export default function DatasetsPage() {
 
         {editDataset && (
           <EditDatasetModal
-            dataset={editDataset}
-            onClose={() => setEditDataset(null)}
-            onSave={() => {
-              setEditDataset(null);
-              fetchDatasets();
-            }}
-          />
+  datasetId={editDataset?.id}
+  onClose={() => setEditDataset(null)}
+  onSave={() => {
+    setEditDataset(null);
+    fetchDatasets();
+  }}
+/>
         )}
       </main>
     </div>
