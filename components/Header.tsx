@@ -3,10 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import path from "path";
-
-// ✅ Absolute import resolution compatible with Vercel
-const PAGE_TITLES = require(path.join(process.cwd(), "lib/pageConfig")).PAGE_TITLES;
+import { PAGE_TITLES } from "../lib/pageConfig"; // ✅ Static import — works on Vercel
 
 export default function Header() {
   const pathname = usePathname();
