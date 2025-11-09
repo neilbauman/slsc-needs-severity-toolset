@@ -14,12 +14,8 @@ const supabase = createClient(
 
 export default function DatasetsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [editDataset, setEditDataset] = useState<any | null>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
-
-  useEffect(() => {
-    fetchDatasets();
-  }, []);
+  const [editDataset, setEditDataset] = useState<any | null>(null);
 
   async function fetchDatasets() {
     const { data, error } = await supabase.from("datasets").select("*");
@@ -29,6 +25,10 @@ export default function DatasetsPage() {
       setDatasets(data);
     }
   }
+
+  useEffect(() => {
+    fetchDatasets();
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -80,7 +80,7 @@ export default function DatasetsPage() {
 
         {showUploadModal && (
           <UploadDatasetModal
-            isOpen={showUploadModal}
+            isOpen={true}
             onClose={() => setShowUploadModal(false)}
             onSave={() => {
               setShowUploadModal(false);
