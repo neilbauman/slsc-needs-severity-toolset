@@ -1,5 +1,5 @@
 // app/layout.tsx
-import './globals.css'; // optional if you have Tailwind or global styles
+
 
 export const metadata = {
   title: 'Philippines SSC Toolset',
