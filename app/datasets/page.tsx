@@ -1,48 +1,77 @@
 'use client';
 
-import Link from 'next/link';
+import React, { useState } from 'react';
+import UploadDatasetModal from '@/components/UploadDatasetModal';
 
 export default function DatasetsPage() {
-  return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="border-b pb-4">
-        <h1 className="text-3xl font-bold text-gray-800">Philippines Shelter Severity Toolset (sandbox)</h1>
-        <nav className="text-sm text-gray-500 mt-1">
-          <Link href="/" className="hover:underline">Dashboard</Link>
-          <span className="mx-1">/</span>
-          <span>Datasets</span>
-        </nav>
-      </div>
+  const [modalOpen, setModalOpen] = useState(false);
 
-      {/* Upload dataset button */}
+  // Placeholder static data — replace with dynamic fetch
+  const coreDatasets = [
+    { id: 'population', name: 'Population (ADM1–ADM4)' },
+    { id: 'admins', name: 'Administrative Boundaries (ADM0–ADM4)' },
+    { id: 'gis', name: 'GIS Layers (Buildings, Roads, Elevation)' },
+  ];
+
+  const otherDatasets = [
+    { id: 'building_typology', name: 'Building Typology by Barangay' },
+    { id: 'evac_centers', name: 'Evacuation Centers (Partial)' },
+  ];
+
+  return (
+    <main className="p-6 space-y-8 max-w-5xl mx-auto">
+      {/* HEADER */}
+      <header className="border-b pb-4">
+        <h1 className="text-2xl font-bold text-gray-800 mb-1">
+          Datasets
+        </h1>
+        <nav className="text-sm text-gray-500">
+          <span className="text-blue-600 hover:underline cursor-pointer">Dashboard</span> &raquo; Datasets
+        </nav>
+      </header>
+
+      {/* UPLOAD BUTTON */}
       <div className="flex justify-end">
         <button
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
-          onClick={() => alert('Upload modal not wired yet')}
+          onClick={() => setModalOpen(true)}
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm"
         >
-          + Upload Dataset
+          Upload New Dataset
         </button>
       </div>
 
-      {/* Core datasets panel */}
-      <section className="bg-white border border-gray-200 rounded-xl shadow p-6">
-        <h2 className="text-xl font-semibold text-gray-700 mb-2">Core Datasets</h2>
-        <ul className="list-disc list-inside text-gray-600 text-sm space-y-1">
-          <li>Administrative Boundaries (ADM0–ADM4)</li>
-          <li>Population Data</li>
-          <li>GIS Layers</li>
+      {/* CORE DATASETS */}
+      <section>
+        <h2 className="text-lg font-semibold text-gray-700 mb-2">Core Datasets</h2>
+        <ul className="space-y-2">
+          {coreDatasets.map((ds) => (
+            <li
+              key={ds.id}
+              className="bg-gray-100 border border-gray-300 rounded p-4 shadow-sm"
+            >
+              <div className="text-sm font-medium text-gray-800">{ds.name}</div>
+            </li>
+          ))}
         </ul>
       </section>
 
-      {/* Uploaded datasets panel */}
-      <section className="bg-white border border-gray-200 rounded-xl shadow p-6">
-        <h2 className="text-xl font-semibold text-gray-700 mb-2">Uploaded Datasets</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          These datasets have been uploaded for use in baseline analysis.
-        </p>
-        <div className="text-sm italic text-gray-400">No uploaded datasets yet.</div>
+      {/* OTHER DATASETS */}
+      <section>
+        <h2 className="text-lg font-semibold text-gray-700 mb-2">Other Uploaded Datasets</h2>
+        <ul className="space-y-2">
+          {otherDatasets.map((ds) => (
+            <li
+              key={ds.id}
+              className="bg-white border border-gray-200 rounded p-4 shadow-sm"
+            >
+              <div className="text-sm text-gray-800 font-medium">{ds.name}</div>
+            </li>
+          ))}
+        </ul>
       </section>
-    </div>
+
+      {/* MODAL */}
+      <UploadDatasetModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
+    </main>
   );
 }
