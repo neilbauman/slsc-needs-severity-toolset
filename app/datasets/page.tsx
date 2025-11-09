@@ -14,7 +14,7 @@ const supabase = createClient(
 
 export default function DatasetsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [editDatasetId, setEditDatasetId] = useState<string | null>(null);
+  const [editDataset, setEditDataset] = useState<any | null>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
 
   async function fetchDatasets() {
@@ -26,9 +26,18 @@ export default function DatasetsPage() {
     }
   }
 
+  async function deleteDataset(id: string) {
+    const { error } = await supabase.from("datasets").delete().eq("id", id);
+    if (error) console.error("Failed to delete dataset:", error);
+    else fetchDatasets();
+  }
+
   useEffect(() => {
     fetchDatasets();
   }, []);
+
+  const coreDatasets = datasets.filter((d) => d.category === "core");
+  const rawDatasets = datasets.filter((d) => d.category !== "core");
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -56,22 +65,56 @@ export default function DatasetsPage() {
           </button>
         </div>
 
-        <section>
-          <h3 className="text-lg font-semibold text-gray-700 mb-3">Uploaded Datasets</h3>
+        <section className="mb-8">
+          <h3 className="text-lg font-semibold text-gray-700 mb-3">Core Datasets</h3>
           <div className="space-y-3">
-            {datasets.map((dataset) => (
+            {coreDatasets.map((dataset) => (
               <div
                 key={dataset.id}
                 className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
               >
-                <span className="text-gray-800">{dataset.name}</span>
+                <div>
+                  <p className="text-gray-800 font-medium">{dataset.name}</p>
+                  <p className="text-sm text-gray-500">Admin Level: {dataset.admin_level}, Type: {dataset.type}</p>
+                </div>
                 <div className="flex space-x-2 text-gray-500">
                   <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
                   <Pencil
                     className="w-4 h-4 cursor-pointer hover:text-yellow-500"
-                    onClick={() => setEditDatasetId(dataset.id)}
+                    onClick={() => setEditDataset(dataset)}
                   />
-                  <Trash className="w-4 h-4 cursor-pointer hover:text-red-500" />
+                  <Trash
+                    className="w-4 h-4 cursor-pointer hover:text-red-500"
+                    onClick={() => deleteDataset(dataset.id)}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className="text-lg font-semibold text-gray-700 mb-3">Other Datasets</h3>
+          <div className="space-y-3">
+            {rawDatasets.map((dataset) => (
+              <div
+                key={dataset.id}
+                className="bg-white p-4 rounded shadow-sm flex items-center justify-between"
+              >
+                <div>
+                  <p className="text-gray-800 font-medium">{dataset.name}</p>
+                  <p className="text-sm text-gray-500">Admin Level: {dataset.admin_level}, Type: {dataset.type}</p>
+                </div>
+                <div className="flex space-x-2 text-gray-500">
+                  <Eye className="w-4 h-4 cursor-pointer hover:text-blue-600" />
+                  <Pencil
+                    className="w-4 h-4 cursor-pointer hover:text-yellow-500"
+                    onClick={() => setEditDataset(dataset)}
+                  />
+                  <Trash
+                    className="w-4 h-4 cursor-pointer hover:text-red-500"
+                    onClick={() => deleteDataset(dataset.id)}
+                  />
                 </div>
               </div>
             ))}
@@ -80,7 +123,7 @@ export default function DatasetsPage() {
 
         {showUploadModal && (
           <UploadDatasetModal
-            isOpen={showUploadModal}
+            isOpen={true}
             onClose={() => setShowUploadModal(false)}
             onSave={() => {
               setShowUploadModal(false);
@@ -89,12 +132,13 @@ export default function DatasetsPage() {
           />
         )}
 
-        {editDatasetId && (
+        {editDataset && (
           <EditDatasetModal
-            datasetId={editDatasetId}
-            onClose={() => setEditDatasetId(null)}
+            dataset={editDataset}
+            isOpen={true}
+            onClose={() => setEditDataset(null)}
             onSave={() => {
-              setEditDatasetId(null);
+              setEditDataset(null);
               fetchDatasets();
             }}
           />
