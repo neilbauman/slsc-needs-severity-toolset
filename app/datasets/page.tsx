@@ -4,24 +4,12 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import EditDatasetModal from "@/components/EditDatasetModal";
+import EditDatasetModal from "../../components/EditDatasetModal";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
-const normalizePcode = (p: string | null) => {
-  if (!p) return null;
-  let code = p.trim().toUpperCase();
-  if (!code.startsWith("PH")) code = "PH" + code;
-  if (code.length < 13) {
-    const prefix = code.slice(0, 2);
-    const body = code.slice(2);
-    code = prefix + body.padStart(11, "0");
-  }
-  return code.slice(0, 13);
-};
 
 export default function DatasetsPage() {
   const router = useRouter();
