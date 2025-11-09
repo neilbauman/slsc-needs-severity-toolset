@@ -1,225 +1,191 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabaseClient";
 import Header from "@/components/Header";
+import DerivedDatasetModal from "@/components/DerivedDatasetModal"; // safe placeholder (renders null if stubbed)
 import ViewDatasetModal from "@/components/ViewDatasetModal";
 import EditDatasetModal from "@/components/EditDatasetModal";
 import DeleteDatasetModal from "@/components/DeleteDatasetModal";
-import DerivedDatasetModal from "@/components/DerivedDatasetModal"; // future
-import { Button } from "@/components/ui/button";
-
-interface Dataset {
-  id: string;
-  name: string;
-  category: string | null;
-  type: string;
-  admin_level: string | null;
-  source: string | null;
-  description: string | null;
-  collected_at: string | null;
-  is_derived: boolean;
-  is_baseline: boolean;
-  derived_from: string | null;
-}
-
-const CATEGORY_ORDER = [
-  "Core",
-  "SSC Framework - P1",
-  "SSC Framework - P2",
-  "SSC Framework - P3",
-  "Hazards",
-  "Underlying Vulnerability",
-  "Uncategorized",
-];
+import UploadDatasetModal from "@/components/UploadDatasetModal";
+import { createClient } from "@/lib/supabaseClient";
 
 export default function DatasetsPage() {
-  const supabase = createClient();
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedDataset, setSelectedDataset] = useState<any>(null);
+  const [modalType, setModalType] = useState<
+    "view" | "edit" | "delete" | "upload" | "derived" | null
+  >(null);
 
-  // Modal state
-  const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
-  const [viewOpen, setViewOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [derivedOpen, setDerivedOpen] = useState(false);
+  const supabase = createClient();
 
   useEffect(() => {
     const fetchDatasets = async () => {
-      setLoading(true);
-      const { data, error } = await supabase.from("datasets").select("*");
-      if (error) {
-        console.error("Error fetching datasets:", error);
-      } else {
-        const processed = data.map((d: Dataset) => ({
-          ...d,
-          category: determineCategory(d),
-        }));
-        setDatasets(processed);
+      try {
+        const { data, error } = await supabase.from("datasets").select("*");
+        if (error) throw error;
+        setDatasets(data || []);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
     fetchDatasets();
-  }, []);
+  }, [supabase]);
 
-  const determineCategory = (d: Dataset): string => {
-    if (d.category && CATEGORY_ORDER.includes(d.category)) return d.category;
-
-    const lowerName = d.name?.toLowerCase() || "";
-    if (
-      lowerName.includes("population") ||
-      lowerName.includes("admin") ||
-      lowerName.includes("boundary") ||
-      lowerName.includes("gis")
-    )
-      return "Core";
-
-    if (d.is_baseline) return "Core";
-    return "Uncategorized";
+  const grouped = {
+    Core: datasets.filter((d) => d.category?.toLowerCase() === "core"),
+    "SSC Framework - P1": datasets.filter((d) =>
+      d.category?.toLowerCase().includes("p1")
+    ),
+    "SSC Framework - P2": datasets.filter((d) =>
+      d.category?.toLowerCase().includes("p2")
+    ),
+    "SSC Framework - P3": datasets.filter((d) =>
+      d.category?.toLowerCase().includes("p3")
+    ),
+    Hazards: datasets.filter((d) =>
+      d.category?.toLowerCase().includes("hazard")
+    ),
+    "Underlying Vulnerabilities": datasets.filter((d) =>
+      d.category?.toLowerCase().includes("vulnerability")
+    ),
+    Uncategorized: datasets.filter((d) => !d.category),
   };
 
-  const groupedDatasets = CATEGORY_ORDER.map((cat) => ({
-    category: cat,
-    datasets: datasets.filter((d) => determineCategory(d) === cat),
-  })).filter((g) => g.datasets.length > 0);
-
-  const handleView = (dataset: Dataset) => {
+  const handleAction = (type: "view" | "edit" | "delete", dataset: any) => {
     setSelectedDataset(dataset);
-    setViewOpen(true);
+    setModalType(type);
   };
 
-  const handleEdit = (dataset: Dataset) => {
-    setSelectedDataset(dataset);
-    setEditOpen(true);
-  };
+  if (loading)
+    return (
+      <div className="p-6 text-gray-600 animate-pulse">
+        Loading datasets...
+      </div>
+    );
 
-  const handleDelete = (dataset: Dataset) => {
-    setSelectedDataset(dataset);
-    setDeleteOpen(true);
-  };
-
-  const handleDerived = (dataset: Dataset) => {
-    setSelectedDataset(dataset);
-    setDerivedOpen(true);
-  };
+  if (error)
+    return (
+      <div className="p-6 text-red-600">
+        Error loading datasets: {error}
+      </div>
+    );
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <div className="mx-auto max-w-7xl px-6 py-6">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-semibold text-gray-800">Datasets</h2>
-          <Button
-            onClick={() => setDerivedOpen(true)}
-            className="bg-blue-600 text-white hover:bg-blue-700"
-          >
-            + Derived Dataset
-          </Button>
+          <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
+          <div className="flex space-x-3">
+            <button
+              onClick={() => setModalType("upload")}
+              className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
+            >
+              Upload Dataset
+            </button>
+            <button
+              onClick={() => setModalType("derived")}
+              className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-1"
+            >
+              Create Derived Dataset
+            </button>
+          </div>
         </div>
 
-        {loading ? (
-          <p className="text-gray-500">Loading datasets...</p>
-        ) : groupedDatasets.length === 0 ? (
-          <p className="text-gray-500">No datasets found.</p>
-        ) : (
-          groupedDatasets.map((group) => (
-            <div key={group.category} className="mb-10">
-              <h3 className="text-xl font-semibold text-gray-700 border-b pb-2 mb-4">
-                {group.category}
-              </h3>
-              <div className="grid grid-cols-1 gap-4">
-                {group.datasets.map((d) => (
-                  <div
-                    key={d.id}
-                    className="bg-white border shadow-sm rounded-lg p-4 hover:shadow-md transition"
-                  >
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="text-lg font-medium text-gray-800">
-                          {d.name}
-                          {d.is_derived && (
-                            <span className="ml-2 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">
-                              Derived
-                            </span>
-                          )}
-                        </h4>
-                        <p className="text-sm text-gray-500 mt-1 line-clamp-2">
-                          {d.description || "No description available."}
-                        </p>
-                        <div className="text-xs text-gray-400 mt-1">
-                          {d.admin_level && <span>Level: {d.admin_level}</span>}
-                          {d.source && <span> • Source: {d.source}</span>}
-                          {d.collected_at && (
-                            <span>
-                              {" "}
-                              • Collected:{" "}
-                              {new Date(d.collected_at).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleView(d)}
+        {Object.entries(grouped).map(([group, groupDatasets]) => (
+          <div key={group} className="mb-8">
+            <h2 className="text-xl font-semibold text-gray-700 mb-3 border-b border-gray-200 pb-1">
+              {group}
+            </h2>
+
+            {groupDatasets.length === 0 ? (
+              <p className="text-sm text-gray-500 italic">
+                No datasets available in this category.
+              </p>
+            ) : (
+              <table className="min-w-full border border-gray-200 bg-white rounded shadow-sm">
+                <thead className="bg-gray-100 text-gray-700 text-sm uppercase">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Name</th>
+                    <th className="px-4 py-2 text-left">Type</th>
+                    <th className="px-4 py-2 text-left">Admin Level</th>
+                    <th className="px-4 py-2 text-left">Source</th>
+                    <th className="px-4 py-2 text-left">Collected</th>
+                    <th className="px-4 py-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupDatasets.map((dataset) => (
+                    <tr
+                      key={dataset.id}
+                      className="border-t hover:bg-gray-50 text-sm"
+                    >
+                      <td className="px-4 py-2">{dataset.name}</td>
+                      <td className="px-4 py-2">{dataset.type}</td>
+                      <td className="px-4 py-2">{dataset.admin_level}</td>
+                      <td className="px-4 py-2">{dataset.source}</td>
+                      <td className="px-4 py-2">
+                        {dataset.collected_at
+                          ? new Date(dataset.collected_at).toLocaleDateString()
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right space-x-2">
+                        <button
+                          onClick={() => handleAction("view", dataset)}
+                          className="text-blue-600 hover:underline"
                         >
                           View
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEdit(d)}
+                        </button>
+                        <button
+                          onClick={() => handleAction("edit", dataset)}
+                          className="text-gray-600 hover:underline"
                         >
                           Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDerived(d)}
-                        >
-                          Derived
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDelete(d)}
+                        </button>
+                        <button
+                          onClick={() => handleAction("delete", dataset)}
+                          className="text-red-600 hover:underline"
                         >
                           Delete
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </main>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))}
+      </div>
 
-      {/* Modals */}
-      {viewOpen && selectedDataset && (
+      {modalType === "view" && selectedDataset && (
         <ViewDatasetModal
           dataset={selectedDataset}
-          onClose={() => setViewOpen(false)}
+          onClose={() => setModalType(null)}
         />
       )}
-      {editOpen && selectedDataset && (
+      {modalType === "edit" && selectedDataset && (
         <EditDatasetModal
           dataset={selectedDataset}
-          onClose={() => setEditOpen(false)}
+          onClose={() => setModalType(null)}
         />
       )}
-      {deleteOpen && selectedDataset && (
+      {modalType === "delete" && selectedDataset && (
         <DeleteDatasetModal
           dataset={selectedDataset}
-          onClose={() => setDeleteOpen(false)}
+          onClose={() => setModalType(null)}
         />
       )}
-      {derivedOpen && (
-        <DerivedDatasetModal onClose={() => setDerivedOpen(false)} />
+      {modalType === "upload" && (
+        <UploadDatasetModal onClose={() => setModalType(null)} />
+      )}
+      {modalType === "derived" && (
+        <DerivedDatasetModal onClose={() => setModalType(null)} />
       )}
     </div>
   );
