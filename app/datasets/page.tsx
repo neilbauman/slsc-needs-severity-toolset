@@ -2,248 +2,186 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
-import EditDatasetModal from "../../components/EditDatasetModal";
+import { createClient } from "@/utils/supabase/client";
+import Header from "@/components/Header";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+interface Dataset {
+  id: string;
+  name: string;
+  type: string;
+  admin_level: string;
+  category?: string;
+  description?: string;
+  created_at?: string;
+}
 
 export default function DatasetsPage() {
-  const router = useRouter();
-  const [adminStats, setAdminStats] = useState<any[]>([]);
-  const [gisLayers, setGisLayers] = useState<any[]>([]);
-  const [population, setPopulation] = useState<any[]>([]);
-  const [datasets, setDatasets] = useState<any[]>([]);
+  const supabase = createClient();
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [selectedDataset, setSelectedDataset] = useState<any>(null);
 
   useEffect(() => {
-    const fetchAll = async () => {
+    const fetchDatasets = async () => {
       setLoading(true);
-      const [
-        { data: adminsData },
-        { data: gis },
-        { data: pop },
-        { data: dsets },
-      ] = await Promise.all([
-        supabase.from("admin_boundaries").select("admin_level"),
-        supabase.from("gis_layers").select("*").order("created_at", { ascending: false }),
-        supabase.from("population_data").select("admin_level, source").limit(1),
-        supabase.from("datasets").select("*").order("created_at", { ascending: false }),
-      ]);
+      const { data, error } = await supabase
+        .from("datasets")
+        .select("*")
+        .order("created_at", { ascending: false });
 
-      const groupedAdmins = (adminsData || []).reduce((acc: Record<string, number>, row: any) => {
-        acc[row.admin_level] = (acc[row.admin_level] || 0) + 1;
-        return acc;
-      }, {});
-      const adminStatsArr = Object.entries(groupedAdmins).map(([level, count]) => ({
-        admin_level: level,
-        count,
-      }));
-
-      setAdminStats(adminStatsArr);
-      setGisLayers(gis || []);
-      setPopulation(pop || []);
-      setDatasets(dsets || []);
+      if (error) {
+        console.error("Error fetching datasets:", error);
+      } else {
+        setDatasets(data || []);
+      }
       setLoading(false);
     };
-    fetchAll();
+
+    fetchDatasets();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this dataset?")) return;
-    const { error } = await supabase.from("datasets").delete().eq("id", id);
-    if (error) alert("Delete failed: " + error.message);
-    else setDatasets(datasets.filter((d) => d.id !== id));
+  // Categorize datasets
+  const categorized = {
+    Core: datasets.filter((d) =>
+      ["Admins", "Population", "GIS Boundaries"].some((k) =>
+        d.name.toLowerCase().includes(k.toLowerCase())
+      )
+    ),
+    Baseline: datasets.filter((d) =>
+      ["SSC", "Hazard", "Vulnerability"].some((k) =>
+        (d.category || d.name).toLowerCase().includes(k.toLowerCase())
+      )
+    ),
+    Derived: datasets.filter((d) =>
+      ["Derived", "Density", "Per"].some((k) =>
+        d.name.toLowerCase().includes(k.toLowerCase())
+      )
+    ),
   };
-
-  const openEditModal = (dataset: any) => {
-    setSelectedDataset(dataset);
-    setEditModalOpen(true);
-  };
-
-  if (loading) return <div className="p-10 text-center text-gray-500">Loading datasets...</div>;
-
-  const categories = [
-    "SSC Framework - P1",
-    "SSC Framework - P2",
-    "SSC Framework - P3",
-    "Hazard",
-    "Underlying Vulnerability",
-  ];
-  const grouped = categories.map((cat) => ({
-    name: cat,
-    items: datasets.filter((d) => d.category === cat),
-  }));
 
   return (
     <div>
-      {/* Header bar with controls */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-semibold">All Datasets</h1>
-        <div className="flex gap-3">
-          <button
-            onClick={() => router.push("/datasets/upload")}
-            className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm"
-          >
-            Upload Dataset
-          </button>
-          <button
-            onClick={() => router.push("/datasets/derive")}
-            className="bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 text-sm"
-          >
-            Derive New Dataset
-          </button>
-        </div>
-      </div>
+      <Header />
 
-      {/* Core Data */}
-      <section className="mb-10">
-        <h2 className="text-xl font-semibold mb-3 border-b pb-1">Core Data</h2>
-        <div className="border rounded p-4 mb-4 bg-white">
-          <h3 className="font-semibold mb-2">Administrative Boundaries</h3>
-          <table className="w-full text-sm border-collapse mb-2">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="border p-1 text-left">Admin Level</th>
-                <th className="border p-1 text-right">Count</th>
-              </tr>
-            </thead>
-            <tbody>
-              {adminStats.map((row) => (
-                <tr key={row.admin_level}>
-                  <td className="border p-1">{row.admin_level}</td>
-                  <td className="border p-1 text-right">{row.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="border rounded p-4 mb-4 bg-white">
-          <h3 className="font-semibold mb-1">Population</h3>
-          {population.length > 0 ? (
-            <p className="text-sm text-gray-700">
-              Available at <strong>{population[0].admin_level}</strong> level
-              <br />
-              Source: {population[0].source || "Unknown"}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-800">
+              Datasets
+            </h1>
+            <p className="text-gray-600 text-sm">
+              Manage, categorize, and derive data used in SSC analysis
             </p>
-          ) : (
-            <p className="text-sm text-gray-500">No population data found.</p>
-          )}
-        </div>
-
-        <div className="border rounded p-4 bg-white">
-          <h3 className="font-semibold mb-2">GIS Layers</h3>
-          {gisLayers.length > 0 ? (
-            <table className="w-full text-sm border-collapse">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="border p-1 text-left">Name</th>
-                  <th className="border p-1 text-left">Type</th>
-                  <th className="border p-1 text-left">Source</th>
-                  <th className="border p-1 text-left">Link</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gisLayers.map((l) => (
-                  <tr key={l.id}>
-                    <td className="border p-1">{l.name}</td>
-                    <td className="border p-1">{l.layer_type}</td>
-                    <td className="border p-1">{l.source || "-"}</td>
-                    <td className="border p-1">
-                      {l.data_url ? (
-                        <a
-                          href={l.data_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          View
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <p className="text-sm text-gray-500">No GIS layers registered.</p>
-          )}
-        </div>
-      </section>
-
-      {/* Baseline Datasets */}
-      <section>
-        <h2 className="text-xl font-semibold mb-3 border-b pb-1">Baseline Datasets</h2>
-        {grouped.map((group) => (
-          <div key={group.name} className="border rounded p-4 mb-4 bg-white">
-            <h3 className="font-semibold mb-2">{group.name}</h3>
-            {group.items.length > 0 ? (
-              <table className="w-full text-sm border-collapse">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="border p-1 text-left">Name</th>
-                    <th className="border p-1 text-left">Admin Level</th>
-                    <th className="border p-1 text-left">Type</th>
-                    <th className="border p-1 text-left">Created</th>
-                    <th className="border p-1 text-left">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.items.map((d) => (
-                    <tr key={d.id}>
-                      <td className="border p-1">{d.name}</td>
-                      <td className="border p-1">{d.admin_level}</td>
-                      <td className="border p-1">{d.type}</td>
-                      <td className="border p-1">
-                        {new Date(d.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="border p-1">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => router.push(`/datasets/${d.id}`)}
-                            className="text-blue-600 hover:underline text-sm"
-                          >
-                            View
-                          </button>
-                          <button
-                            onClick={() => openEditModal(d)}
-                            className="text-amber-600 hover:underline text-sm"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDelete(d.id)}
-                            className="text-red-600 hover:underline text-sm"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-sm text-gray-500">No datasets found under {group.name}.</p>
-            )}
           </div>
-        ))}
-      </section>
 
-      {editModalOpen && (
-        <EditDatasetModal
-          dataset={selectedDataset}
-          onClose={() => setEditModalOpen(false)}
-        />
-      )}
+          <Link
+            href="/datasets/upload"
+            className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm hover:bg-blue-700 transition"
+          >
+            + Upload Dataset
+          </Link>
+        </div>
+
+        {loading ? (
+          <p className="text-gray-500">Loading datasets...</p>
+        ) : datasets.length === 0 ? (
+          <p className="text-gray-500">No datasets found.</p>
+        ) : (
+          <div className="space-y-10">
+            {Object.entries(categorized).map(([category, items]) => (
+              <section key={category}>
+                <h2 className="text-xl font-semibold mb-3 text-gray-800">
+                  {category} Datasets
+                </h2>
+                {items.length === 0 ? (
+                  <p className="text-gray-500 text-sm mb-6">
+                    No {category.toLowerCase()} datasets available.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto bg-white rounded-lg shadow">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Name
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Type
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Admin Level
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Category
+                          </th>
+                          <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                        {items.map((dataset) => (
+                          <tr key={dataset.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 text-sm font-medium text-gray-800">
+                              {dataset.name}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-600">
+                              {dataset.type || "—"}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-600">
+                              {dataset.admin_level?.toUpperCase() || "N/A"}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-600">
+                              {dataset.category || "Uncategorized"}
+                            </td>
+                            <td className="px-6 py-4 text-right text-sm space-x-3">
+                              <Link
+                                href={`/datasets/${dataset.id}`}
+                                className="text-blue-600 hover:underline"
+                              >
+                                View
+                              </Link>
+                              <Link
+                                href={`/datasets/edit/${dataset.id}`}
+                                className="text-yellow-600 hover:underline"
+                              >
+                                Edit
+                              </Link>
+                              <button
+                                onClick={async () => {
+                                  if (
+                                    confirm(
+                                      `Are you sure you want to delete "${dataset.name}"?`
+                                    )
+                                  ) {
+                                    const { error } = await supabase
+                                      .from("datasets")
+                                      .delete()
+                                      .eq("id", dataset.id);
+                                    if (!error) {
+                                      setDatasets((prev) =>
+                                        prev.filter((d) => d.id !== dataset.id)
+                                      );
+                                    } else {
+                                      alert("Failed to delete dataset.");
+                                    }
+                                  }
+                                }}
+                                className="text-red-600 hover:underline"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            ))}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
