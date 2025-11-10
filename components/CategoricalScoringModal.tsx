@@ -1,62 +1,80 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { supabaseBrowser as supabase } from "@/lib/supabase/supabaseBrowser";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function CategoricalScoringModal({ dataset, instance, onClose }) {
-  const [categories, setCategories] = useState([]);
-  const [scores, setScores] = useState({});
+  const [categories, setCategories] = useState<string[]>([]);
+  const [scores, setScores] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadCategories = async () => {
+    const load = async () => {
       const { data, error } = await supabase
         .from("dataset_values_categorical")
         .select("category")
         .eq("dataset_id", dataset.id);
-      if (error) console.error(error);
-      else setCategories([...new Set(data.map((r) => r.category))]);
+      if (error) {
+        console.error(error);
+        return;
+      }
+      const unique = Array.from(new Set(data.map((r) => r.category)));
+      setCategories(unique);
     };
-    loadCategories();
+    load();
   }, [dataset.id]);
 
   const handleSave = async () => {
     setSaving(true);
-    const payload = Object.entries(scores).map(([category, score]) => ({
+    const category_scores = Object.entries(scores).map(([category, score]) => ({
       category,
       score: Number(score),
     }));
     const { error } = await supabase.rpc("score_categorical_dataset", {
       instance_id: instance.id,
       dataset_id: dataset.id,
-      category_scores: payload,
+      category_scores,
     });
     setSaving(false);
-    if (error) alert(error.message);
-    else alert("Scores saved!");
+    if (error) {
+      console.error(error);
+      setStatus("Error: " + error.message);
+    } else {
+      setStatus("✅ Scores saved!");
+    }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl shadow-xl w-[600px] p-6">
-        <h3 className="text-lg font-semibold mb-3">
-          Scoring (categorical): {dataset.name}
-        </h3>
-        <table className="w-full text-sm mb-4">
-          <thead><tr><th>Category</th><th>Score (1-5)</th></tr></thead>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+      <div className="bg-white rounded-lg shadow-lg w-[600px] p-6">
+        <h3 className="text-lg font-semibold mb-3">{dataset.name}</h3>
+        <table className="w-full text-sm mb-3 border border-gray-200">
+          <thead className="bg-gray-100">
+            <tr>
+              <th className="p-2">Category</th>
+              <th className="p-2">Score (1–5)</th>
+            </tr>
+          </thead>
           <tbody>
-            {categories.map((cat) => (
-              <tr key={cat}>
-                <td className="p-1">{cat}</td>
-                <td className="p-1">
+            {categories.map((c) => (
+              <tr key={c} className="border-t">
+                <td className="p-2">{c}</td>
+                <td className="p-2">
                   <input
                     type="number"
                     min={1}
                     max={5}
-                    className="border w-16 text-center"
-                    value={scores[cat] ?? ""}
-                    onChange={(e) => setScores({ ...scores, [cat]: e.target.value })}
+                    className="w-20 border border-gray-300 rounded px-1 text-center"
+                    value={scores[c] ?? ""}
+                    onChange={(e) =>
+                      setScores({ ...scores, [c]: Number(e.target.value) })
+                    }
                   />
                 </td>
               </tr>
@@ -64,11 +82,22 @@ export default function CategoricalScoringModal({ dataset, instance, onClose }) 
           </tbody>
         </table>
 
+        {status && <p className="text-xs text-gray-700 mb-2">{status}</p>}
+
         <div className="flex justify-end space-x-3">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving}>
+          <button
+            onClick={onClose}
+            className="px-3 py-1 border border-gray-400 rounded hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 disabled:opacity-60"
+          >
             {saving ? "Saving..." : "Save"}
-          </Button>
+          </button>
         </div>
       </div>
     </div>
