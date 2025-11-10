@@ -11,14 +11,13 @@ interface NumericScoringModalProps {
 
 export default function NumericScoringModal({ instanceId, dataset, onClose }: NumericScoringModalProps) {
   const [method, setMethod] = useState<'threshold' | 'normalize'>('threshold');
-  const [rules, setRules] = useState<any[]>([
-    { min: null, max: null, score: 1 }
-  ]);
+  const [rules, setRules] = useState<any[]>([{ min: null, max: null, score: 1 }]);
   const [normMin, setNormMin] = useState<number>(0);
   const [normMax, setNormMax] = useState<number>(100);
   const [range, setRange] = useState<[number, number]>([1, 5]);
   const [direction, setDirection] = useState<'normal' | 'inverse'>('normal');
   const [saving, setSaving] = useState(false);
+  const [fetchingRange, setFetchingRange] = useState(false);
 
   useEffect(() => {
     loadExistingConfig();
@@ -47,9 +46,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
     }
   };
 
-  const handleAddRule = () => {
-    setRules([...rules, { min: null, max: null, score: 1 }]);
-  };
+  const handleAddRule = () => setRules([...rules, { min: null, max: null, score: 1 }]);
 
   const handleRuleChange = (index: number, field: string, value: any) => {
     const updated = [...rules];
@@ -61,6 +58,34 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
     const updated = [...rules];
     updated.splice(index, 1);
     setRules(updated);
+  };
+
+  const fetchDatasetMinMax = async () => {
+    setFetchingRange(true);
+    try {
+      const { data, error } = await supabase
+        .from('dataset_values_numeric')
+        .select('value')
+        .eq('dataset_id', dataset.id);
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        alert('No numeric values found in this dataset.');
+        return;
+      }
+
+      const values = data.map((v: any) => v.value);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      setNormMin(min);
+      setNormMax(max);
+
+      alert(`✅ Min/Max set from dataset: ${min.toFixed(2)} – ${max.toFixed(2)}`);
+    } catch (err: any) {
+      alert('Error fetching dataset min/max: ' + err.message);
+    } finally {
+      setFetchingRange(false);
+    }
   };
 
   const handleSave = async () => {
@@ -95,7 +120,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
     if (error) {
       alert(`Error saving configuration: ${error.message}`);
     } else {
-      alert('Numeric scoring configuration saved.');
+      alert('✅ Numeric scoring configuration saved.');
       onClose();
     }
 
@@ -108,19 +133,10 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
         {/* Header */}
         <div className="flex justify-between items-start p-4 border-b">
           <div>
-            <h2 className="text-base font-semibold text-gray-800">
-              Configure Numeric Scoring
-            </h2>
-            <p className="text-xs text-gray-500">
-              {dataset.name} ({dataset.category})
-            </p>
+            <h2 className="text-base font-semibold text-gray-800">Configure Numeric Scoring</h2>
+            <p className="text-xs text-gray-500">{dataset.name} ({dataset.category})</p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl font-light"
-          >
-            ×
-          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-light">×</button>
         </div>
 
         {/* Body */}
@@ -158,9 +174,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
                           type="number"
                           className="border rounded-md px-1 py-0.5 w-24"
                           value={r.min ?? ''}
-                          onChange={(e) =>
-                            handleRuleChange(i, 'min', e.target.value)
-                          }
+                          onChange={(e) => handleRuleChange(i, 'min', e.target.value)}
                         />
                       </td>
                       <td className="px-2 py-1">
@@ -168,9 +182,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
                           type="number"
                           className="border rounded-md px-1 py-0.5 w-24"
                           value={r.max ?? ''}
-                          onChange={(e) =>
-                            handleRuleChange(i, 'max', e.target.value)
-                          }
+                          onChange={(e) => handleRuleChange(i, 'max', e.target.value)}
                         />
                       </td>
                       <td className="px-2 py-1">
@@ -178,9 +190,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
                           type="number"
                           className="border rounded-md px-1 py-0.5 w-20"
                           value={r.score}
-                          onChange={(e) =>
-                            handleRuleChange(i, 'score', e.target.value)
-                          }
+                          onChange={(e) => handleRuleChange(i, 'score', e.target.value)}
                         />
                       </td>
                       <td className="px-2 py-1 text-right">
@@ -206,7 +216,9 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
 
           {method === 'normalize' && (
             <div className="space-y-3">
-              <div className="flex gap-4 items-center">
+              <h3 className="font-medium mb-2">Normalization Parameters</h3>
+
+              <div className="flex flex-wrap gap-4 items-center">
                 <label>Min Value:</label>
                 <input
                   type="number"
@@ -221,15 +233,20 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
                   value={normMax}
                   onChange={(e) => setNormMax(parseFloat(e.target.value))}
                 />
+                <button
+                  onClick={fetchDatasetMinMax}
+                  disabled={fetchingRange}
+                  className="bg-gray-200 px-2 py-1 text-xs rounded-md hover:bg-gray-300 disabled:opacity-50"
+                >
+                  {fetchingRange ? 'Fetching…' : '📊 Use dataset min/max'}
+                </button>
               </div>
 
               <div className="flex gap-4 items-center">
                 <label>Score Range:</label>
                 <select
                   value={range.join('-')}
-                  onChange={(e) =>
-                    setRange(e.target.value.split('-').map(Number) as [number, number])
-                  }
+                  onChange={(e) => setRange(e.target.value.split('-').map(Number) as [number, number])}
                   className="border rounded-md px-2 py-1 text-sm"
                 >
                   <option value="1-3">1–3</option>
