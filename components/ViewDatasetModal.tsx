@@ -37,26 +37,28 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
       if (fetchError) throw fetchError;
 
-      // Fetch all boundaries (ADM2–4)
+      // Fetch boundaries for name lookup
       const { data: boundaries, error: boundaryError } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name');
 
       if (boundaryError) throw boundaryError;
 
-      const nameMap = new Map(boundaries.map((b: any) => [b.admin_pcode, b.name]));
+      const nameMap = new Map(boundaries.map((b: any) => [b.admin_pcode.trim(), b.name]));
 
-      // ADM3 Fix: try removing trailing zeros to match ADM4 codes
+      // ADM3 & ADM4 name resolution
       const enriched = (values || []).map((v: any) => {
-        let adminName = nameMap.get(v.admin_pcode);
-        if (!adminName && v.admin_pcode?.length === 11) {
-          const trimmed = v.admin_pcode.replace(/0+$/, ''); // drop trailing zeros
-          adminName = nameMap.get(trimmed);
-        }
-        if (!adminName && v.admin_pcode?.length > 7) {
-          adminName = nameMap.get(v.admin_pcode.slice(0, 7));
-        }
-        return { ...v, admin_name: adminName || '—' };
+        const code = (v.admin_pcode || '').trim();
+
+        let adminName =
+          nameMap.get(code) || // exact
+          nameMap.get(code.slice(0, 9)) || // ADM3 from 11-digit
+          nameMap.get(code.slice(0, 8)) || // fallback trim
+          nameMap.get(code.replace(/0+$/, '')) || // remove trailing zeros
+          nameMap.get(code.slice(0, 6)) || // broad fallback
+          '—';
+
+        return { ...v, admin_name: adminName };
       });
 
       setData(enriched);
