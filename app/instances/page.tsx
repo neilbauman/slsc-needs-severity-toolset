@@ -213,11 +213,13 @@ export default function InstancesPage() {
 
       {/* Dataset Config */}
       {showDatasetConfig && (
-        <DatasetConfigModal
-          instance={showDatasetConfig}
-          onClose={() => setShowDatasetConfig(null)}
-        />
-      )}
+  <DatasetConfigModal
+    dataset={showDatasetConfig.dataset}
+    instanceId={showDatasetConfig.instanceId}
+    onClose={() => setShowDatasetConfig(null)}
+    onSaved={loadInstanceDatasets}
+  />
+)}
     </div>
   );
 }
