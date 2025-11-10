@@ -8,10 +8,7 @@ interface ScoringPreviewModalProps {
   onClose: () => void;
 }
 
-export default function ScoringPreviewModal({
-  instance,
-  onClose,
-}: ScoringPreviewModalProps) {
+export default function ScoringPreviewModal({ instance, onClose }: ScoringPreviewModalProps) {
   const [datasetConfigs, setDatasetConfigs] = useState<any[]>([]);
   const [categoryConfigs, setCategoryConfigs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +20,6 @@ export default function ScoringPreviewModal({
   const loadScoringData = async () => {
     setLoading(true);
     try {
-      // Load dataset-level configs joined with dataset metadata
       const { data: datasetCfg } = await supabase
         .from('instance_dataset_config')
         .select(`
@@ -59,15 +55,19 @@ export default function ScoringPreviewModal({
     return acc;
   }, {});
 
-  const getCategoryWeight = (cat: string) => {
-    const cfg = categoryConfigs.find((c) => c.category === cat);
-    return cfg ? cfg.weight : 1;
-  };
+  // Mock calculation for now (weights normalized)
+  const mockCategoryScores = Object.entries(groupedByCategory).map(([cat]) => {
+    const catCfg = categoryConfigs.find((c) => c.category === cat);
+    const weight = catCfg?.weight ?? 1;
+    const randomScore = Math.random() * 100; // placeholder for real normalized score
+    return { cat, weight, randomScore };
+  });
 
-  const getCategoryAggregation = (cat: string) => {
-    const cfg = categoryConfigs.find((c) => c.category === cat);
-    return cfg ? cfg.aggregation_method : 'mean';
-  };
+  const totalWeight = mockCategoryScores.reduce((a, b) => a + b.weight, 0);
+  const weightedTotal =
+    totalWeight > 0
+      ? mockCategoryScores.reduce((a, b) => a + (b.randomScore * b.weight) / totalWeight, 0)
+      : 0;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
@@ -75,12 +75,8 @@ export default function ScoringPreviewModal({
         {/* Header */}
         <div className="flex justify-between items-start border-b p-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-800">
-              Scoring Preview
-            </h2>
-            <p className="text-xs text-gray-500">
-              Instance: {instance.name}
-            </p>
+            <h2 className="text-base font-semibold text-gray-800">Scoring Preview</h2>
+            <p className="text-xs text-gray-500">Instance: {instance.name}</p>
           </div>
           <button
             onClick={onClose}
@@ -100,58 +96,85 @@ export default function ScoringPreviewModal({
             </p>
           ) : (
             <>
-              {Object.entries(groupedByCategory).map(([cat, cfgs]) => (
-                <div key={cat} className="mb-6 border rounded-md bg-gray-50">
-                  <div className="flex justify-between items-center bg-gray-100 border-b px-3 py-2">
-                    <h3 className="font-semibold text-gray-800">{cat}</h3>
-                    <span className="text-xs text-gray-600">
-                      Aggregation: <strong>{getCategoryAggregation(cat)}</strong> | Weight:{' '}
-                      <strong>{getCategoryWeight(cat)}</strong>
-                    </span>
-                  </div>
+              {Object.entries(groupedByCategory).map(([cat, cfgs]) => {
+                const catCfg = categoryConfigs.find((c) => c.category === cat);
+                const categoryWeight = catCfg?.weight ?? 1;
+                const aggregation = catCfg?.aggregation_method ?? 'mean';
+                const mockScore = mockCategoryScores.find((m) => m.cat === cat)?.randomScore ?? 0;
 
-                  <table className="min-w-full text-xs">
-                    <thead className="bg-gray-200 text-gray-700">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Dataset</th>
-                        <th className="px-3 py-2 text-left">Admin Level</th>
-                        <th className="px-3 py-2 text-left">Type</th>
-                        <th className="px-3 py-2 text-left">Scoring Method</th>
-                        <th className="px-3 py-2 text-left">Direction</th>
-                        <th className="px-3 py-2 text-left">Weight</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cfgs.map((cfg: any) => (
-                        <tr
-                          key={cfg.dataset_id}
-                          className="border-t hover:bg-gray-50 transition"
-                        >
-                          <td className="px-3 py-2 font-medium text-gray-800">
-                            {cfg.datasets?.name}
-                          </td>
-                          <td className="px-3 py-2">{cfg.datasets?.admin_level}</td>
-                          <td className="px-3 py-2 capitalize">{cfg.datasets?.type}</td>
-                          <td className="px-3 py-2">{cfg.scoring_method}</td>
-                          <td className="px-3 py-2 capitalize">{cfg.direction}</td>
-                          <td className="px-3 py-2">{cfg.weight}</td>
+                return (
+                  <div key={cat} className="mb-6 border rounded-md bg-gray-50">
+                    <div className="flex justify-between items-center bg-gray-100 border-b px-3 py-2">
+                      <h3 className="font-semibold text-gray-800">{cat}</h3>
+                      <span className="text-xs text-gray-600">
+                        Aggregation: <strong>{aggregation}</strong> | Weight:{' '}
+                        <strong>{categoryWeight}</strong>
+                      </span>
+                    </div>
+
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-gray-200 text-gray-700">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Dataset</th>
+                          <th className="px-3 py-2 text-left">Admin Level</th>
+                          <th className="px-3 py-2 text-left">Type</th>
+                          <th className="px-3 py-2 text-left">Scoring Method</th>
+                          <th className="px-3 py-2 text-left">Direction</th>
+                          <th className="px-3 py-2 text-left">Weight</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
+                      </thead>
+                      <tbody>
+                        {cfgs.map((cfg: any) => (
+                          <tr key={cfg.dataset_id} className="border-t hover:bg-gray-50 transition">
+                            <td className="px-3 py-2 font-medium text-gray-800">
+                              {cfg.datasets?.name}
+                            </td>
+                            <td className="px-3 py-2">{cfg.datasets?.admin_level}</td>
+                            <td className="px-3 py-2 capitalize">{cfg.datasets?.type}</td>
+                            <td className="px-3 py-2">{cfg.scoring_method}</td>
+                            <td className="px-3 py-2 capitalize">{cfg.direction}</td>
+                            <td className="px-3 py-2">{cfg.weight}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
 
-              {/* Mock overall summary */}
+                    {/* Mock score bar */}
+                    <div className="px-3 py-2 border-t bg-white">
+                      <div className="flex justify-between items-center text-xs text-gray-600 mb-1">
+                        <span>Category Score</span>
+                        <span>{mockScore.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-2 bg-gray-200 rounded">
+                        <div
+                          className="h-2 bg-blue-500 rounded"
+                          style={{ width: `${mockScore}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Composite roll-up */}
               <div className="mt-8 border-t pt-4">
                 <h3 className="text-sm font-semibold text-gray-800 mb-2">
-                  Overall Scoring Summary
+                  Overall Weighted Score
                 </h3>
-                <p className="text-xs text-gray-600">
-                  The instance’s total score is computed as the weighted combination of
-                  category-level scores. Each category score is an aggregation of its
-                  dataset-level normalized values.  
-                  (This view currently previews weights and methods only.)
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 h-3 bg-gray-200 rounded relative">
+                    <div
+                      className="absolute top-0 left-0 h-3 bg-green-600 rounded"
+                      style={{ width: `${weightedTotal}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-sm font-bold text-gray-700">
+                    {weightedTotal.toFixed(1)}%
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  Weighted average of all category scores (normalized for category weights).
+                  Mocked scores are randomized placeholders — ready to be replaced with real computed scores once scoring logic is implemented.
                 </p>
               </div>
             </>
