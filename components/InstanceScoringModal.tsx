@@ -27,7 +27,7 @@ export default function InstanceScoringModal({
   useEffect(() => {
     const load = async () => {
       const { data, error } = await supabase
-        .from('instance_datasets_view') // A materialized or join view of instance datasets
+        .from('instance_datasets_view')
         .select('dataset_id,dataset_name,category,type')
         .eq('instance_id', instance.id);
 
@@ -36,7 +36,6 @@ export default function InstanceScoringModal({
         return;
       }
 
-      // Group by category
       const grouped: Record<string, any[]> = {};
       (data || []).forEach((d: any) => {
         if (!grouped[d.category]) grouped[d.category] = [];
@@ -72,7 +71,6 @@ export default function InstanceScoringModal({
       return;
     }
 
-    // Call a Supabase function to roll up dataset scores
     const { data, error } = await supabase.rpc('score_instance_overall', {
       in_instance_id: instance.id,
       in_method: method,
@@ -191,3 +189,6 @@ export default function InstanceScoringModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
