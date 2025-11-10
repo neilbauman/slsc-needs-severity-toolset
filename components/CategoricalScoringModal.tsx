@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { createClient } from '@/lib/supabase/supabaseBrowser';
+import { createClientBrowser } from '@/lib/supabaseBrowser';
 
 type CategoryRow = { category: string; score?: number | null };
 
