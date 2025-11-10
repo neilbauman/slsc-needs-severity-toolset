@@ -4,14 +4,17 @@ import { useEffect, useState } from "react";
 import UploadDatasetModal from "@/components/UploadDatasetModal";
 import DeriveDatasetModal from "@/components/DeriveDatasetModal";
 import DatasetTable from "@/components/DatasetTable";
+import ViewDatasetModal from "@/components/ViewDatasetModal";
+import EditDatasetModal from "@/components/EditDatasetModal";
+import DeleteDatasetModal from "@/components/DeleteDatasetModal";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function DatasetsPage() {
   const [datasets, setDatasets] = useState([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showDeriveModal, setShowDeriveModal] = useState(false);
-  const [editDataset, setEditDataset] = useState(null);
   const [viewDataset, setViewDataset] = useState(null);
+  const [editDataset, setEditDataset] = useState(null);
   const [deleteDataset, setDeleteDataset] = useState(null);
 
   useEffect(() => {
@@ -107,6 +110,29 @@ export default function DatasetsPage() {
           onClose={() => setShowDeriveModal(false)}
           onDerived={loadDatasets}
           datasets={datasets}
+        />
+      )}
+
+      {viewDataset && (
+        <ViewDatasetModal
+          dataset={viewDataset}
+          onClose={() => setViewDataset(null)}
+        />
+      )}
+
+      {editDataset && (
+        <EditDatasetModal
+          dataset={editDataset}
+          onClose={() => setEditDataset(null)}
+          onUpdated={loadDatasets}
+        />
+      )}
+
+      {deleteDataset && (
+        <DeleteDatasetModal
+          dataset={deleteDataset}
+          onClose={() => setDeleteDataset(null)}
+          onDeleted={loadDatasets}
         />
       )}
     </div>
