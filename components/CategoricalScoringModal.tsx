@@ -15,7 +15,7 @@ export default function CategoricalScoringModal({
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const supabase = createClient();
+  const supabase = createClientBrowser();
   const [rows, setRows] = useState<CategoryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [method, setMethod] = useState<'twenty_percent' | 'custom_percent' | 'median' | 'mode' | 'weighted_mean'>('weighted_mean');
