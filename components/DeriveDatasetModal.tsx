@@ -1,281 +1,144 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 interface DeriveDatasetModalProps {
   datasets: any[];
   onClose: () => void;
-  onDerived: () => void;
+  onDerived: () => Promise<void>;
 }
 
-export default function DeriveDatasetModal({
-  datasets,
-  onClose,
-  onDerived,
-}: DeriveDatasetModalProps) {
-  const [form, setForm] = useState({
-    source1: "",
-    source2: "",
-    new_name: "",
-    new_category: "",
-    new_description: "",
-    operation: "",
-    scalar_value: "",
-    target_admin_level: "ADM3",
-  });
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-
-  const handleChange = (key: string, value: string) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
+export default function DeriveDatasetModal({ datasets, onClose, onDerived }: DeriveDatasetModalProps) {
+  const [sourceIds, setSourceIds] = useState<string[]>([]);
+  const [operation, setOperation] = useState('divide');
+  const [scalarValue, setScalarValue] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newCategory, setNewCategory] = useState('SSC Framework - P3');
+  const [newDescription, setNewDescription] = useState('');
+  const [targetLevel, setTargetLevel] = useState('ADM3');
 
   const handleDerive = async () => {
-    if (!form.source1 || !form.operation || !form.new_name) {
-      setMessage("⚠️ Please fill out required fields.");
-      return;
-    }
-
-    setLoading(true);
-    setMessage("");
-
-    const sourceArray = form.source2
-      ? [form.source1, form.source2]
-      : [form.source1];
-
-    const { data, error } = await supabase.rpc("derive_dataset", {
-      source_datasets: sourceArray,
-      new_name: form.new_name,
-      operation: form.operation,
-      scalar_value: form.scalar_value ? parseFloat(form.scalar_value) : null,
-      new_category: form.new_category || "Derived",
-      new_description: form.new_description || null,
-      target_admin_level: form.target_admin_level,
+    const { error } = await supabase.rpc('derive_dataset', {
+      source_datasets: sourceIds,
+      new_name: newName,
+      operation,
+      scalar_value: scalarValue ? parseFloat(scalarValue) : null,
+      new_category: newCategory,
+      new_description: newDescription,
+      target_admin_level: targetLevel,
     });
 
-    if (error) {
-      console.error("Error deriving dataset:", error);
-      setMessage(`❌ Failed to derive dataset: ${error.message}`);
-    } else {
-      setMessage("✅ Derived dataset created successfully!");
-      await onDerived();
-      setTimeout(onClose, 1200);
-    }
-
-    setLoading(false);
-  };
-
-  // For operation explanations
-  const operationDescriptions: Record<string, string> = {
-    aggregate_sum: "Aggregate up (sum values to higher admin level)",
-    aggregate_mean: "Aggregate up (average values to higher admin level)",
-    disaggregate_population:
-      "Disaggregate down using population as weighting (split values to lower admin level)",
-    multiply: "Multiply two datasets together (element-wise)",
-    divide: "Divide dataset 1 by dataset 2 (e.g., population / evac centers)",
-    add: "Add two datasets together (element-wise)",
-    subtract: "Subtract dataset 2 from dataset 1",
-    scalar: "Multiply or divide by a constant (scalar value)",
+    if (error) console.error(error);
+    else await onDerived();
+    onClose();
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg border border-gray-200 w-[520px] max-h-[80vh] flex flex-col">
-        {/* Header */}
-        <div className="flex justify-between items-center p-4 border-b bg-gray-50">
-          <h2 className="text-lg font-semibold text-gray-800">
-            Derive New Dataset
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-sm"
+      <div className="bg-white rounded-md shadow-md w-full max-w-md p-5">
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">Derive New Dataset</h2>
+
+        <label className="block text-sm mb-2">
+          Source Datasets
+          <select
+            multiple
+            className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+            onChange={e =>
+              setSourceIds(Array.from(e.target.selectedOptions, opt => opt.value))
+            }
           >
-            ✕
-          </button>
-        </div>
+            {datasets.map(ds => (
+              <option key={ds.id} value={ds.id}>
+                {ds.name} ({ds.admin_level})
+              </option>
+            ))}
+          </select>
+        </label>
 
-        {/* Form */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 text-sm space-y-3">
-          {/* Source datasets */}
-          <div>
-            <label className="block text-gray-700 font-medium">
-              Primary Source Dataset
-            </label>
-            <select
-              value={form.source1}
-              onChange={(e) => handleChange("source1", e.target.value)}
-              className="w-full border rounded p-2 mt-1"
-            >
-              <option value="">Select dataset</option>
-              {datasets.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.admin_level})
-                </option>
-              ))}
-            </select>
-          </div>
+        <label className="block text-sm mb-2">
+          Operation
+          <select
+            className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+            value={operation}
+            onChange={e => setOperation(e.target.value)}
+          >
+            <option value="divide">Divide (A ÷ B)</option>
+            <option value="multiply">Multiply (A × B)</option>
+            <option value="add">Add (A + B)</option>
+            <option value="subtract">Subtract (A - B)</option>
+            <option value="scalar">Multiply/Divide by Scalar</option>
+          </select>
+        </label>
 
-          <div>
-            <label className="block text-gray-700 font-medium">
-              Secondary Dataset (optional)
-            </label>
-            <select
-              value={form.source2}
-              onChange={(e) => handleChange("source2", e.target.value)}
-              className="w-full border rounded p-2 mt-1"
-            >
-              <option value="">None</option>
-              {datasets.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.admin_level})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Operation */}
-          <div>
-            <label className="block text-gray-700 font-medium">
-              Operation Type
-            </label>
-            <select
-              value={form.operation}
-              onChange={(e) => handleChange("operation", e.target.value)}
-              className="w-full border rounded p-2 mt-1"
-            >
-              <option value="">Select operation</option>
-              <optgroup label="Aggregate">
-                <option value="aggregate_sum">Aggregate (Sum)</option>
-                <option value="aggregate_mean">Aggregate (Mean)</option>
-              </optgroup>
-              <optgroup label="Disaggregate">
-                <option value="disaggregate_population">
-                  Disaggregate (Weighted by Population)
-                </option>
-              </optgroup>
-              <optgroup label="Arithmetic">
-                <option value="multiply">Multiply (A × B)</option>
-                <option value="divide">Divide (A ÷ B)</option>
-                <option value="add">Add (A + B)</option>
-                <option value="subtract">Subtract (A − B)</option>
-                <option value="scalar">Multiply or Divide by Scalar</option>
-              </optgroup>
-            </select>
-            {form.operation && (
-              <p className="text-xs text-gray-500 mt-1">
-                {operationDescriptions[form.operation] || ""}
-              </p>
-            )}
-          </div>
-
-          {/* Scalar field */}
-          {form.operation === "scalar" && (
-            <div>
-              <label className="block text-gray-700 font-medium">
-                Scalar Value
-              </label>
-              <input
-                type="number"
-                step="any"
-                value={form.scalar_value}
-                onChange={(e) =>
-                  handleChange("scalar_value", e.target.value.trim())
-                }
-                className="w-full border rounded p-2 mt-1"
-                placeholder="e.g., 4.8 for dividing population by average household size"
-              />
-            </div>
-          )}
-
-          {/* Metadata */}
-          <div>
-            <label className="block text-gray-700 font-medium">New Name</label>
+        {operation === 'scalar' && (
+          <label className="block text-sm mb-2">
+            Scalar Value
             <input
-              type="text"
-              value={form.new_name}
-              onChange={(e) => handleChange("new_name", e.target.value)}
-              className="w-full border rounded p-2 mt-1"
-              placeholder="Derived dataset name"
+              className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+              value={scalarValue}
+              onChange={e => setScalarValue(e.target.value)}
             />
-          </div>
+          </label>
+        )}
 
-          <div>
-            <label className="block text-gray-700 font-medium">Category</label>
-            <select
-              value={form.new_category}
-              onChange={(e) => handleChange("new_category", e.target.value)}
-              className="w-full border rounded p-2 mt-1"
-            >
-              <option value="">Select category</option>
-              <option value="SSC Framework - P1">SSC Framework - P1</option>
-              <option value="SSC Framework - P2">SSC Framework - P2</option>
-              <option value="SSC Framework - P3">SSC Framework - P3</option>
-              <option value="Hazard">Hazard</option>
-              <option value="Exposure">Exposure</option>
-              <option value="Vulnerability">Vulnerability</option>
-              <option value="Underlying">Underlying</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
+        <label className="block text-sm mb-2">
+          New Dataset Name
+          <input
+            className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+          />
+        </label>
 
-          <div>
-            <label className="block text-gray-700 font-medium">
-              Description
-            </label>
-            <textarea
-              value={form.new_description}
-              onChange={(e) =>
-                handleChange("new_description", e.target.value)
-              }
-              className="w-full border rounded p-2 mt-1 resize-none h-16"
-              placeholder="Brief explanation of how this dataset is derived"
-            />
-          </div>
-
-          <div>
-            <label className="block text-gray-700 font-medium">
-              Target Admin Level
-            </label>
-            <select
-              value={form.target_admin_level}
-              onChange={(e) =>
-                handleChange("target_admin_level", e.target.value)
-              }
-              className="w-full border rounded p-2 mt-1"
-            >
-              <option value="ADM1">ADM1</option>
-              <option value="ADM2">ADM2</option>
-              <option value="ADM3">ADM3</option>
-              <option value="ADM4">ADM4</option>
-            </select>
-          </div>
-
-          {message && (
-            <div
-              className={`text-sm text-center ${
-                message.startsWith("✅") ? "text-green-600" : "text-red-600"
-              }`}
-            >
-              {message}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end gap-2 p-3 border-t bg-gray-50">
-          <button
-            onClick={onClose}
-            className="px-3 py-1 text-sm border rounded hover:bg-gray-100 text-gray-700"
+        <label className="block text-sm mb-2">
+          Category
+          <select
+            className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+            value={newCategory}
+            onChange={e => setNewCategory(e.target.value)}
           >
+            <option>Core</option>
+            <option>SSC Framework - P1</option>
+            <option>SSC Framework - P2</option>
+            <option>SSC Framework - P3</option>
+            <option>Hazards</option>
+            <option>Underlying Vulnerabilities</option>
+          </select>
+        </label>
+
+        <label className="block text-sm mb-2">
+          Target Admin Level
+          <select
+            className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+            value={targetLevel}
+            onChange={e => setTargetLevel(e.target.value)}
+          >
+            <option>ADM1</option>
+            <option>ADM2</option>
+            <option>ADM3</option>
+            <option>ADM4</option>
+          </select>
+        </label>
+
+        <label className="block text-sm mb-3">
+          Description
+          <textarea
+            className="w-full border rounded-md px-2 py-1 mt-1 text-sm"
+            value={newDescription}
+            onChange={e => setNewDescription(e.target.value)}
+          />
+        </label>
+
+        <div className="flex justify-end space-x-2">
+          <button onClick={onClose} className="px-3 py-1 text-sm text-gray-600">
             Cancel
           </button>
           <button
             onClick={handleDerive}
-            disabled={loading}
-            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            className="px-3 py-1 bg-green-600 text-white rounded-md text-sm"
           >
-            {loading ? "Processing..." : "Create"}
+            Create
           </button>
         </div>
       </div>
