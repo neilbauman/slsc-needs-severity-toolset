@@ -29,13 +29,24 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
     const adminCodes = data?.map((r) => r.admin_pcode).filter(Boolean) || [];
 
-    // ✅ Use single admin_boundaries table, filter by pcode
-    const { data: admins, error: adminErr } = await supabase
-      .from('admin_boundaries')
-      .select('admin_pcode, name')
-      .in('admin_pcode', adminCodes);
+    // Helper: try to fetch admin names from multiple sources
+    const fetchAdmins = async (tableName: string) => {
+      const { data: admins, error: adminErr } = await supabase
+        .from(tableName)
+        .select('admin_pcode, name')
+        .in('admin_pcode', adminCodes);
+      if (adminErr) console.warn(`Admin lookup failed from ${tableName}:`, adminErr.message);
+      return admins || [];
+    };
 
-    if (adminErr) console.warn('Admin lookup failed:', adminErr.message);
+    // Try unified admin_boundaries first
+    let admins = await fetchAdmins('admin_boundaries');
+
+    // If no ADM3 matches found, fallback
+    if (admins.length === 0 && dataset.admin_level === 'ADM3') {
+      console.log('Falling back to admin_boundaries_adm3 for ADM3 names...');
+      admins = await fetchAdmins('admin_boundaries_adm3');
+    }
 
     const adminMap = new Map<string, string>(
       (admins || []).map((a) => [a.admin_pcode, a.name])
