@@ -6,185 +6,237 @@ import { supabase } from '@/lib/supabaseClient';
 
 interface UploadDatasetModalProps {
   onClose: () => void;
-  onUploaded: () => Promise<void>;
+  onUploaded: () => void;
 }
 
-export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatasetModalProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [parsed, setParsed] = useState<any[]>([]);
-  const [pcodeColumn, setPcodeColumn] = useState('');
-  const [valueColumn, setValueColumn] = useState('');
+export default function UploadDatasetModal({
+  onClose,
+  onUploaded,
+}: UploadDatasetModalProps) {
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('Core');
-  const [adminLevel, setAdminLevel] = useState('ADM3');
+  const [category, setCategory] = useState('');
   const [type, setType] = useState<'numeric' | 'categorical'>('numeric');
+  const [adminLevel, setAdminLevel] = useState('');
+  const [description, setDescription] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const categories = [
+    'Core',
+    'SSC Framework - P1',
+    'SSC Framework - P2',
+    'SSC Framework - P3',
+    'Hazards',
+    'Underlying Vulnerability',
+  ];
+
+  const adminLevels = ['ADM2', 'ADM3', 'ADM4'];
+  const types = ['numeric', 'categorical'];
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      setFile(f);
-      Papa.parse(f, {
-        header: true,
-        complete: (results) => {
-          setParsed(results.data);
-        },
-      });
-    }
+    if (f) setFile(f);
   };
 
   const handleUpload = async () => {
-    if (!parsed.length || !pcodeColumn || !valueColumn || !name) {
-      alert('Missing required fields.');
+    if (!name || !category || !adminLevel || !file) {
+      alert('Please complete all required fields.');
       return;
     }
 
     setUploading(true);
 
-    const { data: newDataset, error: dsErr } = await supabase
-      .from('datasets')
-      .insert([
-        {
-          name,
-          category,
-          admin_level: adminLevel,
-          type,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
-      .single();
+    try {
+      // 1️⃣ Parse CSV
+      const text = await file.text();
+      const parsed = Papa.parse(text, { header: true });
+      if (!parsed.data || parsed.data.length === 0) {
+        alert('CSV is empty or invalid.');
+        setUploading(false);
+        return;
+      }
 
-    if (dsErr) {
-      alert(`Error creating dataset: ${dsErr.message}`);
-      setUploading(false);
-      return;
-    }
+      // 2️⃣ Create dataset record
+      const { data: dataset, error: datasetError } = await supabase
+        .from('datasets')
+        .insert([
+          {
+            name,
+            category,
+            type,
+            admin_level: adminLevel,
+            description,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select()
+        .single();
 
-    const valuesTable = type === 'categorical' ? 'dataset_values_categorical' : 'dataset_values_numeric';
-    const rows = parsed.map((r) => ({
-      dataset_id: newDataset.id,
-      admin_pcode: r[pcodeColumn],
-      value: r[valueColumn],
-    }));
+      if (datasetError) throw datasetError;
 
-    const { error: valErr } = await supabase.from(valuesTable).insert(rows);
-    setUploading(false);
+      // 3️⃣ Prepare rows for insertion
+      const rows = parsed.data
+        .filter((r: any) => r.PCode && r.Value !== undefined)
+        .map((r: any) => ({
+          dataset_id: dataset.id,
+          admin_pcode: r.PCode.trim(),
+          value: type === 'numeric' ? Number(r.Value) : r.Value,
+        }));
 
-    if (valErr) alert(`Error inserting values: ${valErr.message}`);
-    else {
-      await onUploaded();
+      if (rows.length === 0) {
+        alert('No valid rows found in CSV.');
+        setUploading(false);
+        return;
+      }
+
+      // 4️⃣ Insert dataset values
+      const targetTable =
+        type === 'numeric'
+          ? 'dataset_values_numeric'
+          : 'dataset_values_categorical';
+
+      const { error: insertError } = await supabase
+        .from(targetTable)
+        .insert(rows);
+
+      if (insertError) throw insertError;
+
+      alert('Dataset uploaded successfully.');
+      onUploaded();
       onClose();
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      alert('Failed to upload dataset.');
+    } finally {
+      setUploading(false);
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
-        <h2 className="text-lg font-semibold mb-4">Upload Dataset</h2>
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Upload Dataset
+        </h2>
 
-        <div className="space-y-3 text-sm">
-          <input type="file" accept=".csv" onChange={handleFile} />
+        <div className="space-y-4">
+          {/* Dataset Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              placeholder="Dataset name"
+            />
+          </div>
 
-          {parsed.length > 0 && (
-            <>
-              <div>
-                <label className="block text-gray-700 mb-1">Dataset Name</label>
-                <input
-                  className="w-full border rounded-md px-3 py-2"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
+          {/* Category */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Category <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+            >
+              <option value="">Select category</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              <div>
-                <label className="block text-gray-700 mb-1">Category</label>
-                <select
-                  className="w-full border rounded-md px-3 py-2"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                >
-                  <option value="Core">Core</option>
-                  <option value="SSC Framework - P1">SSC Framework - P1</option>
-                  <option value="SSC Framework - P2">SSC Framework - P2</option>
-                  <option value="SSC Framework - P3">SSC Framework - P3</option>
-                  <option value="Hazards">Hazards</option>
-                  <option value="Underlying Vulnerabilities">Underlying Vulnerabilities</option>
-                </select>
-              </div>
+          {/* Type */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Type <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as 'numeric' | 'categorical')}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+            >
+              {types.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-gray-700 mb-1">PCode Column</label>
-                  <select
-                    className="w-full border rounded-md px-3 py-2"
-                    onChange={(e) => setPcodeColumn(e.target.value)}
-                  >
-                    <option value="">Select...</option>
-                    {Object.keys(parsed[0]).map((col) => (
-                      <option key={col}>{col}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-gray-700 mb-1">Value Column</label>
-                  <select
-                    className="w-full border rounded-md px-3 py-2"
-                    onChange={(e) => setValueColumn(e.target.value)}
-                  >
-                    <option value="">Select...</option>
-                    {Object.keys(parsed[0]).map((col) => (
-                      <option key={col}>{col}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+          {/* Admin Level */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Admin Level <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={adminLevel}
+              onChange={(e) => setAdminLevel(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+            >
+              <option value="">Select admin level</option>
+              {adminLevels.map((lvl) => (
+                <option key={lvl} value={lvl}>
+                  {lvl}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-gray-700 mb-1">Admin Level</label>
-                  <select
-                    className="w-full border rounded-md px-3 py-2"
-                    value={adminLevel}
-                    onChange={(e) => setAdminLevel(e.target.value)}
-                  >
-                    <option value="ADM1">ADM1</option>
-                    <option value="ADM2">ADM2</option>
-                    <option value="ADM3">ADM3</option>
-                    <option value="ADM4">ADM4</option>
-                  </select>
-                </div>
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              placeholder="Describe the dataset..."
+            />
+          </div>
 
-                <div>
-                  <label className="block text-gray-700 mb-1">Type</label>
-                  <select
-                    className="w-full border rounded-md px-3 py-2"
-                    value={type}
-                    onChange={(e) => setType(e.target.value as any)}
-                  >
-                    <option value="numeric">Numeric</option>
-                    <option value="categorical">Categorical</option>
-                  </select>
-                </div>
-              </div>
-
-              <button
-                onClick={handleUpload}
-                disabled={uploading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md w-full mt-3 hover:bg-blue-700 disabled:opacity-50"
-              >
-                {uploading ? 'Uploading...' : 'Upload Dataset'}
-              </button>
-            </>
-          )}
+          {/* File Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              CSV File <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileChange}
+              className="w-full text-sm text-gray-700"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Expected headers: <code>PCode, Value</code>
+            </p>
+          </div>
         </div>
 
-        <button
-          onClick={onClose}
-          className="text-sm text-gray-600 hover:text-gray-900 mt-3 block mx-auto"
-        >
-          Cancel
-        </button>
+        <div className="flex justify-end mt-6 space-x-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md"
+            disabled={uploading}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleUpload}
+            disabled={uploading}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md"
+          >
+            {uploading ? 'Uploading...' : 'Upload'}
+          </button>
+        </div>
       </div>
     </div>
   );
