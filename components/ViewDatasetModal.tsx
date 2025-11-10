@@ -10,9 +10,7 @@ interface ViewDatasetModalProps {
 
 export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalProps) {
   const [rows, setRows] = useState<any[]>([]);
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(
-    null
-  );
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
@@ -22,20 +20,36 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       .from(table)
       .select('admin_pcode, value')
       .eq('dataset_id', dataset.id)
-      .limit(2000);
-    if (error) console.error(error);
+      .limit(3000);
+    if (error) {
+      console.error(error);
+      setLoading(false);
+      return;
+    }
 
-    // Join admin names
-    const adminCodes = data?.map((r) => r.admin_pcode) || [];
-    const { data: admins } = await supabase
-      .from('admin_boundaries')
+    const adminCodes = data?.map((r) => r.admin_pcode).filter(Boolean) || [];
+
+    // Dynamically pick admin table
+    const adminTable = dataset.admin_level
+      ? `admin_boundaries_${dataset.admin_level.toLowerCase()}`
+      : 'admin_boundaries';
+
+    // Try to load matching names
+    const { data: admins, error: adminErr } = await supabase
+      .from(adminTable)
       .select('admin_pcode, name')
       .in('admin_pcode', adminCodes);
+
+    if (adminErr) console.warn('Admin name lookup fallback:', adminErr.message);
+
+    const adminMap = new Map<string, string>(
+      (admins || []).map((a) => [a.admin_pcode, a.name])
+    );
 
     const combined =
       data?.map((r) => ({
         ...r,
-        name: admins?.find((a) => a.admin_pcode === r.admin_pcode)?.name || 'Unknown',
+        name: adminMap.get(r.admin_pcode) || 'Unknown',
       })) || [];
 
     setRows(combined);
