@@ -2,17 +2,32 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: () => void; onDerived: () => void }) {
+export default function DeriveDatasetModal({
+  onClose,
+  onDerived,
+}: {
+  onClose: () => void;
+  onDerived: () => void;
+}) {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [dataset1, setDataset1] = useState('');
   const [dataset2, setDataset2] = useState('');
   const [operation, setOperation] = useState('divide');
   const [scalarValue, setScalarValue] = useState('');
   const [newName, setNewName] = useState('');
-  const [newCategory, setNewCategory] = useState('Derived');
+  const [category, setCategory] = useState('');
   const [targetAdminLevel, setTargetAdminLevel] = useState('ADM3');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const categoryOptions = [
+    'Core',
+    'SSC Framework - P1',
+    'SSC Framework - P2',
+    'SSC Framework - P3',
+    'Underlying Vulnerability',
+    'Derived',
+  ];
 
   useEffect(() => {
     async function loadDatasets() {
@@ -26,17 +41,22 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
   }, []);
 
   const handleDerive = async () => {
+    if (!dataset1 || !newName || !category) {
+      setError('Please complete all required fields.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
       const sources = dataset2 ? [dataset1, dataset2] : [dataset1];
-      const { data, error } = await supabase.rpc('derive_dataset', {
+      const { error } = await supabase.rpc('derive_dataset', {
         source_datasets: sources,
         new_name: newName,
         operation,
         scalar_value: scalarValue ? parseFloat(scalarValue) : null,
-        new_category: newCategory,
+        new_category: category,
         target_admin_level: targetAdminLevel,
       });
 
@@ -53,14 +73,15 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-lg max-h-[80vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Create Derived Dataset</h2>
+      <div className="bg-white p-5 rounded-lg shadow-lg w-full max-w-md max-h-[80vh] overflow-y-auto text-sm">
+        <h2 className="text-base font-semibold mb-3">Create Derived Dataset</h2>
 
         {error && <p className="text-red-600 mb-2">{error}</p>}
 
-        <label className="block text-sm font-medium mb-1">Source Dataset 1</label>
+        {/* Source Dataset 1 */}
+        <label className="block font-medium mb-1">Source Dataset 1 *</label>
         <select
-          className="w-full border p-2 rounded mb-3"
+          className="w-full border rounded p-1.5 mb-2 text-sm"
           value={dataset1}
           onChange={(e) => setDataset1(e.target.value)}
         >
@@ -72,9 +93,10 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
           ))}
         </select>
 
-        <label className="block text-sm font-medium mb-1">Operation</label>
+        {/* Operation */}
+        <label className="block font-medium mb-1">Operation *</label>
         <select
-          className="w-full border p-2 rounded mb-3"
+          className="w-full border rounded p-1.5 mb-2 text-sm"
           value={operation}
           onChange={(e) => setOperation(e.target.value)}
         >
@@ -82,14 +104,15 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
           <option value="multiply">Multiply</option>
           <option value="add">Add</option>
           <option value="subtract">Subtract</option>
-          <option value="scalar">Scalar (Dataset1 / value)</option>
+          <option value="scalar">Scalar (Dataset1 ÷ value)</option>
         </select>
 
+        {/* Source Dataset 2 */}
         {operation !== 'scalar' && (
           <>
-            <label className="block text-sm font-medium mb-1">Source Dataset 2</label>
+            <label className="block font-medium mb-1">Source Dataset 2 *</label>
             <select
-              className="w-full border p-2 rounded mb-3"
+              className="w-full border rounded p-1.5 mb-2 text-sm"
               value={dataset2}
               onChange={(e) => setDataset2(e.target.value)}
               disabled={operation === 'scalar'}
@@ -104,12 +127,14 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
           </>
         )}
 
+        {/* Scalar value */}
         {operation === 'scalar' && (
           <>
-            <label className="block text-sm font-medium mb-1">Scalar Value</label>
+            <label className="block font-medium mb-1">Scalar Value *</label>
             <input
               type="number"
-              className="w-full border p-2 rounded mb-3"
+              step="any"
+              className="w-full border rounded p-1.5 mb-2 text-sm"
               placeholder="e.g. 4.8"
               value={scalarValue}
               onChange={(e) => setScalarValue(e.target.value)}
@@ -117,26 +142,35 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
           </>
         )}
 
-        <label className="block text-sm font-medium mb-1">New Dataset Name</label>
+        {/* New dataset name */}
+        <label className="block font-medium mb-1">New Dataset Name *</label>
         <input
           type="text"
-          className="w-full border p-2 rounded mb-3"
+          className="w-full border rounded p-1.5 mb-2 text-sm"
           placeholder="e.g. Population Density"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
         />
 
-        <label className="block text-sm font-medium mb-1">Category</label>
-        <input
-          type="text"
-          className="w-full border p-2 rounded mb-3"
-          value={newCategory}
-          onChange={(e) => setNewCategory(e.target.value)}
-        />
-
-        <label className="block text-sm font-medium mb-1">Target Admin Level</label>
+        {/* Category */}
+        <label className="block font-medium mb-1">Category *</label>
         <select
-          className="w-full border p-2 rounded mb-4"
+          className="w-full border rounded p-1.5 mb-2 text-sm"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+        >
+          <option value="">Select category</option>
+          {categoryOptions.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+
+        {/* Target Admin Level */}
+        <label className="block font-medium mb-1">Target Admin Level *</label>
+        <select
+          className="w-full border rounded p-1.5 mb-3 text-sm"
           value={targetAdminLevel}
           onChange={(e) => setTargetAdminLevel(e.target.value)}
         >
@@ -146,14 +180,18 @@ export default function DeriveDatasetModal({ onClose, onDerived }: { onClose: ()
           <option value="ADM4">ADM4</option>
         </select>
 
+        {/* Actions */}
         <div className="flex justify-end gap-3 mt-4">
-          <button className="px-4 py-2 bg-gray-200 rounded" onClick={onClose}>
+          <button
+            className="px-3 py-1.5 bg-gray-200 rounded text-sm"
+            onClick={onClose}
+          >
             Cancel
           </button>
           <button
             onClick={handleDerive}
             disabled={loading || !dataset1 || !newName}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            className="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
           >
             {loading ? 'Processing...' : 'Materialize Dataset'}
           </button>
