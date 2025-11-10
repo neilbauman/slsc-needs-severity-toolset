@@ -18,6 +18,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
   const [direction, setDirection] = useState<'normal' | 'inverse'>('normal');
   const [saving, setSaving] = useState(false);
   const [fetchingRange, setFetchingRange] = useState(false);
+  const [trimPercent, setTrimPercent] = useState<number>(5);
 
   useEffect(() => {
     loadExistingConfig();
@@ -43,6 +44,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
       setDirection(cfg.direction || 'normal');
       setNormMin(cfg.min_value ?? 0);
       setNormMax(cfg.max_value ?? 100);
+      setTrimPercent(cfg.trim_percent ?? 5);
     }
   };
 
@@ -74,13 +76,24 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
         return;
       }
 
-      const values = data.map((v: any) => v.value);
+      let values = data.map((v: any) => v.value).filter((v: number) => !isNaN(v));
+      values.sort((a, b) => a - b);
+
+      if (trimPercent > 0 && values.length > 20) {
+        const trimCount = Math.floor((values.length * trimPercent) / 100);
+        values = values.slice(trimCount, values.length - trimCount);
+      }
+
       const min = Math.min(...values);
       const max = Math.max(...values);
       setNormMin(min);
       setNormMax(max);
 
-      alert(`✅ Min/Max set from dataset: ${min.toFixed(2)} – ${max.toFixed(2)}`);
+      alert(
+        `✅ Min/Max set from dataset: ${min.toFixed(2)} – ${max.toFixed(2)} ${
+          trimPercent > 0 ? `(trimmed ${trimPercent}% each side)` : ''
+        }`
+      );
     } catch (err: any) {
       alert('Error fetching dataset min/max: ' + err.message);
     } finally {
@@ -98,8 +111,8 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
         rules: rules.map((r) => ({
           min: r.min ? parseFloat(r.min) : null,
           max: r.max ? parseFloat(r.max) : null,
-          score: parseFloat(r.score)
-        }))
+          score: parseFloat(r.score),
+        })),
       };
     } else if (method === 'normalize') {
       score_config = {
@@ -107,7 +120,8 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
         min_value: parseFloat(normMin.toString()),
         max_value: parseFloat(normMax.toString()),
         range,
-        direction
+        direction,
+        trim_percent: trimPercent,
       };
     }
 
@@ -136,7 +150,9 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
             <h2 className="text-base font-semibold text-gray-800">Configure Numeric Scoring</h2>
             <p className="text-xs text-gray-500">{dataset.name} ({dataset.category})</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-light">×</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-light">
+            ×
+          </button>
         </div>
 
         {/* Body */}
@@ -154,6 +170,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
             </select>
           </div>
 
+          {/* Threshold-based Scoring */}
           {method === 'threshold' && (
             <div>
               <h3 className="font-medium mb-2">Threshold Rules</h3>
@@ -214,11 +231,12 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
             </div>
           )}
 
+          {/* Normalization */}
           {method === 'normalize' && (
             <div className="space-y-3">
               <h3 className="font-medium mb-2">Normalization Parameters</h3>
 
-              <div className="flex flex-wrap gap-4 items-center">
+              <div className="flex flex-wrap gap-3 items-center">
                 <label>Min Value:</label>
                 <input
                   type="number"
@@ -233,6 +251,7 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
                   value={normMax}
                   onChange={(e) => setNormMax(parseFloat(e.target.value))}
                 />
+
                 <button
                   onClick={fetchDatasetMinMax}
                   disabled={fetchingRange}
@@ -240,13 +259,25 @@ export default function NumericScoringModal({ instanceId, dataset, onClose }: Nu
                 >
                   {fetchingRange ? 'Fetching…' : '📊 Use dataset min/max'}
                 </button>
+
+                <label className="ml-4">Trim % (each side):</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  className="border rounded-md px-2 py-1 w-16"
+                  value={trimPercent}
+                  onChange={(e) => setTrimPercent(parseFloat(e.target.value))}
+                />
               </div>
 
               <div className="flex gap-4 items-center">
                 <label>Score Range:</label>
                 <select
                   value={range.join('-')}
-                  onChange={(e) => setRange(e.target.value.split('-').map(Number) as [number, number])}
+                  onChange={(e) =>
+                    setRange(e.target.value.split('-').map(Number) as [number, number])
+                  }
                   className="border rounded-md px-2 py-1 text-sm"
                 >
                   <option value="1-3">1–3</option>
