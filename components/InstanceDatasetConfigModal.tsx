@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 interface InstanceDatasetConfigModalProps {
@@ -13,202 +13,194 @@ export default function InstanceDatasetConfigModal({
   onClose,
 }: InstanceDatasetConfigModalProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
-  const [configs, setConfigs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Load datasets & existing configs
   useEffect(() => {
-    if (instance) loadData();
+    loadData();
   }, [instance]);
 
   const loadData = async () => {
     setLoading(true);
+    try {
+      const { data: dsData } = await supabase
+        .from('datasets')
+        .select('id, name, category, type, admin_level')
+        .order('category');
 
-    // Get all datasets
-    const { data: dsData, error: dsError } = await supabase
-      .from('datasets')
-      .select('*')
-      .order('category', { ascending: true });
-    if (dsError) console.error(dsError);
+      const { data: cfgData } = await supabase
+        .from('instance_dataset_config')
+        .select('*')
+        .eq('instance_id', instance.id);
 
-    // Get existing configs for this instance
-    const { data: cfgData, error: cfgError } = await supabase
-      .from('instance_dataset_config')
-      .select('*')
-      .eq('instance_id', instance.id);
-    if (cfgError) console.error(cfgError);
+      const cfgMap: Record<string, any> = {};
+      (cfgData || []).forEach((c) => {
+        cfgMap[c.dataset_id] = c;
+      });
 
-    // Merge existing configs with datasets
-    const merged = (dsData || []).map((d: any) => {
-      const found = (cfgData || []).find((c) => c.dataset_id === d.id);
-      return (
-        found || {
-          dataset_id: d.id,
-          name: d.name,
-          category: d.category,
-          type: d.type,
-          scoring_method: 'minmax',
-          direction: 'positive',
-          weight: 1,
-        }
-      );
-    });
-
-    setDatasets(dsData || []);
-    setConfigs(merged);
-    setLoading(false);
+      setDatasets(dsData || []);
+      setConfig(cfgMap);
+    } catch (err) {
+      console.error('Error loading dataset configs', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleChange = (index: number, field: string, value: any) => {
-    const updated = [...configs];
-    updated[index] = { ...updated[index], [field]: value };
-    setConfigs(updated);
+  const handleChange = (datasetId: string, field: string, value: any) => {
+    setConfig((prev) => ({
+      ...prev,
+      [datasetId]: {
+        ...prev[datasetId],
+        [field]: value,
+      },
+    }));
   };
 
   const handleSave = async () => {
     setSaving(true);
-
-    for (const cfg of configs) {
-      const { error } = await supabase.from('instance_dataset_config').upsert({
+    try {
+      const updates = Object.entries(config).map(([dataset_id, c]) => ({
         instance_id: instance.id,
-        dataset_id: cfg.dataset_id,
-        scoring_method: cfg.scoring_method,
-        direction: cfg.direction,
-        weight: parseFloat(cfg.weight) || 1,
-      });
-      if (error) console.error('Error saving config:', error);
+        dataset_id,
+        scoring_method: c.scoring_method || 'minmax',
+        direction: c.direction || 'positive',
+        weight: parseFloat(c.weight || 1),
+      }));
+
+      await supabase.from('instance_dataset_config').delete().eq('instance_id', instance.id);
+      if (updates.length > 0)
+        await supabase.from('instance_dataset_config').insert(updates);
+
+      onClose();
+    } catch (err) {
+      console.error('Error saving dataset configs', err);
+      alert('Error saving dataset configurations.');
+    } finally {
+      setSaving(false);
     }
-
-    setSaving(false);
-    onClose();
   };
-
-  const grouped = configs.reduce((acc: any, cfg: any) => {
-    const cat = cfg.category || 'Uncategorized';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(cfg);
-    return acc;
-  }, {});
-
-  const orderedCategories = [
-    'Core',
-    'SSC Framework - P1',
-    'SSC Framework - P2',
-    'SSC Framework - P3',
-    'Hazards',
-    'Underlying Vulnerability',
-  ];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-6 max-h-[80vh] flex flex-col">
-        <h2 className="text-lg font-semibold mb-2">
-          Configure Dataset Scoring
-        </h2>
-        <p className="text-sm text-gray-600 mb-4">
-          Define how each dataset is scored in{' '}
-          <strong>{instance.name}</strong>.
-        </p>
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-start border-b p-4">
+          <div>
+            <h2 className="text-base font-semibold text-gray-800">
+              Configure Dataset Scoring
+            </h2>
+            <p className="text-xs text-gray-500">
+              Instance: {instance.name}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl font-light"
+          >
+            ×
+          </button>
+        </div>
 
-        {loading ? (
-          <p className="text-gray-500 text-sm">Loading datasets…</p>
-        ) : (
-          <div className="flex-grow overflow-y-auto border rounded-md">
-            {orderedCategories.map((cat) => {
-              const items = grouped[cat] || [];
-              if (items.length === 0) return null;
-              return (
-                <div key={cat} className="border-b last:border-0">
-                  <h3 className="bg-gray-100 text-gray-800 font-semibold text-sm px-3 py-2">
-                    {cat}
-                  </h3>
-                  <table className="min-w-full text-[12px]">
-                    <thead className="bg-gray-50 text-gray-700">
-                      <tr>
-                        <th className="px-3 py-1 text-left">Dataset</th>
-                        <th className="px-3 py-1 text-left">Type</th>
-                        <th className="px-3 py-1 text-left">Scoring</th>
-                        <th className="px-3 py-1 text-left">Direction</th>
-                        <th className="px-3 py-1 text-left">Weight</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((cfg: any, i: number) => (
+        {/* Body */}
+        <div className="flex-grow overflow-y-auto p-4 text-[12px]">
+          {loading ? (
+            <p className="text-gray-500 text-sm">Loading datasets...</p>
+          ) : (
+            <>
+              {datasets.length === 0 ? (
+                <p className="text-gray-500 text-sm">No datasets available.</p>
+              ) : (
+                <table className="min-w-full border text-xs">
+                  <thead className="bg-gray-100 text-gray-700">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Dataset</th>
+                      <th className="px-3 py-2 text-left">Category</th>
+                      <th className="px-3 py-2 text-left">Admin Level</th>
+                      <th className="px-3 py-2 text-left">Scoring Method</th>
+                      <th className="px-3 py-2 text-left">Direction</th>
+                      <th className="px-3 py-2 text-left">Weight</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datasets.map((ds) => {
+                      const c = config[ds.id] || {};
+                      return (
                         <tr
-                          key={cfg.dataset_id}
+                          key={ds.id}
                           className="border-t hover:bg-gray-50 transition"
                         >
-                          <td className="px-3 py-1">{cfg.name}</td>
-                          <td className="px-3 py-1 capitalize">{cfg.type}</td>
+                          <td className="px-3 py-2 text-gray-800">{ds.name}</td>
+                          <td className="px-3 py-2">{ds.category}</td>
+                          <td className="px-3 py-2">{ds.admin_level}</td>
 
-                          <td className="px-3 py-1">
+                          <td className="px-3 py-2">
                             <select
-                              value={cfg.scoring_method}
+                              value={c.scoring_method || 'minmax'}
                               onChange={(e) =>
-                                handleChange(i, 'scoring_method', e.target.value)
+                                handleChange(ds.id, 'scoring_method', e.target.value)
                               }
                               className="border rounded-md p-1 text-xs w-full"
                             >
-                              <option value="minmax">Min-Max</option>
-                              <option value="zscore">Z-Score</option>
-                              <option value="quantile">Quantile</option>
-                              <option value="threshold">Threshold</option>
+                              <option value="minmax">Min–Max Normalization</option>
+                              <option value="zscore">Z-Score Standardization</option>
+                              <option value="quantile">Quantile Ranking</option>
+                              <option value="threshold">Threshold (binary)</option>
                             </select>
                           </td>
 
-                          <td className="px-3 py-1">
+                          <td className="px-3 py-2">
                             <select
-                              value={cfg.direction}
+                              value={c.direction || 'positive'}
                               onChange={(e) =>
-                                handleChange(i, 'direction', e.target.value)
+                                handleChange(ds.id, 'direction', e.target.value)
                               }
                               className="border rounded-md p-1 text-xs w-full"
                             >
-                              <option value="positive">Higher = Worse</option>
-                              <option value="negative">Higher = Better</option>
+                              <option value="positive">Positive (higher = worse)</option>
+                              <option value="negative">Negative (higher = better)</option>
                             </select>
                           </td>
 
-                          <td className="px-3 py-1">
+                          <td className="px-3 py-2">
                             <input
                               type="number"
-                              min="0"
-                              max="10"
                               step="0.1"
-                              value={cfg.weight}
+                              value={c.weight || 1}
                               onChange={(e) =>
-                                handleChange(i, 'weight', e.target.value)
+                                handleChange(ds.id, 'weight', e.target.value)
                               }
-                              className="border rounded-md p-1 text-xs w-16 text-center"
+                              className="border rounded-md p-1 text-xs w-full"
                             />
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        {/* Footer */}
+        <div className="border-t p-3 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm bg-gray-200 rounded-md hover:bg-gray-300"
+            className="bg-gray-200 px-3 py-1.5 rounded-md text-sm hover:bg-gray-300"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className={`px-3 py-1.5 text-sm rounded-md text-white ${
-              saving
-                ? 'bg-blue-300 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700'
+            className={`px-3 py-1.5 rounded-md text-sm text-white ${
+              saving ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
-            {saving ? 'Saving...' : 'Save Scoring Configuration'}
+            {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
