@@ -29,35 +29,32 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       const table =
         dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
 
+      // 1️⃣ Get dataset values
       const { data: values, error: fetchError } = await supabase
         .from(table)
         .select('*')
         .eq('dataset_id', dataset.id)
-        .limit(1000);
+        .limit(2000);
 
       if (fetchError) throw fetchError;
 
-      // Fetch boundaries for name lookup
+      // 2️⃣ Fetch boundaries filtered by relevant admin level
       const { data: boundaries, error: boundaryError } = await supabase
         .from('admin_boundaries')
-        .select('admin_pcode, name');
+        .select('admin_pcode, admin_level, name');
 
       if (boundaryError) throw boundaryError;
 
-      const nameMap = new Map(boundaries.map((b: any) => [b.admin_pcode.trim(), b.name]));
+      // 3️⃣ Build lookup map by full pcode for the dataset's admin level
+      const filtered = boundaries.filter(
+        (b: any) => b.admin_level === dataset.admin_level
+      );
+      const nameMap = new Map(filtered.map((b: any) => [b.admin_pcode.trim(), b.name]));
 
-      // ADM3 & ADM4 name resolution
+      // 4️⃣ Assign names
       const enriched = (values || []).map((v: any) => {
         const code = (v.admin_pcode || '').trim();
-
-        let adminName =
-          nameMap.get(code) || // exact
-          nameMap.get(code.slice(0, 9)) || // ADM3 from 11-digit
-          nameMap.get(code.slice(0, 8)) || // fallback trim
-          nameMap.get(code.replace(/0+$/, '')) || // remove trailing zeros
-          nameMap.get(code.slice(0, 6)) || // broad fallback
-          '—';
-
+        const adminName = nameMap.get(code) || '—';
         return { ...v, admin_name: adminName };
       });
 
