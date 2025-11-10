@@ -128,6 +128,7 @@ export default function DatasetsPage() {
         )}
       </div>
 
+      {/* Upload Modal */}
       {showUploadModal && (
         <UploadDatasetModal
           onClose={() => setShowUploadModal(false)}
@@ -135,6 +136,7 @@ export default function DatasetsPage() {
         />
       )}
 
+      {/* Derive Modal */}
       {showDeriveModal && (
         <DeriveDatasetModal
           datasets={datasets}
@@ -143,6 +145,7 @@ export default function DatasetsPage() {
         />
       )}
 
+      {/* View Modal */}
       {viewDataset && (
         <ViewDatasetModal
           dataset={viewDataset}
@@ -150,11 +153,12 @@ export default function DatasetsPage() {
         />
       )}
 
+      {/* Edit Modal */}
       {editDataset && (
         <EditDatasetModal
           dataset={editDataset}
           onClose={() => setEditDataset(null)}
-          onSaved={loadDatasets}
+          onSave={loadDatasets}
         />
       )}
     </div>
