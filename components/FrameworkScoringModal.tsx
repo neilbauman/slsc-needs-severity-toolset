@@ -3,17 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-/**
- * FrameworkScoringModal
- * ------------------------------------------------------------
- * Power-user modal for rolling up:
- *   - per-category (multiple datasets per category)
- *   - SSC Framework (Pillar 1, Pillar 2, Pillar 3)
- *   - Final Overall (SSC + Hazards/Risks + Underlying Vulnerabilities)
- *
- * No shadcn; Tailwind only. Calls RPC: score_framework_aggregate.
- */
-
 type Method = 'average' | 'median' | 'worst_case' | 'custom_weighted';
 
 type GroupKey =
@@ -34,12 +23,12 @@ type CategoryCfg = {
   key: GroupKey;
   include: boolean;
   method: Method;
-  weights: Record<string, number>; // dataset_id -> weight (only when custom_weighted)
+  weights: Record<string, number>;
 };
 
 type RollupCfg = {
   method: Method;
-  weights: Record<string, number>; // key -> weight when custom_weighted
+  weights: Record<string, number>;
 };
 
 interface Props {
@@ -61,7 +50,6 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
   const [datasets, setDatasets] = useState<UiDataset[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Per-category configuration (datasets within a category)
   const [categories, setCategories] = useState<CategoryCfg[]>(
     ALL_CATEGORY_KEYS.map((k) => ({
       key: k,
@@ -71,29 +59,22 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
     }))
   );
 
-  // SSC roll-up across the 3 pillars
   const [sscRollup, setSscRollup] = useState<RollupCfg>({
     method: 'worst_case',
     weights: { 'SSC Framework - P1': 1 / 3, 'SSC Framework - P2': 1 / 3, 'SSC Framework - P3': 1 / 3 },
   });
 
-  // Final overall roll-up across SSC, Hazards/Risks, Underlying Vulnerabilities
   const [overallRollup, setOverallRollup] = useState<RollupCfg>({
     method: 'average',
     weights: { 'SSC Framework': 0.6, 'Hazards/Risks': 0.2, 'Underlying Vulnerabilities': 0.2 },
   });
 
-  // Load datasets attached to this instance
   useEffect(() => {
     const load = async () => {
       setError(null);
-      // Prefer a view if you have it; otherwise use instance_datasets join datasets
       const { data, error } = await supabase
         .from('instance_datasets')
-        .select(`
-          dataset_id:id,
-          datasets!inner(name, category, type)
-        `)
+        .select(`dataset_id:id, datasets!inner(name, category, type)`)
         .eq('instance_id', instance.id);
 
       if (error) {
@@ -110,14 +91,13 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
 
       setDatasets(mapped);
 
-      // Initialize even weights per category (for convenience)
       const next = [...categories];
       for (const key of ALL_CATEGORY_KEYS) {
         const ds = mapped.filter((d) => d.category === key);
         if (ds.length > 0) {
           const w = 1 / ds.length;
           const weights: Record<string, number> = {};
-          ds.forEach((d) => (weights[d.dataset_id] = Number(w.toFixed(6))));
+          ds.forEach((d) => (weights[d.dataset_id] = Number(w.toFixed(3))));
           const idx = next.findIndex((c) => c.key === key);
           if (idx >= 0) next[idx].weights = weights;
         }
@@ -143,49 +123,21 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
   }, [datasets]);
 
   const updateCategory = (key: GroupKey, patch: Partial<CategoryCfg>) => {
-    setCategories((prev) =>
-      prev.map((c) => (c.key === key ? { ...c, ...patch } : c))
-    );
+    setCategories((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c)));
   };
 
-  const formatNum = (v: number) => (Number.isFinite(v) ? String(v) : '');
-  const sumWeights = (weights: Record<string, number>) =>
-    Object.values(weights).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  const sumWeights = (w: Record<string, number>) =>
+    Object.values(w).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
 
   const validate = () => {
-    // category custom weights must sum to 1
     for (const cat of categories) {
       if (!cat.include) continue;
       if (cat.method === 'custom_weighted') {
-        const ds = grouped[cat.key];
-        if (!ds.length) continue;
-        const sw = sumWeights(cat.weights);
-        if (Math.abs(sw - 1) > 1e-3) {
-          setError(`Weights for "${cat.key}" must sum to 1. Currently ${sw.toFixed(3)}.`);
+        const s = sumWeights(cat.weights);
+        if (Math.abs(s - 1) > 0.01) {
+          setError(`Weights for ${cat.key} must sum to 1 (now ${s.toFixed(2)})`);
           return false;
         }
-      }
-    }
-    // ssc custom weights sum=1
-    if (sscRollup.method === 'custom_weighted') {
-      const sw =
-        (sscRollup.weights['SSC Framework - P1'] || 0) +
-        (sscRollup.weights['SSC Framework - P2'] || 0) +
-        (sscRollup.weights['SSC Framework - P3'] || 0);
-      if (Math.abs(sw - 1) > 1e-3) {
-        setError(`SSC Framework weights must sum to 1. Currently ${sw.toFixed(3)}.`);
-        return false;
-      }
-    }
-    // overall custom weights sum=1
-    if (overallRollup.method === 'custom_weighted') {
-      const sw =
-        (overallRollup.weights['SSC Framework'] || 0) +
-        (overallRollup.weights['Hazards/Risks'] || 0) +
-        (overallRollup.weights['Underlying Vulnerabilities'] || 0);
-      if (Math.abs(sw - 1) > 1e-3) {
-        setError(`Overall weights must sum to 1. Currently ${sw.toFixed(3)}.`);
-        return false;
       }
     }
     setError(null);
@@ -225,7 +177,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
       return;
     }
 
-    if (onSaved) await onSaved();
+    await onSaved();
     onClose();
     setLoading(false);
   };
@@ -234,104 +186,88 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as Method)}
-      className="border border-gray-300 rounded px-2 py-1 w-full"
+      className="border border-gray-300 rounded px-2 py-1 text-sm w-full"
     >
       <option value="average">Average</option>
       <option value="median">Median</option>
-      <option value="worst_case">Worst-case (Max)</option>
+      <option value="worst_case">Worst case</option>
       <option value="custom_weighted">Custom weighted</option>
     </select>
   );
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl p-6">
-        <div className="flex items-start justify-between mb-2">
-          <h2 className="text-xl font-semibold">
-            Framework & Overall Scoring — {instance?.name}
-          </h2>
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+      <div className="bg-white rounded-md shadow-lg w-full max-w-4xl h-[90vh] flex flex-col text-sm">
+        <div className="flex justify-between items-center border-b px-4 py-2">
+          <div className="font-semibold text-base">
+            Framework & Overall Scoring — {instance.name}
+          </div>
           <button
             onClick={onClose}
-            className="ml-4 px-3 py-1 rounded border border-gray-300 hover:bg-gray-100"
+            className="text-gray-600 hover:text-black text-xs border px-2 py-1 rounded"
           >
             Close
           </button>
         </div>
-        <p className="text-gray-600 mb-4">
-          Control how datasets roll up to categories, how categories roll up to SSC Framework, and how everything rolls up to a final overall score.
-        </p>
 
         {error && (
-          <div className="mb-4 text-sm text-red-600 border border-red-200 bg-red-50 rounded px-3 py-2">
+          <div className="bg-red-50 text-red-600 text-xs border-b border-red-200 px-3 py-2">
             {error}
           </div>
         )}
 
-        {/* Per-category configuration */}
-        <div className="space-y-6">
+        {/* Scrollable content */}
+        <div className="overflow-y-auto flex-1 px-3 py-2 space-y-3">
           {ALL_CATEGORY_KEYS.map((key) => {
             const cat = categories.find((c) => c.key === key)!;
             const list = grouped[key];
-
             return (
-              <div key={key} className="border rounded-lg overflow-hidden">
-                <div className="px-4 py-3 bg-gray-50 flex items-center justify-between">
+              <div key={key} className="border rounded">
+                <div className="flex justify-between items-center bg-gray-50 px-3 py-1.5">
                   <div className="font-medium">{key}</div>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-center gap-1 text-xs">
                     <input
                       type="checkbox"
                       checked={cat.include}
                       onChange={(e) => updateCategory(key, { include: e.target.checked })}
                     />
-                    Include in scoring
+                    Include
                   </label>
                 </div>
-
-                <div className="p-4 space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <div className="text-sm text-gray-600 mb-1">Method</div>
-                      {renderMethodSelect(cat.method, (m) => updateCategory(key, { method: m }))}
-                    </div>
-                    <div className="md:col-span-2">
-                      <div className="text-sm text-gray-600 mb-1">Datasets</div>
-                      <div className="text-sm">
-                        {list.length
-                          ? list.map((d) => d.dataset_name).join(', ')
-                          : <span className="text-gray-400">None attached</span>}
-                      </div>
+                <div className="p-2 space-y-1">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>{renderMethodSelect(cat.method, (m) => updateCategory(key, { method: m }))}</div>
+                    <div className="col-span-2 text-gray-700 truncate">
+                      {list.length
+                        ? list.map((d) => d.dataset_name).join(', ')
+                        : <span className="text-gray-400">No datasets</span>}
                     </div>
                   </div>
-
                   {cat.method === 'custom_weighted' && list.length > 0 && (
-                    <div className="mt-2">
-                      <div className="text-sm font-medium mb-2">Weights (must sum to 1)</div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {list.map((d) => (
-                          <div key={d.dataset_id} className="flex items-center gap-2">
-                            <div className="flex-1 text-sm text-gray-800">{d.dataset_name}</div>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              max="1"
-                              value={formatNum(categories.find((c) => c.key === key)!.weights[d.dataset_id] ?? 0)}
-                              onChange={(e) => {
-                                const w = parseFloat(e.target.value);
-                                updateCategory(key, {
-                                  weights: {
-                                    ...categories.find((c) => c.key === key)!.weights,
-                                    [d.dataset_id]: Number.isFinite(w) ? w : 0,
-                                  },
-                                });
-                              }}
-                              className="w-28 border border-gray-300 rounded px-2 py-1"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Sum: {sumWeights(categories.find((c) => c.key === key)!.weights).toFixed(3)}
+                    <div className="space-y-1">
+                      {list.map((d) => (
+                        <div key={d.dataset_id} className="flex justify-between items-center text-xs">
+                          <span>{d.dataset_name}</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="1"
+                            value={cat.weights[d.dataset_id] ?? 0}
+                            onChange={(e) =>
+                              updateCategory(key, {
+                                weights: {
+                                  ...cat.weights,
+                                  [d.dataset_id]: parseFloat(e.target.value) || 0,
+                                },
+                              })
+                            }
+                            className="w-16 border rounded px-1 py-0.5"
+                          />
+                        </div>
+                      ))}
+                      <div className="text-[10px] text-gray-500">
+                        Sum: {sumWeights(cat.weights).toFixed(2)}
                       </div>
                     </div>
                   )}
@@ -339,111 +275,79 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
               </div>
             );
           })}
-        </div>
 
-        {/* SSC Framework roll-up */}
-        <div className="mt-6 border rounded-lg overflow-hidden">
-          <div className="px-4 py-3 bg-teal-50 font-medium">
-            SSC Framework roll-up (Pillar 1, Pillar 2, Pillar 3)
-          </div>
-          <div className="p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <div className="text-sm text-gray-600 mb-1">Method</div>
-                {renderMethodSelect(sscRollup.method, (m) => setSscRollup((prev) => ({ ...prev, method: m })))}
-              </div>
-            </div>
-
-            {sscRollup.method === 'custom_weighted' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
-                {(['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3'] as GroupKey[]).map((k) => (
-                  <div key={k}>
-                    <div className="text-sm text-gray-700 mb-1">{k}</div>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      value={formatNum(sscRollup.weights[k] ?? 0)}
-                      onChange={(e) =>
-                        setSscRollup((prev) => ({
-                          ...prev,
-                          weights: { ...prev.weights, [k]: parseFloat(e.target.value) || 0 },
-                        }))
-                      }
-                      className="w-full border border-gray-300 rounded px-2 py-1"
-                    />
-                  </div>
-                ))}
-                <div className="md:col-span-3 text-xs text-gray-500">
-                  Sum:{' '}
-                  {(
-                    (sscRollup.weights['SSC Framework - P1'] || 0) +
-                    (sscRollup.weights['SSC Framework - P2'] || 0) +
-                    (sscRollup.weights['SSC Framework - P3'] || 0)
-                  ).toFixed(3)}
+          <div className="border rounded">
+            <div className="bg-teal-50 px-3 py-1.5 font-medium">SSC Framework Roll-up</div>
+            <div className="p-2 space-y-1">
+              {renderMethodSelect(sscRollup.method, (m) => setSscRollup((p) => ({ ...p, method: m })))}
+              {sscRollup.method === 'custom_weighted' && (
+                <div className="grid grid-cols-3 gap-2 mt-1 text-xs">
+                  {(['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3'] as GroupKey[]).map((k) => (
+                    <div key={k}>
+                      <div>{k}</div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={sscRollup.weights[k] ?? 0}
+                        onChange={(e) =>
+                          setSscRollup((p) => ({
+                            ...p,
+                            weights: { ...p.weights, [k]: parseFloat(e.target.value) || 0 },
+                          }))
+                        }
+                        className="w-full border rounded px-1 py-0.5"
+                      />
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Final overall roll-up */}
-        <div className="mt-6 border rounded-lg overflow-hidden">
-          <div className="px-4 py-3 bg-amber-50 font-medium">Final Overall roll-up</div>
-          <div className="p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <div className="text-sm text-gray-600 mb-1">Method</div>
-                {renderMethodSelect(overallRollup.method, (m) => setOverallRollup((prev) => ({ ...prev, method: m })))}
-              </div>
+              )}
             </div>
+          </div>
 
-            {overallRollup.method === 'custom_weighted' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
-                {['SSC Framework', 'Hazards/Risks', 'Underlying Vulnerabilities'].map((k) => (
-                  <div key={k}>
-                    <div className="text-sm text-gray-700 mb-1">{k}</div>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      value={formatNum(overallRollup.weights[k] ?? 0)}
-                      onChange={(e) =>
-                        setOverallRollup((prev) => ({
-                          ...prev,
-                          weights: { ...prev.weights, [k]: parseFloat(e.target.value) || 0 },
-                        }))
-                      }
-                      className="w-full border border-gray-300 rounded px-2 py-1"
-                    />
-                  </div>
-                ))}
-                <div className="md:col-span-3 text-xs text-gray-500">
-                  Sum:{' '}
-                  {(
-                    (overallRollup.weights['SSC Framework'] || 0) +
-                    (overallRollup.weights['Hazards/Risks'] || 0) +
-                    (overallRollup.weights['Underlying Vulnerabilities'] || 0)
-                  ).toFixed(3)}
+          <div className="border rounded">
+            <div className="bg-amber-50 px-3 py-1.5 font-medium">Final Overall Roll-up</div>
+            <div className="p-2 space-y-1">
+              {renderMethodSelect(overallRollup.method, (m) => setOverallRollup((p) => ({ ...p, method: m })))}
+              {overallRollup.method === 'custom_weighted' && (
+                <div className="grid grid-cols-3 gap-2 mt-1 text-xs">
+                  {['SSC Framework', 'Hazards/Risks', 'Underlying Vulnerabilities'].map((k) => (
+                    <div key={k}>
+                      <div>{k}</div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        value={overallRollup.weights[k] ?? 0}
+                        onChange={(e) =>
+                          setOverallRollup((p) => ({
+                            ...p,
+                            weights: { ...p.weights, [k]: parseFloat(e.target.value) || 0 },
+                          }))
+                        }
+                        className="w-full border rounded px-1 py-0.5"
+                      />
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="mt-6 flex justify-end gap-3">
+        <div className="border-t bg-gray-50 px-4 py-2 flex justify-end gap-2">
           <button
-            className="px-4 py-2 rounded border border-gray-300 hover:bg-gray-100"
             onClick={onClose}
+            className="border px-3 py-1 rounded text-xs hover:bg-gray-100"
             disabled={loading}
           >
             Cancel
           </button>
           <button
-            className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700"
             onClick={handleApply}
+            className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700"
             disabled={loading}
           >
             {loading ? 'Scoring…' : 'Apply Scoring'}
