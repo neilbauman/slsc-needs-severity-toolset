@@ -10,70 +10,54 @@ interface ViewDatasetModalProps {
 
 export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalProps) {
   const [rows, setRows] = useState<any[]>([]);
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadData = async () => {
     setLoading(true);
     const table = dataset.type === 'categorical' ? 'dataset_values_categorical' : 'dataset_values_numeric';
-    const { data, error } = await supabase
+    const { data: datasetValues, error: dataErr } = await supabase
       .from(table)
       .select('admin_pcode, value')
       .eq('dataset_id', dataset.id)
-      .limit(3000);
-    if (error) {
-      console.error(error);
+      .limit(5000);
+
+    if (dataErr) {
+      console.error('Dataset fetch error:', dataErr);
       setLoading(false);
       return;
     }
 
-    const adminCodes = data?.map((r) => r.admin_pcode).filter(Boolean) || [];
+    const adminCodes = (datasetValues ?? []).map((r) => r.admin_pcode);
 
-    // Attempt 1: try "admin_boundaries" with "name"
-    let { data: admins, error: adminErr } = await supabase
+    // Fetch all matching admin names — no level filtering
+    const { data: admins, error: adminErr } = await supabase
       .from('admin_boundaries')
-      .select('admin_pcode, name')
-      .in('admin_pcode', adminCodes);
+      .select('admin_pcode, name');
 
-    // Attempt 2: try "admin_name" if "name" failed
-    if ((!admins || admins.length === 0) && !adminErr) {
-      const { data: adminsAlt, error: altErr } = await supabase
-        .from('admin_boundaries')
-        .select('admin_pcode, admin_name')
-        .in('admin_pcode', adminCodes);
-      if (!altErr && adminsAlt?.length) {
-        admins = adminsAlt.map((a: any) => ({
-          admin_pcode: a.admin_pcode,
-          name: a.admin_name,
-        }));
-      }
+    if (adminErr) {
+      console.error('Admin boundaries fetch error:', adminErr);
+      setLoading(false);
+      return;
     }
 
-    // Attempt 3: try "adm3_name" if still empty
-    if ((!admins || admins.length === 0)) {
-      const { data: adminsAlt2, error: altErr2 } = await supabase
-        .from('admin_boundaries')
-        .select('admin_pcode, adm3_name')
-        .in('admin_pcode', adminCodes);
-      if (!altErr2 && adminsAlt2?.length) {
-        admins = adminsAlt2.map((a: any) => ({
-          admin_pcode: a.admin_pcode,
-          name: a.adm3_name,
-        }));
-      }
-    }
+    // Create lookup map using flexible matching
+    const adminMap = new Map<string, string>();
+    admins?.forEach((a) => {
+      // normalize both sides (trim and uppercase)
+      adminMap.set(a.admin_pcode.trim().toUpperCase(), a.name);
+    });
 
-    const adminMap = new Map<string, string>(
-      (admins || []).map((a) => [a.admin_pcode, a.name])
-    );
+    const combined = datasetValues?.map((r) => {
+      const code = r.admin_pcode?.trim().toUpperCase();
+      // try direct match, or prefix-based (for ADM3 codes stored as ADM4-compatible)
+      const name =
+        adminMap.get(code) ||
+        adminMap.get(code.slice(0, 9)) || // e.g. PH083746000 → PH083746
+        'Unknown';
+      return { ...r, name };
+    });
 
-    const combined =
-      data?.map((r) => ({
-        ...r,
-        name: adminMap.get(r.admin_pcode) || 'Unknown',
-      })) || [];
-
-    setRows(combined);
+    setRows(combined ?? []);
     setLoading(false);
   };
 
@@ -81,33 +65,12 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
     loadData();
   }, [dataset]);
 
-  const sortedRows = (() => {
-    if (!sortConfig) return rows;
-    const { key, direction } = sortConfig;
-    return [...rows].sort((a, b) => {
-      if (a[key] < b[key]) return direction === 'asc' ? -1 : 1;
-      if (a[key] > b[key]) return direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  })();
-
-  const requestSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig?.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  };
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-5xl p-5 max-h-[80vh] flex flex-col">
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-lg font-semibold">{dataset.name}</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-600 hover:text-gray-900 text-sm font-medium"
-          >
+          <button onClick={onClose} className="text-gray-600 hover:text-gray-900 text-sm font-medium">
             ✕ Close
           </button>
         </div>
@@ -119,32 +82,17 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
             <table className="min-w-full">
               <thead className="bg-gray-100 sticky top-0 text-gray-700">
                 <tr>
-                  <th
-                    onClick={() => requestSort('admin_pcode')}
-                    className="px-3 py-2 text-left cursor-pointer hover:bg-gray-200"
-                  >
-                    PCode {sortConfig?.key === 'admin_pcode' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
-                  </th>
-                  <th
-                    onClick={() => requestSort('name')}
-                    className="px-3 py-2 text-left cursor-pointer hover:bg-gray-200"
-                  >
-                    Admin Name {sortConfig?.key === 'name' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
-                  </th>
-                  <th
-                    onClick={() => requestSort('value')}
-                    className="px-3 py-2 text-right cursor-pointer hover:bg-gray-200"
-                  >
-                    Value {sortConfig?.key === 'value' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
-                  </th>
+                  <th className="px-3 py-2 text-left">PCode</th>
+                  <th className="px-3 py-2 text-left">Admin Name</th>
+                  <th className="px-3 py-2 text-right">Value</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map((row) => (
-                  <tr key={row.admin_pcode} className="border-t hover:bg-gray-50">
-                    <td className="px-3 py-1.5">{row.admin_pcode}</td>
-                    <td className="px-3 py-1.5">{row.name}</td>
-                    <td className="px-3 py-1.5 text-right">{row.value}</td>
+                {rows.map((r) => (
+                  <tr key={r.admin_pcode} className="border-t hover:bg-gray-50">
+                    <td className="px-3 py-1.5">{r.admin_pcode}</td>
+                    <td className="px-3 py-1.5">{r.name}</td>
+                    <td className="px-3 py-1.5 text-right">{r.value}</td>
                   </tr>
                 ))}
               </tbody>
