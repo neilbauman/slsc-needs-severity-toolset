@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
+import React, { useState, useEffect } from 'react';
 import NumericScoringModal from './NumericScoringModal';
 import CategoricalScoringModal from './CategoricalScoringModal';
 
@@ -72,14 +71,14 @@ export default function InstanceDatasetConfigModal({
         <h2 className="text-2xl font-semibold mb-4">Dataset Configuration</h2>
 
         <p className="mb-4 text-gray-600">
-          Configure which datasets are included in instance:{" "}
+          Configure which datasets are included in instance:{' '}
           <strong>{instance?.name}</strong>
         </p>
 
         {loading ? (
           <p>Loading datasets...</p>
         ) : (
-          <table className="min-w-full text-sm border">
+          <table className="min-w-full text-sm border border-gray-300">
             <thead className="bg-gray-100">
               <tr>
                 <th className="p-2 text-left">Select</th>
@@ -117,10 +116,18 @@ export default function InstanceDatasetConfigModal({
         )}
 
         <div className="flex justify-end mt-6 gap-3">
-          <Button variant="outline" onClick={onClose}>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
+          >
             Cancel
-          </Button>
-          <Button onClick={handleSave}>Save Selections</Button>
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            Save Selections
+          </button>
         </div>
 
         {/* scoring modals */}
