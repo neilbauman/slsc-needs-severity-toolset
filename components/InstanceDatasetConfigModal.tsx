@@ -1,152 +1,100 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import NumericScoringModal from './NumericScoringModal';
-import CategoricalScoringModal from './CategoricalScoringModal';
+import { useState, useEffect } from "react";
+import { supabaseBrowser as supabase } from "@/lib/supabase/supabaseBrowser";
+import { Button } from "@/components/ui/button";
+import NumericScoringModal from "./NumericScoringModal";
+import CategoricalScoringModal from "./CategoricalScoringModal";
 
-interface InstanceDatasetConfigModalProps {
-  instance: any;
-  onClose: () => void;
-  onSaved?: () => void;
-}
-
-export default function InstanceDatasetConfigModal({
-  instance,
-  onClose,
-  onSaved,
-}: InstanceDatasetConfigModalProps) {
-  const [datasets, setDatasets] = useState<any[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [showNumericModal, setShowNumericModal] = useState<any>(null);
-  const [showCategoricalModal, setShowCategoricalModal] = useState<any>(null);
+export default function InstanceDatasetConfigModal({ instance, onClose }) {
+  const [datasets, setDatasets] = useState([]);
+  const [selectedDataset, setSelectedDataset] = useState(null);
+  const [scoringType, setScoringType] = useState<"numeric" | "categorical" | null>(null);
 
   useEffect(() => {
-    async function loadDatasets() {
-      setLoading(true);
-      try {
-        const res = await fetch('/api/datasets');
-        const data = await res.json();
-        setDatasets(data || []);
-      } catch (err) {
-        console.error('Error loading datasets:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadDatasets();
-  }, []);
+    const loadData = async () => {
+      const { data, error } = await supabase
+        .from("instance_datasets")
+        .select(`
+          id,
+          instance_id,
+          dataset_id,
+          datasets (
+            id, name, category, type, admin_level, source
+          )
+        `)
+        .eq("instance_id", instance.id);
+      if (error) console.error(error);
+      else setDatasets(data.map(d => d.datasets));
+    };
+    loadData();
+  }, [instance.id]);
 
-  const handleToggle = (id: string) => {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+  const handleConfigure = (dataset) => {
+    setSelectedDataset(dataset);
+    setScoringType(dataset.type);
   };
 
-  const handleSave = async () => {
-    try {
-      await fetch(`/api/instances/${instance.id}/datasets`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ datasetIds: selected }),
-      });
-      if (onSaved) await onSaved();
-      onClose();
-    } catch (err) {
-      console.error('Error saving datasets:', err);
-    }
-  };
-
-  const handleConfigureScoring = (dataset: any) => {
-    if (dataset.type === 'numeric') setShowNumericModal(dataset);
-    else if (dataset.type === 'categorical') setShowCategoricalModal(dataset);
+  const handleCloseScoring = () => {
+    setSelectedDataset(null);
+    setScoringType(null);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      <div className="bg-white rounded-lg shadow-lg w-[1000px] max-h-[90vh] overflow-y-auto p-6">
-        <h2 className="text-2xl font-semibold mb-4">
-          Dataset Configuration
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl shadow-xl w-[900px] p-6">
+        <h2 className="text-xl font-semibold mb-4">
+          Configure Datasets for {instance.name}
         </h2>
 
-        <p className="text-gray-600 mb-4">
-          Configure which datasets are included in instance:{' '}
-          <strong>{instance.name}</strong>
-        </p>
-
-        {loading ? (
-          <p>Loading datasets...</p>
-        ) : (
-          <table className="min-w-full text-sm border border-gray-300">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 text-left">Select</th>
-                <th className="p-2 text-left">Dataset Name</th>
-                <th className="p-2 text-left">Category</th>
-                <th className="p-2 text-left">Type</th>
-                <th className="p-2 text-left">Admin Level</th>
-                <th className="p-2 text-left">Actions</th>
+        <table className="w-full text-sm border">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="text-left p-2">Dataset</th>
+              <th className="text-left p-2">Category</th>
+              <th className="text-left p-2">Type</th>
+              <th className="text-left p-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {datasets.map((d) => (
+              <tr key={d.id} className="border-b hover:bg-gray-50">
+                <td className="p-2">{d.name}</td>
+                <td className="p-2">{d.category}</td>
+                <td className="p-2 capitalize">{d.type}</td>
+                <td className="p-2">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => handleConfigure(d)}
+                  >
+                    Configure Scoring
+                  </Button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {datasets.map((ds) => (
-                <tr key={ds.id} className="border-t hover:bg-gray-50 transition">
-                  <td className="p-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(ds.id)}
-                      onChange={() => handleToggle(ds.id)}
-                    />
-                  </td>
-                  <td className="p-2 font-medium">{ds.name}</td>
-                  <td className="p-2">{ds.category}</td>
-                  <td className="p-2 capitalize">{ds.type}</td>
-                  <td className="p-2">{ds.admin_level}</td>
-                  <td className="p-2">
-                    <button
-                      onClick={() => handleConfigureScoring(ds)}
-                      className="text-blue-600 hover:underline text-sm"
-                    >
-                      Configure Scoring
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+            ))}
+          </tbody>
+        </table>
 
-        <div className="flex justify-end mt-6 gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-          >
-            Save Selections
-          </button>
+        <div className="flex justify-end mt-4">
+          <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
-
-        {showNumericModal && (
-          <NumericScoringModal
-            dataset={showNumericModal}
-            instance={instance}
-            onClose={() => setShowNumericModal(null)}
-          />
-        )}
-
-        {showCategoricalModal && (
-          <CategoricalScoringModal
-            dataset={showCategoricalModal}
-            instance={instance}
-            onClose={() => setShowCategoricalModal(null)}
-          />
-        )}
       </div>
+
+      {scoringType === "numeric" && selectedDataset && (
+        <NumericScoringModal
+          dataset={selectedDataset}
+          instance={instance}
+          onClose={handleCloseScoring}
+        />
+      )}
+      {scoringType === "categorical" && selectedDataset && (
+        <CategoricalScoringModal
+          dataset={selectedDataset}
+          instance={instance}
+          onClose={handleCloseScoring}
+        />
+      )}
     </div>
   );
 }
