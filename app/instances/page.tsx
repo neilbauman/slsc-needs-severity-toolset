@@ -3,19 +3,19 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import ScoringPreviewModal from '@/components/ScoringPreviewModal';
+import DatasetConfigModal from '@/components/DatasetConfigModal';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showScoringPreview, setShowScoringPreview] = useState<any | null>(null);
+  const [showDatasetConfig, setShowDatasetConfig] = useState<any | null>(null);
 
-  // Fields for new instance
   const [newName, setNewName] = useState('');
-  const [newType, setNewType] = useState('baseline');
   const [newDescription, setNewDescription] = useState('');
+  const [newType, setNewType] = useState('Baseline');
 
-  // Load all instances
   const loadInstances = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -31,7 +31,6 @@ export default function InstancesPage() {
     loadInstances();
   }, []);
 
-  // Create a new instance
   const handleCreate = async () => {
     if (!newName.trim()) {
       alert('Please enter an instance name.');
@@ -59,7 +58,6 @@ export default function InstancesPage() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-semibold">Instances</h1>
           <button
@@ -93,7 +91,7 @@ export default function InstancesPage() {
                     className="border-t hover:bg-gray-50 transition"
                   >
                     <td className="px-3 py-2 font-medium">{inst.name}</td>
-                    <td className="px-3 py-2 capitalize">{inst.type}</td>
+                    <td className="px-3 py-2">{inst.type}</td>
                     <td className="px-3 py-2 text-gray-600">
                       {inst.description || '—'}
                     </td>
@@ -116,9 +114,7 @@ export default function InstancesPage() {
                         Category Config
                       </button>
                       <button
-                        onClick={() =>
-                          alert('🧮 Dataset scoring configuration coming next.')
-                        }
+                        onClick={() => setShowDatasetConfig(inst)}
                         className="text-yellow-600 hover:underline text-sm"
                       >
                         Dataset Config
@@ -157,7 +153,7 @@ export default function InstancesPage() {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   className="w-full border px-2 py-1 rounded-md text-sm"
-                  placeholder="e.g. Baseline 2025"
+                  placeholder="e.g. Baseline (PHL) - Nov 2025"
                 />
               </div>
 
@@ -170,9 +166,9 @@ export default function InstancesPage() {
                   onChange={(e) => setNewType(e.target.value)}
                   className="w-full border px-2 py-1 rounded-md text-sm"
                 >
-                  <option value="baseline">Baseline</option>
-                  <option value="forecast">Forecast</option>
-                  <option value="nowcast">Nowcast</option>
+                  <option value="Baseline">Baseline</option>
+                  <option value="Forecast">Forecast</option>
+                  <option value="Nowcast">Nowcast</option>
                 </select>
               </div>
 
@@ -207,11 +203,19 @@ export default function InstancesPage() {
         </div>
       )}
 
-      {/* Scoring Preview Modal */}
+      {/* Scoring Preview */}
       {showScoringPreview && (
         <ScoringPreviewModal
           instance={showScoringPreview}
           onClose={() => setShowScoringPreview(null)}
+        />
+      )}
+
+      {/* Dataset Config */}
+      {showDatasetConfig && (
+        <DatasetConfigModal
+          instance={showDatasetConfig}
+          onClose={() => setShowDatasetConfig(null)}
         />
       )}
     </div>
