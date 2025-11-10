@@ -29,18 +29,13 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
     const adminCodes = data?.map((r) => r.admin_pcode).filter(Boolean) || [];
 
-    // Dynamically pick admin table
-    const adminTable = dataset.admin_level
-      ? `admin_boundaries_${dataset.admin_level.toLowerCase()}`
-      : 'admin_boundaries';
-
-    // Try to load matching names
+    // ✅ Use single admin_boundaries table, filter by pcode
     const { data: admins, error: adminErr } = await supabase
-      .from(adminTable)
+      .from('admin_boundaries')
       .select('admin_pcode, name')
       .in('admin_pcode', adminCodes);
 
-    if (adminErr) console.warn('Admin name lookup fallback:', adminErr.message);
+    if (adminErr) console.warn('Admin lookup failed:', adminErr.message);
 
     const adminMap = new Map<string, string>(
       (admins || []).map((a) => [a.admin_pcode, a.name])
