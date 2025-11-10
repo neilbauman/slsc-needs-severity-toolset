@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/supabaseBrowser';
 
 type CategoryRow = { category: string; score?: number | null };
 
@@ -15,7 +15,7 @@ export default function CategoricalScoringModal({
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const supabase = createClientComponentClient();
+  const supabase = createClient();
   const [rows, setRows] = useState<CategoryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [method, setMethod] = useState<'twenty_percent' | 'custom_percent' | 'median' | 'mode' | 'weighted_mean'>('weighted_mean');
@@ -42,7 +42,6 @@ export default function CategoricalScoringModal({
         const c = (r.category ?? String(r.value ?? '')).trim();
         if (c) setCats.add(c);
       });
-      // ignore utility categories if present
       const filtered = Array.from(setCats).filter(
         (c) => c.toLowerCase() !== 'housing units' && c.toLowerCase() !== 'municipality_city code'
       );
@@ -155,11 +154,7 @@ export default function CategoricalScoringModal({
         </div>
 
         <div className="p-6 border-t flex items-center justify-end gap-3">
-          <button
-            className="px-4 py-2 rounded border"
-            onClick={onClose}
-            disabled={loading}
-          >
+          <button className="px-4 py-2 rounded border" onClick={onClose} disabled={loading}>
             Cancel
           </button>
           <button
