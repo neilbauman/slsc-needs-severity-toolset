@@ -15,6 +15,7 @@ export default function DatasetsPage() {
   const [showDeriveModal, setShowDeriveModal] = useState(false);
   const [viewDataset, setViewDataset] = useState<any | null>(null);
   const [editDataset, setEditDataset] = useState<any | null>(null);
+  const [deleteDataset, setDeleteDataset] = useState<any | null>(null);
 
   // Load all datasets
   const loadDatasets = async () => {
@@ -32,6 +33,22 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
+  const handleDelete = async () => {
+    if (!deleteDataset) return;
+    const { error } = await supabase
+      .from('datasets')
+      .delete()
+      .eq('id', deleteDataset.id);
+    if (error) {
+      console.error('Delete error:', error);
+      alert('Error deleting dataset.');
+    } else {
+      setDeleteDataset(null);
+      await loadDatasets();
+    }
+  };
+
+  // Group datasets by category
   const grouped = datasets.reduce((acc: any, ds: any) => {
     const cat = ds.category || 'Uncategorized';
     if (!acc[cat]) acc[cat] = [];
@@ -39,13 +56,14 @@ export default function DatasetsPage() {
     return acc;
   }, {});
 
+  // Updated category order and corrected singular label
   const orderedCategories = [
     'Core',
     'SSC Framework - P1',
     'SSC Framework - P2',
     'SSC Framework - P3',
     'Hazards',
-    'Underlying Vulnerabilities',
+    'Underlying Vulnerability', // ← corrected singular
   ];
 
   return (
@@ -116,6 +134,12 @@ export default function DatasetsPage() {
                             >
                               Edit
                             </button>
+                            <button
+                              onClick={() => setDeleteDataset(ds)}
+                              className="text-red-600 hover:underline text-sm"
+                            >
+                              Delete
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -160,6 +184,38 @@ export default function DatasetsPage() {
           onClose={() => setEditDataset(null)}
           onSave={loadDatasets}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteDataset && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-5">
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">
+              Delete Dataset
+            </h3>
+            <p className="text-gray-600 text-sm mb-4">
+              Are you sure you want to delete{' '}
+              <span className="font-medium text-gray-800">
+                {deleteDataset.name}
+              </span>
+              ? This action cannot be undone.
+            </p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setDeleteDataset(null)}
+                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-md"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
