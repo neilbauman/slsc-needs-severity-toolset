@@ -137,12 +137,13 @@ export default function InstanceDatasetConfigModal({ instance, onClose, onSaved 
         />
       )}
       {selected && selected.type === "categorical" && (
-        <CategoricalScoringModal
-          dataset={selected}
-          instance={instance}
-          onClose={handleModalClose}
-        />
-      )}
+  <CategoricalScoringModal
+    dataset={selected}
+    instance={instance}
+    onClose={handleModalClose}
+    onSaved={async () => {}}  // ✅ add this line
+  />
+)}
     </div>
   );
 }
