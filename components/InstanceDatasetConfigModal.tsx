@@ -2,16 +2,23 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
+import NumericScoringModal from "./NumericScoringModal";
+import CategoricalScoringModal from "./CategoricalScoringModal";
 
-// --- Replace with your Supabase env vars ---
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function InstanceDatasetConfigModal({ instance, onClose }) {
-  const [datasets, setDatasets] = useState([]);
-  const [selected, setSelected] = useState(null);
+interface Props {
+  instance: any;
+  onClose: () => void;
+  onSaved?: () => void;
+}
+
+export default function InstanceDatasetConfigModal({ instance, onClose, onSaved }: Props) {
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [selected, setSelected] = useState<any | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -27,6 +34,11 @@ export default function InstanceDatasetConfigModal({ instance, onClose }) {
     };
     load();
   }, [instance.id]);
+
+  const handleModalClose = () => {
+    setSelected(null);
+    if (onSaved) onSaved(); // notify parent when scoring modal closes
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
@@ -77,7 +89,7 @@ export default function InstanceDatasetConfigModal({ instance, onClose }) {
         <NumericScoringModal
           dataset={selected}
           instance={instance}
-          onClose={() => setSelected(null)}
+          onClose={handleModalClose}
         />
       )}
 
@@ -85,13 +97,9 @@ export default function InstanceDatasetConfigModal({ instance, onClose }) {
         <CategoricalScoringModal
           dataset={selected}
           instance={instance}
-          onClose={() => setSelected(null)}
+          onClose={handleModalClose}
         />
       )}
     </div>
   );
 }
-
-// Local imports at bottom to avoid Next.js circular import issues
-import NumericScoringModal from "./NumericScoringModal";
-import CategoricalScoringModal from "./CategoricalScoringModal";
