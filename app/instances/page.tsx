@@ -2,11 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import InstanceConfigModal from '@/components/InstanceConfigModal';
+import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
+// Scoring preview modal will be added next
+// import ScoringPreviewModal from '@/components/ScoringPreviewModal';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [configInstance, setConfigInstance] = useState<any | null>(null);
+  const [datasetConfigInstance, setDatasetConfigInstance] = useState<any | null>(null);
+  const [scoringPreviewInstance, setScoringPreviewInstance] = useState<any | null>(null);
+
   const [newInstance, setNewInstance] = useState({
     name: '',
     type: 'baseline',
@@ -84,14 +92,12 @@ export default function InstancesPage() {
                   <th className="px-3 py-2 text-left">Status</th>
                   <th className="px-3 py-2 text-left">Created</th>
                   <th className="px-3 py-2 text-left">Updated</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {instances.map((inst) => (
-                  <tr
-                    key={inst.id}
-                    className="border-t hover:bg-gray-50 transition"
-                  >
+                  <tr key={inst.id} className="border-t hover:bg-gray-50 transition">
                     <td className="px-3 py-2">{inst.name}</td>
                     <td className="px-3 py-2 capitalize">{inst.type}</td>
                     <td className="px-3 py-2">{inst.admin_level}</td>
@@ -103,6 +109,26 @@ export default function InstancesPage() {
                       {inst.updated_at
                         ? new Date(inst.updated_at).toLocaleDateString()
                         : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right space-x-2">
+                      <button
+                        onClick={() => setConfigInstance(inst)}
+                        className="text-blue-600 hover:underline text-sm"
+                      >
+                        Categories
+                      </button>
+                      <button
+                        onClick={() => setDatasetConfigInstance(inst)}
+                        className="text-green-600 hover:underline text-sm"
+                      >
+                        Datasets
+                      </button>
+                      <button
+                        onClick={() => setScoringPreviewInstance(inst)}
+                        className="text-purple-600 hover:underline text-sm"
+                      >
+                        Scoring
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -119,9 +145,7 @@ export default function InstancesPage() {
             <h2 className="text-lg font-semibold mb-4">Create New Instance</h2>
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium text-gray-700">
-                  Name
-                </label>
+                <label className="text-sm font-medium text-gray-700">Name</label>
                 <input
                   type="text"
                   value={newInstance.name}
@@ -140,10 +164,7 @@ export default function InstancesPage() {
                 <select
                   value={newInstance.type}
                   onChange={(e) =>
-                    setNewInstance({
-                      ...newInstance,
-                      type: e.target.value,
-                    })
+                    setNewInstance({ ...newInstance, type: e.target.value })
                   }
                   className="w-full border rounded-md p-2 text-sm"
                 >
@@ -210,6 +231,30 @@ export default function InstancesPage() {
           </div>
         </div>
       )}
+
+      {/* Category Configuration Modal */}
+      {configInstance && (
+        <InstanceConfigModal
+          instance={configInstance}
+          onClose={() => setConfigInstance(null)}
+        />
+      )}
+
+      {/* Dataset Configuration Modal */}
+      {datasetConfigInstance && (
+        <InstanceDatasetConfigModal
+          instance={datasetConfigInstance}
+          onClose={() => setDatasetConfigInstance(null)}
+        />
+      )}
+
+      {/* Scoring Preview Modal (next step) */}
+      {/* {scoringPreviewInstance && (
+        <ScoringPreviewModal
+          instance={scoringPreviewInstance}
+          onClose={() => setScoringPreviewInstance(null)}
+        />
+      )} */}
     </div>
   );
 }
