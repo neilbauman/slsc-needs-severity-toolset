@@ -12,9 +12,19 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const normalizePCode = (code?: string): string => {
+    if (!code) return '';
+    // Always uppercase, trim spaces, and remove trailing zeros for ADM3 equivalence
+    return code.trim().toUpperCase().replace(/0+$/, '');
+  };
+
   const loadData = async () => {
     setLoading(true);
-    const table = dataset.type === 'categorical' ? 'dataset_values_categorical' : 'dataset_values_numeric';
+    const table =
+      dataset.type === 'categorical'
+        ? 'dataset_values_categorical'
+        : 'dataset_values_numeric';
+
     const { data: datasetValues, error: dataErr } = await supabase
       .from(table)
       .select('admin_pcode, value')
@@ -27,9 +37,7 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       return;
     }
 
-    const adminCodes = (datasetValues ?? []).map((r) => r.admin_pcode);
-
-    // Fetch all matching admin names — no level filtering
+    // Fetch all boundaries once — no admin_level filtering
     const { data: admins, error: adminErr } = await supabase
       .from('admin_boundaries')
       .select('admin_pcode, name');
@@ -40,24 +48,30 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       return;
     }
 
-    // Create lookup map using flexible matching
+    // Build lookup by normalized code (trailing zeros removed)
     const adminMap = new Map<string, string>();
     admins?.forEach((a) => {
-      // normalize both sides (trim and uppercase)
-      adminMap.set(a.admin_pcode.trim().toUpperCase(), a.name);
+      adminMap.set(normalizePCode(a.admin_pcode), a.name);
     });
 
-    const combined = datasetValues?.map((r) => {
-      const code = r.admin_pcode?.trim().toUpperCase();
-      // try direct match, or prefix-based (for ADM3 codes stored as ADM4-compatible)
-      const name =
-        adminMap.get(code) ||
-        adminMap.get(code.slice(0, 9)) || // e.g. PH083746000 → PH083746
-        'Unknown';
-      return { ...r, name };
-    });
+    const combined =
+      datasetValues?.map((r) => {
+        const rawCode = r.admin_pcode?.trim().toUpperCase();
+        const normalized = normalizePCode(rawCode);
 
-    setRows(combined ?? []);
+        // Try both normalized and raw forms (for ADM4)
+        const name =
+          adminMap.get(normalized) ||
+          adminMap.get(rawCode) ||
+          'Unknown';
+
+        return {
+          ...r,
+          name,
+        };
+      }) ?? [];
+
+    setRows(combined);
     setLoading(false);
   };
 
@@ -70,7 +84,10 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       <div className="bg-white rounded-lg shadow-lg w-full max-w-5xl p-5 max-h-[80vh] flex flex-col">
         <div className="flex justify-between items-center mb-3">
           <h2 className="text-lg font-semibold">{dataset.name}</h2>
-          <button onClick={onClose} className="text-gray-600 hover:text-gray-900 text-sm font-medium">
+          <button
+            onClick={onClose}
+            className="text-gray-600 hover:text-gray-900 text-sm font-medium"
+          >
             ✕ Close
           </button>
         </div>
