@@ -18,12 +18,9 @@ export default function InstanceDatasetConfigModal({
   const [datasets, setDatasets] = useState<any[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // scoring modals
   const [showNumericModal, setShowNumericModal] = useState<any>(null);
   const [showCategoricalModal, setShowCategoricalModal] = useState<any>(null);
 
-  // load datasets
   useEffect(() => {
     async function loadDatasets() {
       setLoading(true);
@@ -32,7 +29,7 @@ export default function InstanceDatasetConfigModal({
         const data = await res.json();
         setDatasets(data || []);
       } catch (err) {
-        console.error('Error loading datasets', err);
+        console.error(err);
       } finally {
         setLoading(false);
       }
@@ -66,14 +63,11 @@ export default function InstanceDatasetConfigModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
       <div className="bg-white rounded-lg shadow-lg w-[900px] max-h-[85vh] overflow-y-auto p-6">
-        <h2 className="text-2xl font-semibold mb-4">Dataset Configuration</h2>
-
-        <p className="mb-4 text-gray-600">
-          Configure which datasets are included in instance:{' '}
-          <strong>{instance?.name}</strong>
-        </p>
+        <h2 className="text-2xl font-semibold mb-4">
+          Configure Datasets for {instance.name}
+        </h2>
 
         {loading ? (
           <p>Loading datasets...</p>
@@ -81,11 +75,10 @@ export default function InstanceDatasetConfigModal({
           <table className="min-w-full text-sm border border-gray-300">
             <thead className="bg-gray-100">
               <tr>
-                <th className="p-2 text-left">Select</th>
-                <th className="p-2 text-left">Dataset Name</th>
+                <th className="p-2">Select</th>
+                <th className="p-2 text-left">Name</th>
                 <th className="p-2 text-left">Category</th>
                 <th className="p-2 text-left">Type</th>
-                <th className="p-2 text-left">Admin Level</th>
                 <th className="p-2 text-left">Actions</th>
               </tr>
             </thead>
@@ -102,12 +95,13 @@ export default function InstanceDatasetConfigModal({
                   <td className="p-2">{ds.name}</td>
                   <td className="p-2">{ds.category}</td>
                   <td className="p-2 capitalize">{ds.type}</td>
-                  <td className="p-2">{ds.admin_level}</td>
-                  <td
-                    className="p-2 text-blue-600 cursor-pointer hover:underline"
-                    onClick={() => handleConfigureScoring(ds)}
-                  >
-                    Configure Scoring
+                  <td className="p-2">
+                    <button
+                      onClick={() => handleConfigureScoring(ds)}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      Configure Scoring
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -126,15 +120,14 @@ export default function InstanceDatasetConfigModal({
             onClick={handleSave}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
           >
-            Save Selections
+            Save
           </button>
         </div>
 
-        {/* scoring modals */}
         {showNumericModal && (
           <NumericScoringModal
             dataset={showNumericModal}
-            instanceId={instance.id}
+            instance={instance}
             onClose={() => setShowNumericModal(null)}
           />
         )}
@@ -142,7 +135,7 @@ export default function InstanceDatasetConfigModal({
         {showCategoricalModal && (
           <CategoricalScoringModal
             dataset={showCategoricalModal}
-            instanceId={instance.id}
+            instance={instance}
             onClose={() => setShowCategoricalModal(null)}
           />
         )}
