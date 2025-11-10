@@ -29,23 +29,38 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
 
     const adminCodes = data?.map((r) => r.admin_pcode).filter(Boolean) || [];
 
-    // Helper: try to fetch admin names from multiple sources
-    const fetchAdmins = async (tableName: string) => {
-      const { data: admins, error: adminErr } = await supabase
-        .from(tableName)
-        .select('admin_pcode, name')
+    // Attempt 1: try "admin_boundaries" with "name"
+    let { data: admins, error: adminErr } = await supabase
+      .from('admin_boundaries')
+      .select('admin_pcode, name')
+      .in('admin_pcode', adminCodes);
+
+    // Attempt 2: try "admin_name" if "name" failed
+    if ((!admins || admins.length === 0) && !adminErr) {
+      const { data: adminsAlt, error: altErr } = await supabase
+        .from('admin_boundaries')
+        .select('admin_pcode, admin_name')
         .in('admin_pcode', adminCodes);
-      if (adminErr) console.warn(`Admin lookup failed from ${tableName}:`, adminErr.message);
-      return admins || [];
-    };
+      if (!altErr && adminsAlt?.length) {
+        admins = adminsAlt.map((a: any) => ({
+          admin_pcode: a.admin_pcode,
+          name: a.admin_name,
+        }));
+      }
+    }
 
-    // Try unified admin_boundaries first
-    let admins = await fetchAdmins('admin_boundaries');
-
-    // If no ADM3 matches found, fallback
-    if (admins.length === 0 && dataset.admin_level === 'ADM3') {
-      console.log('Falling back to admin_boundaries_adm3 for ADM3 names...');
-      admins = await fetchAdmins('admin_boundaries_adm3');
+    // Attempt 3: try "adm3_name" if still empty
+    if ((!admins || admins.length === 0)) {
+      const { data: adminsAlt2, error: altErr2 } = await supabase
+        .from('admin_boundaries')
+        .select('admin_pcode, adm3_name')
+        .in('admin_pcode', adminCodes);
+      if (!altErr2 && adminsAlt2?.length) {
+        admins = adminsAlt2.map((a: any) => ({
+          admin_pcode: a.admin_pcode,
+          name: a.adm3_name,
+        }));
+      }
     }
 
     const adminMap = new Map<string, string>(
