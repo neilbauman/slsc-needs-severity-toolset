@@ -12,6 +12,7 @@
     "react-dom": "18.2.0",
     "papaparse": "^5.4.1",
     "lucide-react": "^0.320.0",
+    "recharts": "^2.9.0",
     "@supabase/supabase-js": "^2.39.7"
   },
   "devDependencies": {
