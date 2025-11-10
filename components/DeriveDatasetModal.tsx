@@ -25,10 +25,11 @@ export default function DeriveDatasetModal({
     'SSC Framework - P1',
     'SSC Framework - P2',
     'SSC Framework - P3',
-    'Underlying Vulnerability',
+    'Underlying Vulnerabilities',
     'Derived',
   ];
 
+  // Fetch available datasets
   useEffect(() => {
     async function loadDatasets() {
       const { data, error } = await supabase
@@ -40,6 +41,14 @@ export default function DeriveDatasetModal({
     loadDatasets();
   }, []);
 
+  // Auto-inherit category from Dataset 1
+  useEffect(() => {
+    if (dataset1 && datasets.length > 0) {
+      const found = datasets.find((d) => d.id === dataset1);
+      if (found?.category) setCategory(found.category);
+    }
+  }, [dataset1, datasets]);
+
   const handleDerive = async () => {
     if (!dataset1 || !newName || !category) {
       setError('Please complete all required fields.');
@@ -50,15 +59,19 @@ export default function DeriveDatasetModal({
     setError('');
 
     try {
-      const sources = dataset2 ? [dataset1, dataset2] : [dataset1];
-      const { error } = await supabase.rpc('derive_dataset', {
-        source_datasets: sources,
+      // Construct full payload (satisfies SQL format placeholders)
+      const payload = {
+        source_datasets: dataset2 ? [dataset1, dataset2] : [dataset1],
         new_name: newName,
-        operation,
-        scalar_value: scalarValue ? parseFloat(scalarValue) : null,
-        new_category: category,
-        target_admin_level: targetAdminLevel,
-      });
+        operation: operation || 'divide',
+        scalar_value: scalarValue ? parseFloat(scalarValue) : 0,
+        new_category: category || 'Derived',
+        target_admin_level: targetAdminLevel || 'ADM3',
+      };
+
+      console.log('DeriveDatasetModal payload:', payload);
+
+      const { error } = await supabase.rpc('derive_dataset', payload);
 
       if (error) throw error;
       onDerived();
@@ -101,10 +114,10 @@ export default function DeriveDatasetModal({
           onChange={(e) => setOperation(e.target.value)}
         >
           <option value="divide">Divide (Dataset1 / Dataset2)</option>
-          <option value="multiply">Multiply</option>
-          <option value="add">Add</option>
-          <option value="subtract">Subtract</option>
-          <option value="scalar">Scalar (Dataset1 ÷ value)</option>
+          <option value="multiply">Multiply (Dataset1 × Dataset2)</option>
+          <option value="add">Add (Dataset1 + Dataset2)</option>
+          <option value="subtract">Subtract (Dataset1 − Dataset2)</option>
+          <option value="scalar">Scalar (Dataset1 ÷ Value)</option>
         </select>
 
         {/* Source Dataset 2 */}
@@ -118,11 +131,13 @@ export default function DeriveDatasetModal({
               disabled={operation === 'scalar'}
             >
               <option value="">Select dataset</option>
-              {datasets.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.type})
-                </option>
-              ))}
+              {datasets
+                .filter((d) => d.id !== dataset1)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.type})
+                  </option>
+                ))}
             </select>
           </>
         )}
