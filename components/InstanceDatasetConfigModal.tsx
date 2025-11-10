@@ -1,146 +1,145 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
 import NumericScoringModal from './NumericScoringModal';
 import CategoricalScoringModal from './CategoricalScoringModal';
 
-interface DatasetConfigModalProps {
+interface InstanceDatasetConfigModalProps {
   instance: any;
   onClose: () => void;
   onSaved?: () => void;
 }
 
-export default function DatasetConfigModal({
+export default function InstanceDatasetConfigModal({
   instance,
   onClose,
   onSaved,
-}: DatasetConfigModalProps) {
+}: InstanceDatasetConfigModalProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [showNumericModal, setShowNumericModal] = useState<any | null>(null);
-  const [showCategoricalModal, setShowCategoricalModal] = useState<any | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
 
+  // scoring modals
+  const [showNumericModal, setShowNumericModal] = useState<any>(null);
+  const [showCategoricalModal, setShowCategoricalModal] = useState<any>(null);
+
+  // load datasets
   useEffect(() => {
+    async function loadDatasets() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/datasets`);
+        const data = await res.json();
+        setDatasets(data || []);
+      } catch (err) {
+        console.error('Error loading datasets', err);
+      } finally {
+        setLoading(false);
+      }
+    }
     loadDatasets();
   }, []);
 
-  async function loadDatasets() {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('datasets')
-      .select('id, name, category, type, admin_level');
-    if (!error && data) setDatasets(data);
-    setLoading(false);
-  }
+  const handleToggle = (id: string) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
 
-  function toggleSelection(id: string) {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  }
+  const handleSave = async () => {
+    try {
+      await fetch(`/api/instances/${instance.id}/datasets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ datasetIds: selected }),
+      });
+      if (onSaved) await onSaved();
+      onClose();
+    } catch (err) {
+      console.error('Error saving datasets', err);
+    }
+  };
 
-  async function saveSelections() {
-    const records = Array.from(selected).map((datasetId) => ({
-      instance_id: instance.id,
-      dataset_id: datasetId,
-    }));
-    await supabase.from('instance_datasets').upsert(records);
-    if (onSaved) onSaved();
-    onClose();
-  }
-
-  function configureScoring(dataset: any) {
-    if (dataset.type === 'Numeric') setShowNumericModal(dataset);
-    else if (dataset.type === 'Categorical') setShowCategoricalModal(dataset);
-  }
+  const handleConfigureScoring = (dataset: any) => {
+    if (dataset.type === 'numeric') setShowNumericModal(dataset);
+    else if (dataset.type === 'categorical') setShowCategoricalModal(dataset);
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-5xl relative">
-        <div className="flex justify-between items-center border-b p-4">
-          <h2 className="text-lg font-semibold text-gray-800">Dataset Configuration</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
-            ×
-          </button>
-        </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div className="bg-white rounded-lg shadow-lg w-[900px] max-h-[85vh] overflow-y-auto p-6">
+        <h2 className="text-2xl font-semibold mb-4">Dataset Configuration</h2>
 
-        <div className="p-4 text-sm text-gray-700">
-          {loading ? (
-            <p>Loading datasets…</p>
-          ) : (
-            <table className="min-w-full border text-sm">
-              <thead className="bg-gray-100 text-gray-600">
-                <tr>
-                  <th className="px-3 py-2 text-left">Select</th>
-                  <th className="px-3 py-2 text-left">Dataset Name</th>
-                  <th className="px-3 py-2 text-left">Category</th>
-                  <th className="px-3 py-2 text-left">Type</th>
-                  <th className="px-3 py-2 text-left">Admin Level</th>
-                  <th className="px-3 py-2 text-left">Actions</th>
+        <p className="mb-4 text-gray-600">
+          Configure which datasets are included in instance:{" "}
+          <strong>{instance?.name}</strong>
+        </p>
+
+        {loading ? (
+          <p>Loading datasets...</p>
+        ) : (
+          <table className="min-w-full text-sm border">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="p-2 text-left">Select</th>
+                <th className="p-2 text-left">Dataset Name</th>
+                <th className="p-2 text-left">Category</th>
+                <th className="p-2 text-left">Type</th>
+                <th className="p-2 text-left">Admin Level</th>
+                <th className="p-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datasets.map((ds) => (
+                <tr key={ds.id} className="border-t hover:bg-gray-50">
+                  <td className="p-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(ds.id)}
+                      onChange={() => handleToggle(ds.id)}
+                    />
+                  </td>
+                  <td className="p-2">{ds.name}</td>
+                  <td className="p-2">{ds.category}</td>
+                  <td className="p-2 capitalize">{ds.type}</td>
+                  <td className="p-2">{ds.admin_level}</td>
+                  <td
+                    className="p-2 text-blue-600 cursor-pointer hover:underline"
+                    onClick={() => handleConfigureScoring(ds)}
+                  >
+                    Configure Scoring
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {datasets.map((d) => (
-                  <tr key={d.id} className="border-t hover:bg-gray-50">
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(d.id)}
-                        onChange={() => toggleSelection(d.id)}
-                      />
-                    </td>
-                    <td className="px-3 py-2">{d.name}</td>
-                    <td className="px-3 py-2">{d.category}</td>
-                    <td className="px-3 py-2">{d.type}</td>
-                    <td className="px-3 py-2">{d.admin_level}</td>
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => configureScoring(d)}
-                        className="text-blue-600 hover:underline"
-                      >
-                        Configure Scoring
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+              ))}
+            </tbody>
+          </table>
+        )}
 
-        <div className="border-t p-4 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 border rounded-md text-gray-700 hover:bg-gray-100"
-          >
+        <div className="flex justify-end mt-6 gap-3">
+          <Button variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            onClick={saveSelections}
-            className="px-4 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700"
-          >
-            Save Selections
-          </button>
+          </Button>
+          <Button onClick={handleSave}>Save Selections</Button>
         </div>
-      </div>
 
-      {showNumericModal && (
-        <NumericScoringModal
-          dataset={showNumericModal}
-          instance={instance}
-          onClose={() => setShowNumericModal(null)}
-        />
-      )}
-      {showCategoricalModal && (
-        <CategoricalScoringModal
-          dataset={showCategoricalModal}
-          instance={instance}
-          onClose={() => setShowCategoricalModal(null)}
-        />
-      )}
+        {/* scoring modals */}
+        {showNumericModal && (
+          <NumericScoringModal
+            dataset={showNumericModal}
+            instanceId={instance.id}
+            onClose={() => setShowNumericModal(null)}
+          />
+        )}
+
+        {showCategoricalModal && (
+          <CategoricalScoringModal
+            dataset={showCategoricalModal}
+            instanceId={instance.id}
+            onClose={() => setShowCategoricalModal(null)}
+          />
+        )}
+      </div>
     </div>
   );
 }
