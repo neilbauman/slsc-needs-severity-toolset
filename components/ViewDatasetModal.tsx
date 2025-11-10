@@ -12,23 +12,26 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const normalizePCode = (code?: string, level?: string): string => {
+  // Normalize PCode — remove 3 trailing zeros if ADM3 pattern (11 chars ending in 000)
+  const normalizePCode = (code?: string): string => {
     if (!code) return '';
-    const cleaned = code.trim().toUpperCase();
-    // Strip trailing zeros only if code length > expected for level
-    if (level === 'ADM3' && cleaned.length >= 11) return cleaned.slice(0, 9);
-    if (level === 'ADM2' && cleaned.length >= 9) return cleaned.slice(0, 7);
-    if (level === 'ADM4' && cleaned.length >= 13) return cleaned.slice(0, 11);
+    let cleaned = code.trim().toUpperCase();
+    if (cleaned.length === 11 && cleaned.endsWith('000')) {
+      cleaned = cleaned.slice(0, 8); // remove last 3 zeros (PH051705000 → PH051705)
+    }
     return cleaned;
   };
 
   const loadData = async () => {
     setLoading(true);
+
+    // Detect table based on dataset type
     const table =
       dataset.type === 'categorical'
         ? 'dataset_values_categorical'
         : 'dataset_values_numeric';
 
+    // Fetch dataset values
     const { data: datasetValues, error: datasetErr } = await supabase
       .from(table)
       .select('admin_pcode, value')
@@ -41,40 +44,34 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
       return;
     }
 
+    // Fetch boundaries
     const { data: admins, error: adminErr } = await supabase
       .from('admin_boundaries')
       .select('admin_pcode, name, admin_level');
 
     if (adminErr) {
-      console.error('Admin fetch error:', adminErr);
+      console.error('Admin boundaries fetch error:', adminErr);
       setLoading(false);
       return;
     }
 
+    // Map all possible codes (with and without trailing zeros)
     const adminMap = new Map<string, string>();
     admins?.forEach((a) => {
       const full = a.admin_pcode.trim().toUpperCase();
-      const sliced9 = full.slice(0, 9);
-      const sliced7 = full.slice(0, 7);
       adminMap.set(full, a.name);
-      adminMap.set(sliced9, a.name);
-      adminMap.set(sliced7, a.name);
+      if (full.length === 8) adminMap.set(full + '000', a.name); // map both ADM3/ADM4 forms
     });
 
     const combined =
       datasetValues?.map((r) => {
         const raw = r.admin_pcode?.trim().toUpperCase();
-        const normalized = normalizePCode(raw, dataset.admin_level);
+        const normalized = normalizePCode(raw);
         const name =
-          adminMap.get(normalized) ||
-          adminMap.get(raw.slice(0, 9)) || // fallback for ADM3
           adminMap.get(raw) ||
+          adminMap.get(normalized) ||
           'Unknown';
-
-        return {
-          ...r,
-          name,
-        };
+        return { ...r, name };
       }) ?? [];
 
     setRows(combined);
