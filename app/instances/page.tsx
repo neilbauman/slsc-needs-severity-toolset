@@ -140,12 +140,12 @@ export default function InstancesPage() {
 
       {/* Dataset Config Modal */}
       {showDatasetConfig && (
-        <InstanceDatasetConfigModal
-          instanceId={showDatasetConfig}
-          onClose={() => setShowDatasetConfig(null)}
-          onSaved={() => reloadInstanceDatasets(showDatasetConfig)}
-        />
-      )}
+  <InstanceDatasetConfigModal
+    instance={showDatasetConfig}
+    onClose={() => setShowDatasetConfig(null)}
+    onSaved={() => reloadInstanceDatasets(showDatasetConfig)}
+  />
+)}
 
       {/* Category Config Modal */}
       {showCategoryConfig && (
