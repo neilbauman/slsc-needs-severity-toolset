@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import InstanceConfigModal from '@/components/InstanceConfigModal';
 import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
-// Scoring preview modal will be added next
-// import ScoringPreviewModal from '@/components/ScoringPreviewModal';
+import ScoringPreviewModal from '@/components/ScoringPreviewModal';
 
 export default function InstancesPage() {
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [configInstance, setConfigInstance] = useState<any | null>(null);
   const [datasetConfigInstance, setDatasetConfigInstance] = useState<any | null>(null);
@@ -29,8 +29,12 @@ export default function InstancesPage() {
       .from('instances')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) console.error(error);
-    else setInstances(data || []);
+
+    if (error) {
+      console.error(error);
+    } else {
+      setInstances(data || []);
+    }
     setLoading(false);
   };
 
@@ -97,7 +101,10 @@ export default function InstancesPage() {
               </thead>
               <tbody>
                 {instances.map((inst) => (
-                  <tr key={inst.id} className="border-t hover:bg-gray-50 transition">
+                  <tr
+                    key={inst.id}
+                    className="border-t hover:bg-gray-50 transition"
+                  >
                     <td className="px-3 py-2">{inst.name}</td>
                     <td className="px-3 py-2 capitalize">{inst.type}</td>
                     <td className="px-3 py-2">{inst.admin_level}</td>
@@ -248,13 +255,13 @@ export default function InstancesPage() {
         />
       )}
 
-      {/* Scoring Preview Modal (next step) */}
-      {/* {scoringPreviewInstance && (
+      {/* Scoring Preview Modal */}
+      {scoringPreviewInstance && (
         <ScoringPreviewModal
           instance={scoringPreviewInstance}
           onClose={() => setScoringPreviewInstance(null)}
         />
-      )} */}
+      )}
     </div>
   );
 }
