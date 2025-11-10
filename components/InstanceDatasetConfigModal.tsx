@@ -25,11 +25,11 @@ export default function InstanceDatasetConfigModal({
     async function loadDatasets() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/datasets`);
+        const res = await fetch('/api/datasets');
         const data = await res.json();
         setDatasets(data || []);
       } catch (err) {
-        console.error(err);
+        console.error('Error loading datasets:', err);
       } finally {
         setLoading(false);
       }
@@ -53,7 +53,7 @@ export default function InstanceDatasetConfigModal({
       if (onSaved) await onSaved();
       onClose();
     } catch (err) {
-      console.error('Error saving datasets', err);
+      console.error('Error saving datasets:', err);
     }
   };
 
@@ -64,10 +64,15 @@ export default function InstanceDatasetConfigModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      <div className="bg-white rounded-lg shadow-lg w-[900px] max-h-[85vh] overflow-y-auto p-6">
+      <div className="bg-white rounded-lg shadow-lg w-[1000px] max-h-[90vh] overflow-y-auto p-6">
         <h2 className="text-2xl font-semibold mb-4">
-          Configure Datasets for {instance.name}
+          Dataset Configuration
         </h2>
+
+        <p className="text-gray-600 mb-4">
+          Configure which datasets are included in instance:{' '}
+          <strong>{instance.name}</strong>
+        </p>
 
         {loading ? (
           <p>Loading datasets...</p>
@@ -75,16 +80,17 @@ export default function InstanceDatasetConfigModal({
           <table className="min-w-full text-sm border border-gray-300">
             <thead className="bg-gray-100">
               <tr>
-                <th className="p-2">Select</th>
-                <th className="p-2 text-left">Name</th>
+                <th className="p-2 text-left">Select</th>
+                <th className="p-2 text-left">Dataset Name</th>
                 <th className="p-2 text-left">Category</th>
                 <th className="p-2 text-left">Type</th>
+                <th className="p-2 text-left">Admin Level</th>
                 <th className="p-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
               {datasets.map((ds) => (
-                <tr key={ds.id} className="border-t hover:bg-gray-50">
+                <tr key={ds.id} className="border-t hover:bg-gray-50 transition">
                   <td className="p-2">
                     <input
                       type="checkbox"
@@ -92,9 +98,10 @@ export default function InstanceDatasetConfigModal({
                       onChange={() => handleToggle(ds.id)}
                     />
                   </td>
-                  <td className="p-2">{ds.name}</td>
+                  <td className="p-2 font-medium">{ds.name}</td>
                   <td className="p-2">{ds.category}</td>
                   <td className="p-2 capitalize">{ds.type}</td>
+                  <td className="p-2">{ds.admin_level}</td>
                   <td className="p-2">
                     <button
                       onClick={() => handleConfigureScoring(ds)}
@@ -120,7 +127,7 @@ export default function InstanceDatasetConfigModal({
             onClick={handleSave}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
           >
-            Save
+            Save Selections
           </button>
         </div>
 
