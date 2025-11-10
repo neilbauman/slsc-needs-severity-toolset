@@ -12,10 +12,14 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const normalizePCode = (code?: string): string => {
+  const normalizePCode = (code?: string, level?: string): string => {
     if (!code) return '';
-    // Always uppercase, trim spaces, and remove trailing zeros for ADM3 equivalence
-    return code.trim().toUpperCase().replace(/0+$/, '');
+    const cleaned = code.trim().toUpperCase();
+    // Strip trailing zeros only if code length > expected for level
+    if (level === 'ADM3' && cleaned.length >= 11) return cleaned.slice(0, 9);
+    if (level === 'ADM2' && cleaned.length >= 9) return cleaned.slice(0, 7);
+    if (level === 'ADM4' && cleaned.length >= 13) return cleaned.slice(0, 11);
+    return cleaned;
   };
 
   const loadData = async () => {
@@ -25,44 +29,46 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
         ? 'dataset_values_categorical'
         : 'dataset_values_numeric';
 
-    const { data: datasetValues, error: dataErr } = await supabase
+    const { data: datasetValues, error: datasetErr } = await supabase
       .from(table)
       .select('admin_pcode, value')
       .eq('dataset_id', dataset.id)
       .limit(5000);
 
-    if (dataErr) {
-      console.error('Dataset fetch error:', dataErr);
+    if (datasetErr) {
+      console.error('Dataset fetch error:', datasetErr);
       setLoading(false);
       return;
     }
 
-    // Fetch all boundaries once — no admin_level filtering
     const { data: admins, error: adminErr } = await supabase
       .from('admin_boundaries')
-      .select('admin_pcode, name');
+      .select('admin_pcode, name, admin_level');
 
     if (adminErr) {
-      console.error('Admin boundaries fetch error:', adminErr);
+      console.error('Admin fetch error:', adminErr);
       setLoading(false);
       return;
     }
 
-    // Build lookup by normalized code (trailing zeros removed)
     const adminMap = new Map<string, string>();
     admins?.forEach((a) => {
-      adminMap.set(normalizePCode(a.admin_pcode), a.name);
+      const full = a.admin_pcode.trim().toUpperCase();
+      const sliced9 = full.slice(0, 9);
+      const sliced7 = full.slice(0, 7);
+      adminMap.set(full, a.name);
+      adminMap.set(sliced9, a.name);
+      adminMap.set(sliced7, a.name);
     });
 
     const combined =
       datasetValues?.map((r) => {
-        const rawCode = r.admin_pcode?.trim().toUpperCase();
-        const normalized = normalizePCode(rawCode);
-
-        // Try both normalized and raw forms (for ADM4)
+        const raw = r.admin_pcode?.trim().toUpperCase();
+        const normalized = normalizePCode(raw, dataset.admin_level);
         const name =
           adminMap.get(normalized) ||
-          adminMap.get(rawCode) ||
+          adminMap.get(raw.slice(0, 9)) || // fallback for ADM3
+          adminMap.get(raw) ||
           'Unknown';
 
         return {
