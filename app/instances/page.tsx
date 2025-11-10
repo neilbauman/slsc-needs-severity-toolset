@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import DatasetConfigModal from '@/components/DatasetConfigModal';
-import CategoryConfigModal from '@/components/CategoryConfigModal';
+import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
+import InstanceCategoryConfigModal from '@/components/InstanceCategoryConfigModal';
 import ScoringPreviewModal from '@/components/ScoringPreviewModal';
 
 export default function InstancesPage() {
@@ -50,9 +50,7 @@ export default function InstancesPage() {
     else loadInstances();
   };
 
-  const loadInstanceDatasets = async (instanceId: string) => {
-    // Placeholder reload after configuration
-    console.log(`Reloading datasets for instance: ${instanceId}`);
+  const reloadInstanceDatasets = async (instanceId: string) => {
     await loadInstances();
   };
 
@@ -142,16 +140,16 @@ export default function InstancesPage() {
 
       {/* Dataset Config Modal */}
       {showDatasetConfig && (
-        <DatasetConfigModal
+        <InstanceDatasetConfigModal
           instanceId={showDatasetConfig}
           onClose={() => setShowDatasetConfig(null)}
-          onSaved={() => loadInstanceDatasets(showDatasetConfig)}
+          onSaved={() => reloadInstanceDatasets(showDatasetConfig)}
         />
       )}
 
       {/* Category Config Modal */}
       {showCategoryConfig && (
-        <CategoryConfigModal
+        <InstanceCategoryConfigModal
           instance={showCategoryConfig}
           onClose={() => setShowCategoryConfig(null)}
         />
@@ -169,7 +167,7 @@ export default function InstancesPage() {
 }
 
 /**
- * Simple component for showing which datasets belong to an instance.
+ * Table of datasets currently linked to an instance
  */
 function InstanceDatasets({ instanceId }: { instanceId: string }) {
   const [datasets, setDatasets] = useState<any[]>([]);
