@@ -5,26 +5,26 @@ import { supabase } from '@/lib/supabaseClient';
 import NumericScoringModal from './NumericScoringModal';
 import CategoricalScoringModal from './CategoricalScoringModal';
 
-interface DatasetConfigModalProps {
-  instanceId: string;
+interface InstanceDatasetConfigModalProps {
+  instance: any;
   onClose: () => void;
   onSaved?: () => void;
 }
 
-export default function DatasetConfigModal({
-  instanceId,
+export default function InstanceDatasetConfigModal({
+  instance,
   onClose,
   onSaved,
-}: DatasetConfigModalProps) {
+}: InstanceDatasetConfigModalProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selectedDatasets, setSelectedDatasets] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNumericModal, setShowNumericModal] = useState<any | null>(null);
   const [showCategoricalModal, setShowCategoricalModal] = useState<any | null>(null);
 
   useEffect(() => {
-    loadDatasets();
-  }, []);
+    if (instance) loadDatasets();
+  }, [instance]);
 
   const loadDatasets = async () => {
     setLoading(true);
@@ -32,28 +32,20 @@ export default function DatasetConfigModal({
       .from('datasets')
       .select('*')
       .order('category', { ascending: true });
-
-    if (error) {
-      console.error(error);
-    } else {
-      setDatasets(data || []);
-
-      // Load instance selections
-      const { data: existing } = await supabase
-        .from('instance_datasets')
-        .select('dataset_id')
-        .eq('instance_id', instanceId);
-
-      if (existing) {
-        setSelected(existing.map((d) => d.dataset_id));
-      }
-    }
-
+    if (error) console.error(error);
+    else setDatasets(data || []);
     setLoading(false);
+
+    // Load existing instance dataset links
+    const { data: linked } = await supabase
+      .from('instance_datasets')
+      .select('dataset_id')
+      .eq('instance_id', instance.id);
+    if (linked) setSelectedDatasets(linked.map((l) => l.dataset_id));
   };
 
-  const toggleSelection = (datasetId: string) => {
-    setSelected((prev) =>
+  const toggleDataset = (datasetId: string) => {
+    setSelectedDatasets((prev) =>
       prev.includes(datasetId)
         ? prev.filter((id) => id !== datasetId)
         : [...prev, datasetId]
@@ -61,138 +53,93 @@ export default function DatasetConfigModal({
   };
 
   const handleSaveSelections = async () => {
-    try {
-      // Clear existing links for this instance
-      await supabase.from('instance_datasets').delete().eq('instance_id', instanceId);
-
-      // Insert updated selections
-      const insertRows = selected.map((id) => ({
-        instance_id: instanceId,
+    // Delete existing links and reinsert new ones
+    await supabase.from('instance_datasets').delete().eq('instance_id', instance.id);
+    if (selectedDatasets.length > 0) {
+      const newLinks = selectedDatasets.map((id) => ({
+        instance_id: instance.id,
         dataset_id: id,
       }));
-
-      if (insertRows.length > 0) {
-        const { error } = await supabase.from('instance_datasets').insert(insertRows);
-        if (error) throw error;
-      }
-
-      alert('Datasets updated successfully.');
-      onSaved?.();
-      onClose();
-    } catch (err) {
-      console.error(err);
-      alert('Error saving dataset selections.');
+      await supabase.from('instance_datasets').insert(newLinks);
     }
+    if (onSaved) onSaved();
+    onClose();
   };
 
-  const grouped = datasets.reduce((acc: any, ds: any) => {
-    const cat = ds.category || 'Uncategorized';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(ds);
-    return acc;
-  }, {});
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl relative max-h-[90vh] flex flex-col overflow-hidden">
-        {/* Header */}
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl">
         <div className="flex justify-between items-center p-4 border-b">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800">
-              Dataset Configuration
-            </h2>
-            <p className="text-xs text-gray-500">
-              Configure which datasets are included in instance:{' '}
-              <span className="font-medium">Baseline (PHL) – Nov 2025</span>
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl font-light"
-          >
+          <h2 className="text-lg font-semibold">Dataset Configuration</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">
             ×
           </button>
         </div>
 
-        <div className="flex-grow overflow-y-auto p-4">
+        <div className="p-4">
+          <p className="text-gray-600 mb-3">
+            Configure which datasets are included in instance:{' '}
+            <strong>{instance?.name}</strong>
+          </p>
+
           {loading ? (
-            <p className="text-gray-500 text-sm">Loading datasets…</p>
+            <p className="text-sm text-gray-500">Loading datasets…</p>
           ) : (
-            Object.keys(grouped).map((cat) => (
-              <div key={cat} className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                  {cat}
-                </h3>
-                <div className="overflow-x-auto border rounded-md bg-white shadow-sm">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-100 text-gray-700">
-                      <tr>
-                        <th className="px-3 py-2 text-left w-16">Select</th>
-                        <th className="px-3 py-2 text-left">Dataset Name</th>
-                        <th className="px-3 py-2 text-left">Category</th>
-                        <th className="px-3 py-2 text-left">Type</th>
-                        <th className="px-3 py-2 text-left">Admin Level</th>
-                        <th className="px-3 py-2 text-right w-32">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grouped[cat].map((ds: any) => (
-                        <tr
-                          key={ds.id}
-                          className={`border-t ${
-                            selected.includes(ds.id)
-                              ? 'bg-blue-50'
-                              : 'hover:bg-gray-50'
-                          }`}
-                        >
-                          <td className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              checked={selected.includes(ds.id)}
-                              onChange={() => toggleSelection(ds.id)}
-                              className="cursor-pointer"
-                            />
-                          </td>
-                          <td className="px-3 py-2 font-medium text-gray-800">
-                            {ds.name}
-                          </td>
-                          <td className="px-3 py-2">{ds.category}</td>
-                          <td className="px-3 py-2 capitalize">{ds.type}</td>
-                          <td className="px-3 py-2">{ds.admin_level}</td>
-                          <td className="px-3 py-2 text-right">
-                            {ds.type === 'numeric' ? (
-                              <button
-                                onClick={() => setShowNumericModal(ds)}
-                                className="text-blue-600 hover:underline text-sm"
-                              >
-                                ⚙ Configure Scoring
-                              </button>
-                            ) : ds.type === 'categorical' ? (
-                              <button
-                                onClick={() => setShowCategoricalModal(ds)}
-                                className="text-blue-600 hover:underline text-sm"
-                              >
-                                ⚙ Configure Scoring
-                              </button>
-                            ) : (
-                              <span className="text-gray-400 text-sm">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))
+            <div className="overflow-x-auto border rounded-md">
+              <table className="min-w-full text-sm border-collapse">
+                <thead className="bg-gray-100 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Select</th>
+                    <th className="px-3 py-2 text-left">Dataset Name</th>
+                    <th className="px-3 py-2 text-left">Category</th>
+                    <th className="px-3 py-2 text-left">Type</th>
+                    <th className="px-3 py-2 text-left">Admin Level</th>
+                    <th className="px-3 py-2 text-left">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {datasets.map((d) => (
+                    <tr key={d.id} className="border-t hover:bg-gray-50">
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedDatasets.includes(d.id)}
+                          onChange={() => toggleDataset(d.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-2">{d.name}</td>
+                      <td className="px-3 py-2">{d.category}</td>
+                      <td className="px-3 py-2">{d.type}</td>
+                      <td className="px-3 py-2">{d.admin_level}</td>
+                      <td className="px-3 py-2">
+                        {d.type === 'Numeric' ? (
+                          <button
+                            onClick={() => setShowNumericModal(d)}
+                            className="text-blue-600 hover:underline"
+                          >
+                            Configure Scoring
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setShowCategoricalModal(d)}
+                            className="text-blue-600 hover:underline"
+                          >
+                            Configure Scoring
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
-        {/* Footer */}
         <div className="border-t p-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-md border text-gray-600 hover:bg-gray-50"
+            className="px-4 py-1.5 text-sm rounded-md border text-gray-700 hover:bg-gray-100"
           >
             Cancel
           </button>
@@ -205,23 +152,20 @@ export default function DatasetConfigModal({
         </div>
       </div>
 
-      {/* Numeric Scoring Modal */}
+      {/* Modals for Scoring */}
       {showNumericModal && (
         <NumericScoringModal
           dataset={showNumericModal}
-          instanceId={instanceId}
+          instance={instance}
           onClose={() => setShowNumericModal(null)}
-          onSaved={loadDatasets}
         />
       )}
 
-      {/* Categorical Scoring Modal */}
       {showCategoricalModal && (
         <CategoricalScoringModal
           dataset={showCategoricalModal}
-          instanceId={instanceId}
+          instance={instance}
           onClose={() => setShowCategoricalModal(null)}
-          onSaved={loadDatasets}
         />
       )}
     </div>
