@@ -28,7 +28,6 @@ export default function DatasetsPage() {
     }
   }
 
-  // Group datasets by category
   const grouped = datasets.reduce((acc, d) => {
     const cat = d.category || "Uncategorized";
     if (!acc[cat]) acc[cat] = [];
@@ -36,7 +35,6 @@ export default function DatasetsPage() {
     return acc;
   }, {});
 
-  // Define preferred category display order
   const categoryOrder = [
     "Core",
     "SSC Framework - P1",
@@ -59,7 +57,6 @@ export default function DatasetsPage() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800">
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
@@ -83,7 +80,6 @@ export default function DatasetsPage() {
           </div>
         </div>
 
-        {/* Dataset Groups */}
         {sortedCategories.map((category) => (
           <div key={category} className="mb-8">
             <h2 className="text-lg font-semibold text-gray-700 mb-2 border-b border-gray-200 pb-1">
@@ -101,7 +97,6 @@ export default function DatasetsPage() {
         ))}
       </div>
 
-      {/* Upload Modal */}
       {showUploadModal && (
         <UploadDatasetModal
           onClose={() => setShowUploadModal(false)}
@@ -109,11 +104,10 @@ export default function DatasetsPage() {
         />
       )}
 
-      {/* Derive Modal */}
       {showDeriveModal && (
         <DeriveDatasetModal
           onClose={() => setShowDeriveModal(false)}
-          onCreated={loadDatasets}
+          onDerived={loadDatasets}
           datasets={datasets}
         />
       )}
