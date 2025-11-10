@@ -50,7 +50,7 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
       complete: (results) => {
         const rows = results.data as any[];
         if (rows.length === 0) {
-          setError('CSV appears empty');
+          setError('CSV appears empty.');
           return;
         }
         setPreview(rows.slice(0, 5));
@@ -61,10 +61,10 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
   };
 
   const handleUpload = async () => {
-    if (!file) return setError('Please select a file');
+    if (!file) return setError('Please select a file.');
     if (!mapping.admin_pcode || !mapping.value)
-      return setError('Please map Admin PCode and Value columns');
-    if (!meta.name) return setError('Please enter a dataset name');
+      return setError('Please map Admin PCode and Value columns.');
+    if (!meta.name) return setError('Please enter a dataset name.');
 
     setLoading(true);
     setError(null);
@@ -87,38 +87,42 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
 
       if (insertError) throw insertError;
 
-      // Parse full CSV again for insertion
-      Papa.parse(file, {
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        complete: async (results) => {
-          const rows = results.data as any[];
-          const values = rows.map((r) => ({
-            dataset_id: dataset.id,
-            admin_pcode: String(r[mapping.admin_pcode] || '').trim(),
-            admin_name: mapping.admin_name ? String(r[mapping.admin_name] || '').trim() : null,
-            value: meta.type === 'numeric' ? Number(r[mapping.value]) : String(r[mapping.value]),
-          }));
+      // Parse the entire CSV synchronously
+      const csvText = await file.text();
+      const results = Papa.parse(csvText, { header: true, dynamicTyping: true });
+      const rows = results.data as any[];
 
-          const table =
-            meta.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
+      if (!rows || rows.length === 0) throw new Error('CSV file is empty.');
 
-          const chunkSize = 500;
-          for (let i = 0; i < values.length; i += chunkSize) {
-            const chunk = values.slice(i, i + chunkSize);
-            const { error: insertChunkError } = await supabase.from(table).insert(chunk);
-            if (insertChunkError) throw insertChunkError;
-          }
+      // Build dataset values
+      const values = rows
+        .filter((r) => r[mapping.admin_pcode] && r[mapping.value] !== undefined)
+        .map((r) => ({
+          dataset_id: dataset.id,
+          admin_pcode: String(r[mapping.admin_pcode]).trim(),
+          admin_name: mapping.admin_name ? String(r[mapping.admin_name] || '').trim() : null,
+          value: meta.type === 'numeric' ? Number(r[mapping.value]) : String(r[mapping.value]),
+        }));
 
-          alert(`✅ Dataset "${meta.name}" uploaded successfully!`);
-          onUploaded();
-          onClose();
-        },
-      });
+      if (values.length === 0) throw new Error('No valid rows found in CSV.');
+
+      const table =
+        meta.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
+
+      // Insert in chunks to avoid payload limits
+      const chunkSize = 500;
+      for (let i = 0; i < values.length; i += chunkSize) {
+        const chunk = values.slice(i, i + chunkSize);
+        const { error: insertChunkError } = await supabase.from(table).insert(chunk);
+        if (insertChunkError) throw insertChunkError;
+      }
+
+      alert(`✅ Uploaded ${values.length} rows to ${table}`);
+      await onUploaded();
+      onClose();
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Upload failed');
+      console.error('Upload failed:', err);
+      setError(err.message || 'Upload failed.');
     } finally {
       setLoading(false);
     }
