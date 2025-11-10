@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 interface EditDatasetModalProps {
   dataset: any;
   onClose: () => void;
-  onSave: () => Promise<void>;
+  onSave: () => void;
 }
 
 export default function EditDatasetModal({
@@ -14,131 +14,159 @@ export default function EditDatasetModal({
   onClose,
   onSave,
 }: EditDatasetModalProps) {
-  const [form, setForm] = useState({
-    name: dataset.name || '',
-    category: dataset.category || '',
-    admin_level: dataset.admin_level || '',
-    type: dataset.type || 'numeric',
-    description: dataset.description || '',
-  });
+  const [name, setName] = useState(dataset.name || '');
+  const [category, setCategory] = useState(dataset.category || '');
+  const [type, setType] = useState(dataset.type || 'numeric');
+  const [adminLevel, setAdminLevel] = useState(dataset.admin_level || '');
+  const [description, setDescription] = useState(dataset.description || '');
   const [saving, setSaving] = useState(false);
 
-  const handleChange = (field: string, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
+  const categories = [
+    'Core',
+    'SSC Framework - P1',
+    'SSC Framework - P2',
+    'SSC Framework - P3',
+    'Hazards',
+    'Underlying Vulnerability',
+  ];
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const adminLevels = ['ADM2', 'ADM3', 'ADM4'];
+  const types = ['numeric', 'categorical'];
+
+  const handleSave = async () => {
     setSaving(true);
-
     const { error } = await supabase
       .from('datasets')
       .update({
-        name: form.name,
-        category: form.category,
-        admin_level: form.admin_level,
-        type: form.type,
-        description: form.description,
+        name,
+        category,
+        type,
+        admin_level: adminLevel,
+        description,
         updated_at: new Date().toISOString(),
       })
       .eq('id', dataset.id);
 
     setSaving(false);
+
     if (error) {
-      alert(`Error updating dataset: ${error.message}`);
+      console.error('Error updating dataset:', error);
+      alert('Failed to update dataset.');
     } else {
-      await onSave();
+      onSave();
       onClose();
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-lg p-6">
-        <h2 className="text-lg font-semibold mb-4">Edit Dataset</h2>
-        <form onSubmit={handleSubmit} className="space-y-3 text-sm">
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">
+          Edit Dataset
+        </h2>
+
+        <div className="space-y-4">
+          {/* Dataset Name */}
           <div>
-            <label className="block text-gray-700 mb-1">Name</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Name
+            </label>
             <input
               type="text"
-              value={form.name}
-              onChange={(e) => handleChange('name', e.target.value)}
-              className="w-full border rounded-md px-3 py-2"
-              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              placeholder="Dataset name"
             />
           </div>
 
+          {/* Category */}
           <div>
-            <label className="block text-gray-700 mb-1">Category</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Category
+            </label>
             <select
-              value={form.category}
-              onChange={(e) => handleChange('category', e.target.value)}
-              className="w-full border rounded-md px-3 py-2"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
             >
-              <option value="Core">Core</option>
-              <option value="SSC Framework - P1">SSC Framework - P1</option>
-              <option value="SSC Framework - P2">SSC Framework - P2</option>
-              <option value="SSC Framework - P3">SSC Framework - P3</option>
-              <option value="Hazards">Hazards</option>
-              <option value="Underlying Vulnerabilities">
-                Underlying Vulnerabilities
-              </option>
+              <option value="">Select category</option>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
             </select>
           </div>
 
+          {/* Type */}
           <div>
-            <label className="block text-gray-700 mb-1">Admin Level</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Type
+            </label>
             <select
-              value={form.admin_level}
-              onChange={(e) => handleChange('admin_level', e.target.value)}
-              className="w-full border rounded-md px-3 py-2"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
             >
-              <option value="ADM1">ADM1</option>
-              <option value="ADM2">ADM2</option>
-              <option value="ADM3">ADM3</option>
-              <option value="ADM4">ADM4</option>
+              {types.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
             </select>
           </div>
 
+          {/* Admin Level */}
           <div>
-            <label className="block text-gray-700 mb-1">Type</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Admin Level
+            </label>
             <select
-              value={form.type}
-              onChange={(e) => handleChange('type', e.target.value)}
-              className="w-full border rounded-md px-3 py-2"
+              value={adminLevel}
+              onChange={(e) => setAdminLevel(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
             >
-              <option value="numeric">Numeric</option>
-              <option value="categorical">Categorical</option>
+              <option value="">Select admin level</option>
+              {adminLevels.map((lvl) => (
+                <option key={lvl} value={lvl}>
+                  {lvl}
+                </option>
+              ))}
             </select>
           </div>
 
+          {/* Description */}
           <div>
-            <label className="block text-gray-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
             <textarea
-              value={form.description}
-              onChange={(e) => handleChange('description', e.target.value)}
-              className="w-full border rounded-md px-3 py-2"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
               rows={3}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              placeholder="Describe the dataset..."
             />
           </div>
+        </div>
 
-          <div className="flex justify-end gap-2 mt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="bg-gray-200 text-gray-800 px-3 py-1.5 rounded-md hover:bg-gray-300"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="bg-blue-600 text-white px-4 py-1.5 rounded-md hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        </form>
+        <div className="flex justify-end mt-6 space-x-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md"
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
     </div>
   );
