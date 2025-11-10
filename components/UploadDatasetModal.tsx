@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 interface UploadDatasetModalProps {
   onClose: () => void;
@@ -9,7 +9,7 @@ interface UploadDatasetModalProps {
 }
 
 export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatasetModalProps) {
-  const supabase = createClient();
+
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
