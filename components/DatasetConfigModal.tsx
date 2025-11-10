@@ -2,119 +2,86 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import NumericScoringModal from './NumericScoringModal';
 
 interface DatasetConfigModalProps {
   instance: any;
   onClose: () => void;
 }
 
-export default function DatasetConfigModal({
-  instance,
-  onClose,
-}: DatasetConfigModalProps) {
+export default function DatasetConfigModal({ instance, onClose }: DatasetConfigModalProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
-  const [configs, setConfigs] = useState<any[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [showNumericModal, setShowNumericModal] = useState<any | null>(null);
 
-  // Load all datasets and existing configs for this instance
   useEffect(() => {
-    if (!instance) return;
-    loadData();
-  }, [instance]);
+    loadDatasets();
+    loadSelections();
+  }, []);
 
-  const loadData = async () => {
-    setLoading(true);
-    setError(null);
+  const loadDatasets = async () => {
+    const { data, error } = await supabase
+      .from('datasets')
+      .select('*')
+      .order('category', { ascending: true });
 
-    try {
-      const { data: allDatasets, error: dsError } = await supabase
-        .from('datasets')
-        .select('*')
-        .order('category', { ascending: true });
-
-      if (dsError) throw dsError;
-
-      const { data: existingConfigs, error: cfgError } = await supabase
-        .from('instance_datasets')
-        .select('*')
-        .eq('instance_id', instance.id);
-
-      if (cfgError) throw cfgError;
-
-      setDatasets(allDatasets || []);
-      setConfigs(existingConfigs || []);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to load dataset configurations');
-    } finally {
-      setLoading(false);
-    }
+    if (error) console.error(error);
+    else setDatasets(data || []);
+    setLoading(false);
   };
 
-  const getConfig = (datasetId: string) =>
-    configs.find((c) => c.dataset_id === datasetId);
+  const loadSelections = async () => {
+    const { data, error } = await supabase
+      .from('instance_datasets')
+      .select('dataset_id')
+      .eq('instance_id', instance.id);
 
-  const handleToggleDataset = (dataset: any) => {
-    const exists = getConfig(dataset.id);
-    if (exists) {
-      setConfigs(configs.filter((c) => c.dataset_id !== dataset.id));
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setSelected(data?.map((r: any) => r.dataset_id) || []);
+  };
+
+  const handleToggle = (datasetId: string) => {
+    if (selected.includes(datasetId)) {
+      setSelected(selected.filter((id) => id !== datasetId));
     } else {
-      setConfigs([
-        ...configs,
-        {
-          dataset_id: dataset.id,
-          instance_id: instance.id,
-          score_method: 'linear',
-          direction: 'normal',
-          weight: 1.0,
-        },
-      ]);
+      setSelected([...selected, datasetId]);
     }
-  };
-
-  const handleChange = (datasetId: string, field: string, value: any) => {
-    setConfigs((prev) =>
-      prev.map((c) =>
-        c.dataset_id === datasetId ? { ...c, [field]: value } : c
-      )
-    );
   };
 
   const handleSave = async () => {
-    try {
-      setSaving(true);
+    setSaving(true);
 
-      const { error: delError } = await supabase
-        .from('instance_datasets')
-        .delete()
-        .eq('instance_id', instance.id);
-      if (delError) throw delError;
+    // Clear old selections
+    await supabase.from('instance_datasets').delete().eq('instance_id', instance.id);
 
-      if (configs.length > 0) {
-        const { error: insertError } = await supabase
-          .from('instance_datasets')
-          .insert(configs);
-        if (insertError) throw insertError;
-      }
+    // Insert new selections
+    const records = selected.map((id) => ({
+      instance_id: instance.id,
+      dataset_id: id,
+      score_config: {},
+    }));
 
-      alert('Dataset scoring configuration saved.');
+    const { error } = await supabase.from('instance_datasets').insert(records);
+
+    if (error) {
+      alert(`Error saving datasets: ${error.message}`);
+    } else {
+      alert('Datasets saved for this instance.');
       onClose();
-    } catch (err: any) {
-      console.error(err);
-      alert(`Error saving configuration: ${err.message}`);
-    } finally {
-      setSaving(false);
     }
+
+    setSaving(false);
   };
 
-  const scoringMethods = [
-    { value: 'linear', label: 'Linear (higher = higher risk)' },
-    { value: 'inverse', label: 'Inverse (higher = lower risk)' },
-    { value: 'threshold', label: 'Threshold (binary cutoff)' },
-    { value: 'categorical', label: 'Categorical (mapped scores)' },
-  ];
+  const openNumericModal = (dataset: any) => {
+    setShowNumericModal(dataset);
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-3">
@@ -122,11 +89,9 @@ export default function DatasetConfigModal({
         {/* Header */}
         <div className="flex justify-between items-start p-4 border-b">
           <div>
-            <h2 className="text-base font-semibold text-gray-800">
-              Dataset Scoring Configuration
-            </h2>
+            <h2 className="text-base font-semibold text-gray-800">Dataset Configuration</h2>
             <p className="text-xs text-gray-500">
-              Instance: {instance.name} ({instance.type})
+              Configure which datasets are included in instance: <strong>{instance.name}</strong>
             </p>
           </div>
           <button
@@ -138,111 +103,54 @@ export default function DatasetConfigModal({
         </div>
 
         {/* Body */}
-        <div className="flex-grow overflow-y-auto p-4">
+        <div className="flex-grow overflow-y-auto p-4 text-sm">
           {loading ? (
-            <p className="text-gray-500 text-center py-8 text-sm">
-              Loading datasets...
-            </p>
-          ) : error ? (
-            <p className="text-red-600 text-center py-8">{error}</p>
-          ) : datasets.length === 0 ? (
-            <p className="text-gray-500 text-center py-8 text-sm">
-              No datasets found.
-            </p>
+            <p className="text-gray-500">Loading datasets...</p>
           ) : (
-            <div className="overflow-x-auto border rounded-md">
-              <table className="min-w-full text-sm border-collapse">
-                <thead className="bg-gray-100 text-gray-700">
-                  <tr>
-                    <th className="px-3 py-2 text-left border-b">Use</th>
-                    <th className="px-3 py-2 text-left border-b">Name</th>
-                    <th className="px-3 py-2 text-left border-b">Category</th>
-                    <th className="px-3 py-2 text-left border-b">Type</th>
-                    <th className="px-3 py-2 text-left border-b">Method</th>
-                    <th className="px-3 py-2 text-left border-b">Direction</th>
-                    <th className="px-3 py-2 text-left border-b">Weight</th>
+            <table className="min-w-full text-sm border border-gray-200 rounded-md">
+              <thead className="bg-gray-100 border-b text-gray-700">
+                <tr>
+                  <th className="px-3 py-2 text-left">Select</th>
+                  <th className="px-3 py-2 text-left">Dataset Name</th>
+                  <th className="px-3 py-2 text-left">Category</th>
+                  <th className="px-3 py-2 text-left">Type</th>
+                  <th className="px-3 py-2 text-left">Admin Level</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {datasets.map((ds) => (
+                  <tr
+                    key={ds.id}
+                    className={`border-t ${
+                      selected.includes(ds.id) ? 'bg-blue-50' : ''
+                    } hover:bg-gray-50 transition`}
+                  >
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(ds.id)}
+                        onChange={() => handleToggle(ds.id)}
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-medium text-gray-800">{ds.name}</td>
+                    <td className="px-3 py-2 text-gray-700">{ds.category}</td>
+                    <td className="px-3 py-2 text-gray-700 capitalize">{ds.type}</td>
+                    <td className="px-3 py-2 text-gray-700">{ds.admin_level}</td>
+                    <td className="px-3 py-2 text-right">
+                      {ds.type === 'numeric' && selected.includes(ds.id) && (
+                        <button
+                          onClick={() => openNumericModal(ds)}
+                          className="text-blue-600 hover:underline text-sm"
+                        >
+                          ⚙️ Configure Scoring
+                        </button>
+                      )}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {datasets.map((d) => {
-                    const cfg = getConfig(d.id);
-                    const selected = !!cfg;
-                    return (
-                      <tr
-                        key={d.id}
-                        className={`border-t ${
-                          selected ? 'bg-blue-50' : 'bg-white'
-                        }`}
-                      >
-                        <td className="px-3 py-2 border-b">
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => handleToggleDataset(d)}
-                          />
-                        </td>
-                        <td className="px-3 py-2 border-b font-medium">
-                          {d.name}
-                        </td>
-                        <td className="px-3 py-2 border-b">{d.category}</td>
-                        <td className="px-3 py-2 border-b capitalize">
-                          {d.type}
-                        </td>
-                        <td className="px-3 py-2 border-b">
-                          {selected && (
-                            <select
-                              value={cfg?.score_method || 'linear'}
-                              onChange={(e) =>
-                                handleChange(d.id, 'score_method', e.target.value)
-                              }
-                              className="border rounded-md px-1 py-0.5 text-sm"
-                            >
-                              {scoringMethods.map((m) => (
-                                <option key={m.value} value={m.value}>
-                                  {m.label}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 border-b">
-                          {selected && (
-                            <select
-                              value={cfg?.direction || 'normal'}
-                              onChange={(e) =>
-                                handleChange(d.id, 'direction', e.target.value)
-                              }
-                              className="border rounded-md px-1 py-0.5 text-sm"
-                            >
-                              <option value="normal">Normal</option>
-                              <option value="inverse">Inverse</option>
-                            </select>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 border-b">
-                          {selected && (
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={cfg?.weight ?? 1}
-                              onChange={(e) =>
-                                handleChange(
-                                  d.id,
-                                  'weight',
-                                  parseFloat(e.target.value)
-                                )
-                              }
-                              className="border rounded-md px-2 py-0.5 text-sm w-20"
-                            />
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
 
@@ -259,10 +167,19 @@ export default function DatasetConfigModal({
             disabled={saving}
             className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? 'Saving...' : 'Save Selections'}
           </button>
         </div>
       </div>
+
+      {/* Numeric Scoring Modal */}
+      {showNumericModal && (
+        <NumericScoringModal
+          instanceId={instance.id}
+          dataset={showNumericModal}
+          onClose={() => setShowNumericModal(null)}
+        />
+      )}
     </div>
   );
 }
