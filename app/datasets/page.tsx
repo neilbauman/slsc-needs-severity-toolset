@@ -10,9 +10,6 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState([]);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showDeriveModal, setShowDeriveModal] = useState(false);
-  const [viewDataset, setViewDataset] = useState(null);
-  const [editDataset, setEditDataset] = useState(null);
-  const [deleteDataset, setDeleteDataset] = useState(null);
 
   useEffect(() => {
     loadDatasets();
@@ -23,9 +20,7 @@ export default function DatasetsPage() {
       .from("datasets")
       .select("*")
       .order("created_at", { ascending: false });
-    if (!error && data) {
-      setDatasets(data);
-    }
+    if (!error && data) setDatasets(data);
   }
 
   const grouped = datasets.reduce((acc, d) => {
@@ -86,12 +81,7 @@ export default function DatasetsPage() {
               {category}
             </h2>
             <div className="overflow-x-auto bg-white rounded-md shadow-sm border border-gray-200">
-              <DatasetTable
-                datasets={grouped[category]}
-                onView={setViewDataset}
-                onEdit={setEditDataset}
-                onDelete={setDeleteDataset}
-              />
+              <DatasetTable datasets={grouped[category]} />
             </div>
           </div>
         ))}
