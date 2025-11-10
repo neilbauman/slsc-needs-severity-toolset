@@ -10,7 +10,7 @@ type GroupKey =
   | 'SSC Framework - P2'
   | 'SSC Framework - P3'
   | 'Hazards/Risks'
-  | 'Underlying Vulnerabilities';
+  | 'Underlying Vulnerability';
 
 type UiDataset = {
   dataset_id: string;
@@ -42,7 +42,7 @@ const ALL_CATEGORY_KEYS: GroupKey[] = [
   'SSC Framework - P2',
   'SSC Framework - P3',
   'Hazards/Risks',
-  'Underlying Vulnerabilities',
+  'Underlying Vulnerability',
 ];
 
 export default function FrameworkScoringModal({ instance, onClose, onSaved }: Props) {
@@ -114,7 +114,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
       'SSC Framework - P2': [],
       'SSC Framework - P3': [],
       'Hazards/Risks': [],
-      'Underlying Vulnerabilities': [],
+      'Underlying Vulnerability': [],
     };
     for (const d of datasets) {
       if (m[d.category]) m[d.category].push(d);
