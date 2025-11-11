@@ -1,274 +1,432 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
-import type { FeatureCollection, Feature, Geometry } from 'geojson';
-import L from 'leaflet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Feature, FeatureCollection, Geometry } from 'geojson';
+import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import type { GeoJSON as LeafletGeoJSON } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { createClient } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 
-type AdmRow = { admin_pcode: string; name: string; geom: Geometry };
+type Instance = {
+  id: string;
+  name: string;
+  admin_scope?: string[] | null;
+};
 
-function FitBoundsOnLoad({ geoRef, deps = [] }: { geoRef: React.RefObject<L.GeoJSON | null>; deps?: any[] }) {
-  const map = useMap();
-  useEffect(() => {
-    if (geoRef.current) {
-      try {
-        const b = geoRef.current.getBounds();
-        if (b.isValid()) map.fitBounds(b.pad(0.05));
-      } catch {}
-    }
-  }, [map, geoRef, ...(deps ?? [])]);
-  return null;
+type AdmRow = {
+  admin_level: 'ADM1' | 'ADM2';
+  admin_pcode: string;
+  name: string;
+  geom: Geometry;
+};
+
+type Props = {
+  instance: Instance;
+  onClose: () => void;
+  onSaved: () => void;
+};
+
+const GSC = {
+  red: '#630710',
+  blue: '#004b87',
+  green: '#2e7d32',
+  orange: '#d35400',
+  gray: '#374151',
+  lightGray: '#e5e7eb',
+  beige: '#f5f2ee',
+};
+
+function classNames(...xs: (string | false | null | undefined)[]) {
+  return xs.filter(Boolean).join(' ');
 }
 
-export default function AffectedAreaModal({
-  instanceId,
-  initialScope,
-  onClose,
-  onSaved,
-}: {
-  instanceId: string;
-  initialScope?: string[] | null;
-  onClose: () => void;
-  onSaved: (updatedScope: string[]) => Promise<void>;
-}) {
-  const supabase = createClient();
+function toFeatureCollection(rows: AdmRow[]): FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: rows.map((r) => ({
+      type: 'Feature',
+      geometry: r.geom,
+      properties: {
+        admin_level: r.admin_level,
+        admin_pcode: r.admin_pcode,
+        name: r.name,
+      },
+    })) as Feature[],
+  };
+}
 
-  // Global state
-  const [activeTab, setActiveTab] = useState<'ADM1' | 'ADM2'>('ADM1');
+// simple green→red gradient for future use (kept for consistency)
+function pctToColor(p: number) {
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  const t = clamp(p);
+  const r = Math.round(255 * t);
+  const g = Math.round(170 * (1 - t) + 30); // keep green-ish when low
+  const b = Math.round(60 * (1 - t));
+  return `rgb(${r},${g},${b})`;
+}
+
+export default function AffectedAreaModal({ instance, onClose, onSaved }: Props) {
+  const [loading, setLoading] = useState(true);
   const [adm1Rows, setAdm1Rows] = useState<AdmRow[]>([]);
   const [adm2Rows, setAdm2Rows] = useState<AdmRow[]>([]);
-  const [selectedAdm1, setSelectedAdm1] = useState<Set<string>>(new Set());
-  const [selectedAdm2, setSelectedAdm2] = useState<Set<string>>(new Set(initialScope ?? []));
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const geoRef = useRef<L.GeoJSON | null>(null);
-
-  // Fetch function (ADM1 or ADM2)
-  const fetchData = async (level: 'ADM1' | 'ADM2', filter?: string[]) => {
-    setLoading(true);
-    const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
-      in_admin_level: level,
-      in_search: search || null,
-    });
-    if (error) {
-      console.error(error.message);
-      setLoading(false);
-      return [];
-    }
-    let rows = (data ?? []).map((r: any) => ({
-      admin_pcode: r.admin_pcode,
-      name: r.name,
-      geom: r.geom as Geometry,
-    }));
-    // Filter ADM2 by selected ADM1 prefix
-    if (level === 'ADM2' && filter && filter.length > 0) {
-      rows = rows.filter((r) => filter.some((f) => r.admin_pcode.startsWith(f)));
-    }
-    setLoading(false);
-    return rows;
-  };
-
-  // Load ADM1 at start
-  useEffect(() => {
-    fetchData('ADM1').then(setAdm1Rows);
-  }, []);
-
-  // Load ADM2 when entering ADM2 tab
-  useEffect(() => {
-    if (activeTab === 'ADM2') {
-      fetchData('ADM2', Array.from(selectedAdm1)).then(setAdm2Rows);
-    }
-  }, [activeTab, selectedAdm1]);
-
-  // Selection helpers
-  const toggleAdm1 = (p: string) =>
-    setSelectedAdm1((prev) => {
-      const next = new Set(prev);
-      next.has(p) ? next.delete(p) : next.add(p);
-      return next;
-    });
-
-  const toggleAdm2 = (p: string) =>
-    setSelectedAdm2((prev) => {
-      const next = new Set(prev);
-      next.has(p) ? next.delete(p) : next.add(p);
-      return next;
-    });
-
-  // Build map features
-  const currentRows = activeTab === 'ADM1' ? adm1Rows : adm2Rows;
-  const fc: FeatureCollection = useMemo(
-    () => ({
-      type: 'FeatureCollection',
-      features: currentRows.map(
-        (r) =>
-          ({
-            type: 'Feature',
-            geometry: r.geom,
-            properties: { admin_pcode: r.admin_pcode, name: r.name },
-          }) as Feature
-      ),
-    }),
-    [currentRows]
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const [selectedAdm2, setSelectedAdm2] = useState<Set<string>>(
+    new Set(instance.admin_scope ?? [])
   );
 
-  const style = (f: any) => {
-    const code = f.properties?.admin_pcode;
-    const sel =
-      activeTab === 'ADM1'
-        ? selectedAdm1.has(code)
-        : selectedAdm2.has(code);
-    return {
-      color: sel ? '#2e7d32' : '#888',
-      weight: 1.2,
-      fillColor: sel ? '#81c784' : '#ccc',
-      fillOpacity: sel ? 0.6 : 0.2,
+  // map refs
+  const adm1LayerRef = useRef<LeafletGeoJSON | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+
+  // load ADM1 + ADM2
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const [{ data: a1, error: e1 }, { data: a2, error: e2 }] = await Promise.all([
+        supabase.rpc('get_admin_boundaries_geojson', {
+          in_admin_level: 'ADM1',
+          in_search: null,
+        }),
+        supabase.rpc('get_admin_boundaries_geojson', {
+          in_admin_level: 'ADM2',
+          in_search: null,
+        }),
+      ]);
+
+      if (!cancelled) {
+        if (e1 || e2) {
+          console.error('RPC get_admin_boundaries_geojson failed', e1 || e2);
+          setAdm1Rows([]);
+          setAdm2Rows([]);
+        } else {
+          setAdm1Rows((a1 ?? []) as AdmRow[]);
+          setAdm2Rows((a2 ?? []) as AdmRow[]);
+        }
+        setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-  };
+  }, []);
 
-  const onEach = (f: any, l: L.Layer) => {
-    const code = f.properties?.admin_pcode;
-    if (!code) return;
-    l.on({
-      click: () =>
-        activeTab === 'ADM1' ? toggleAdm1(code) : toggleAdm2(code),
+  // group ADM2 by parent ADM1 prefix (first 4 chars like PH01)
+  const grouped = useMemo(() => {
+    const byParent = new Map<string, AdmRow[]>();
+    for (const r of adm2Rows) {
+      const parent = r.admin_pcode.slice(0, 4);
+      if (!byParent.has(parent)) byParent.set(parent, []);
+      byParent.get(parent)!.push(r);
+    }
+    // keep ADM1 display rows aligned with actual data available
+    const adm1 = adm1Rows
+      .map((r) => ({
+        ...r,
+        children: (byParent.get(r.admin_pcode) ?? []).sort((a, b) =>
+          a.name.localeCompare(b.name)
+        ),
+      }))
+      .filter((r) => r.children.length > 0);
+
+    // search filter
+    const s = search.trim().toLowerCase();
+    if (!s) return adm1;
+
+    return adm1
+      .map((g) => {
+        const matchGroup =
+          g.name.toLowerCase().includes(s) ||
+          g.admin_pcode.toLowerCase().includes(s);
+        const kids = matchGroup
+          ? g.children
+          : g.children.filter(
+              (c) =>
+                c.name.toLowerCase().includes(s) ||
+                c.admin_pcode.toLowerCase().includes(s)
+            );
+        return kids.length ? { ...g, children: kids } : null;
+      })
+      .filter(Boolean) as (AdmRow & { children: AdmRow[] })[];
+  }, [adm1Rows, adm2Rows, search]);
+
+  const totalAdm2 = useMemo(
+    () => adm2Rows.length,
+    [adm2Rows.length]
+  );
+
+  // geojson sources for map (ADM1 outlines, selected ADM2 shaded)
+  const adm1FC = useMemo(() => toFeatureCollection(adm1Rows), [adm1Rows]);
+  const selectedAdm2FC = useMemo(() => {
+    const sel = new Set(selectedAdm2);
+    const rows = adm2Rows.filter((r) => sel.has(r.admin_pcode));
+    return toFeatureCollection(rows);
+  }, [adm2Rows, selectedAdm2]);
+
+  // fit map to ADM1 bounds when layer mounts/updates
+  useEffect(() => {
+    const layer = adm1LayerRef.current;
+    if (!layer) return;
+    try {
+      const b = layer.getBounds();
+      if (b.isValid()) {
+        const map = layer._map ?? mapRef.current;
+        map?.fitBounds(b.pad(0.05));
+      }
+    } catch {
+      /* noop */
+    }
+  }, [adm1FC]);
+
+  // handlers
+  const toggleGroup = (adm1Code: string) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(adm1Code)) next.delete(adm1Code);
+      else next.add(adm1Code);
+      return next;
     });
-    l.bindTooltip(f.properties?.name || code);
   };
 
-  const filteredRows = useMemo(() => {
-    const q = search.toLowerCase();
-    if (!q) return currentRows;
-    return currentRows.filter(
-      (r) =>
-        r.name.toLowerCase().includes(q) ||
-        r.admin_pcode.toLowerCase().includes(q)
-    );
-  }, [search, currentRows]);
+  const isGroupOpen = (adm1Code: string) => openGroups.has(adm1Code);
 
-  const handleSave = async () => {
-    setSaving(true);
-    const scope = Array.from(selectedAdm2);
+  const handleToggleAdm2 = (code: string) => {
+    setSelectedAdm2((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  };
+
+  const handleToggleAdm1 = (adm1Code: string, children: AdmRow[], checked: boolean) => {
+    setSelectedAdm2((prev) => {
+      const next = new Set(prev);
+      for (const ch of children) {
+        if (checked) next.add(ch.admin_pcode);
+        else next.delete(ch.admin_pcode);
+      }
+      return next;
+    });
+  };
+
+  const isAdm1FullySelected = (children: AdmRow[]) =>
+    children.every((c) => selectedAdm2.has(c.admin_pcode));
+
+  const isAdm1PartiallySelected = (children: AdmRow[]) => {
+    const any = children.some((c) => selectedAdm2.has(c.admin_pcode));
+    const all = isAdm1FullySelected(children);
+    return any && !all;
+  };
+
+  const selectAll = () => {
+    setSelectedAdm2(new Set(adm2Rows.map((r) => r.admin_pcode)));
+  };
+
+  const clearAll = () => setSelectedAdm2(new Set());
+
+  const save = async () => {
+    const codes = Array.from(selectedAdm2);
     const { error } = await supabase
       .from('instances')
-      .update({ admin_scope: scope })
-      .eq('id', instanceId);
-    setSaving(false);
-    if (error) return alert(error.message);
-    await onSaved(scope);
-    onClose();
+      .update({ admin_scope: codes })
+      .eq('id', instance.id);
+    if (error) {
+      console.error('Failed saving admin_scope', error);
+      return;
+    }
+    onSaved();
   };
 
-  const selectedCount =
-    activeTab === 'ADM1' ? selectedAdm1.size : selectedAdm2.size;
+  // styles
+  const panelCls =
+    'rounded-lg border border-gray-200 bg-white shadow-sm';
+  const headerCls =
+    'flex items-center justify-between px-4 py-2 text-sm font-medium text-gray-700 bg-[var(--gsc-beige,#f5f2ee)] border-b border-gray-200';
+  const btn =
+    'px-3 py-1.5 rounded-md text-sm font-medium transition disabled:opacity-50';
+  const btnPrimary =
+    'bg-[var(--gsc-blue,#004b87)] text-white hover:opacity-90';
+  const btnGhost =
+    'border border-gray-300 text-gray-700 hover:bg-gray-50';
+  const chip =
+    'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-[var(--gsc-light-gray,#e5e7eb)] text-[var(--gsc-gray,#374151)]';
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-[1100px] max-w-[95vw] max-h-[90vh] flex flex-col border">
-        {/* Header */}
-        <div className="flex justify-between items-center px-4 py-3 border-b bg-[var(--gsc-beige,#f5f2ee)]">
-          <h2 className="font-semibold text-[var(--gsc-gray,#374151)] text-sm">
-            Configure Affected Area
+    <div
+      className="fixed inset-0 z-[1000] flex items-center justify-center"
+      style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+      aria-modal
+    >
+      <div className="w-[min(1000px,96vw)] max-h-[92vh] overflow-hidden rounded-xl bg-white shadow-2xl border border-gray-200">
+        {/* Title bar */}
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-[var(--gsc-beige,#f5f2ee)]">
+          <h2 className="text-[15px] font-semibold text-[var(--gsc-gray,#374151)]">
+            Configure Affected Area (ADM1 → ADM2)
           </h2>
-          <button
-            onClick={onClose}
-            className="text-sm px-3 py-1 border rounded hover:bg-gray-50"
-          >
-            Close
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b text-sm">
-          {[
-            { key: 'ADM1', label: 'Regions (ADM1)' },
-            { key: 'ADM2', label: 'Provinces (ADM2)' },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key as any)}
-              className={`flex-1 py-2 ${
-                activeTab === tab.key
-                  ? 'bg-[var(--gsc-blue,#004b87)] text-white'
-                  : 'bg-[var(--gsc-beige,#f5f2ee)] text-[var(--gsc-gray,#374151)] hover:bg-gray-100'
-              }`}
-            >
-              {tab.label}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className={classNames(btn, btnGhost)}>
+              Close
             </button>
-          ))}
+            <button
+              onClick={save}
+              className={classNames(btn, btnPrimary)}
+              disabled={loading}
+            >
+              Save Affected Area
+            </button>
+          </div>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1 grid grid-cols-2 overflow-hidden">
-          {/* Map */}
-          <div className="relative h-[600px]">
-            <MapContainer
-              center={[12.8797, 121.774]}
-              zoom={6}
-              style={{ height: '100%', width: '100%' }}
-            >
-              <TileLayer
-                attribution="© OpenStreetMap"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {!loading && currentRows.length > 0 && (
-                <GeoJSON
-                  ref={geoRef as any}
-                  data={fc as any}
-                  style={style}
-                  onEachFeature={onEach}
+        {/* Body */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+          {/* Left: Map */}
+          <div className={panelCls}>
+            <div className={headerCls}>
+              <span>Regions map (ADM1 outlines, selected ADM2 shaded)</span>
+              <span className={chip}>
+                Selected provinces: {selectedAdm2.size}
+              </span>
+            </div>
+            <div className="h-[520px]">
+              <MapContainer
+                ref={(m) => (mapRef.current = m)}
+                center={[12.8797, 121.7740]}
+                zoom={5}
+                scrollWheelZoom={false}
+                className="h-full w-full"
+              >
+                <TileLayer
+                  attribution="&copy; OpenStreetMap"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-              )}
-              <FitBoundsOnLoad geoRef={geoRef} deps={[currentRows.length]} />
-            </MapContainer>
+                {/* ADM1 outlines */}
+                <GeoJSON
+                  ref={adm1LayerRef as any}
+                  data={adm1FC as any}
+                  style={() => ({
+                    color: '#666',
+                    weight: 1,
+                    fill: false,
+                  })}
+                />
+                {/* Selected ADM2 shaded */}
+                <GeoJSON
+                  data={selectedAdm2FC as any}
+                  style={() => ({
+                    color: '#222',
+                    weight: 1,
+                    fill: true,
+                    fillOpacity: 0.35,
+                    fillColor: pctToColor(0.25), // currently uniform; hook to scoring later
+                  })}
+                  onEachFeature={(feat, layer) => {
+                    const p = feat.properties as any;
+                    if (p?.name) layer.bindTooltip(`${p.name} (${p.admin_pcode})`);
+                  }}
+                />
+              </MapContainer>
+            </div>
           </div>
 
-          {/* List */}
-          <div className="border-l flex flex-col">
-            <div className="p-3 flex items-center gap-2 border-b">
+          {/* Right: Hierarchical selector */}
+          <div className={panelCls}>
+            <div className={headerCls}>
+              <div className="flex items-center gap-2">
+                <span>Regions (ADM1) & Provinces (ADM2)</span>
+                <span className={chip}>{totalAdm2} provinces</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={selectAll} className={classNames(btn, btnGhost)}>
+                  Select all
+                </button>
+                <button onClick={clearAll} className={classNames(btn, btnGhost)}>
+                  Clear all
+                </button>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="px-3 pt-3">
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                className="w-full px-3 py-2 rounded border text-sm"
+                placeholder="Search region/province name or pcode…"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--gsc-blue,#004b87)]"
               />
-              <span className="text-xs text-gray-600">
-                {selectedCount} / {currentRows.length}
-              </span>
             </div>
-            <div className="flex-1 overflow-auto">
+
+            {/* Tree list */}
+            <div className="p-3 pt-2 overflow-y-auto max-h-[460px]">
               {loading ? (
-                <div className="p-6 text-sm text-gray-500">Loading…</div>
+                <div className="text-sm text-gray-500 py-20 text-center">
+                  Loading administrative boundaries…
+                </div>
+              ) : grouped.length === 0 ? (
+                <div className="text-sm text-gray-500 py-20 text-center">
+                  No results.
+                </div>
               ) : (
-                <ul className="divide-y">
-                  {filteredRows.map((r) => {
-                    const on =
-                      activeTab === 'ADM1'
-                        ? selectedAdm1.has(r.admin_pcode)
-                        : selectedAdm2.has(r.admin_pcode);
+                <ul className="space-y-2">
+                  {grouped.map((g) => {
+                    const open = isGroupOpen(g.admin_pcode);
+                    const full = isAdm1FullySelected(g.children);
+                    const partial = isAdm1PartiallySelected(g.children);
+
                     return (
-                      <li
-                        key={r.admin_pcode}
-                        onClick={() =>
-                          activeTab === 'ADM1'
-                            ? toggleAdm1(r.admin_pcode)
-                            : toggleAdm2(r.admin_pcode)
-                        }
-                        className={`flex items-center justify-between px-3 py-2 cursor-pointer ${
-                          on ? 'bg-green-50' : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className="text-sm font-medium">{r.name}</span>
-                        <span
-                          className={`text-xs ${
-                            on ? 'text-green-700' : 'text-gray-500'
-                          }`}
-                        >
-                          {r.admin_pcode}
-                        </span>
+                      <li key={g.admin_pcode} className="border border-gray-200 rounded-md">
+                        {/* ADM1 row */}
+                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50">
+                          <div className="flex items-center gap-2">
+                            <button
+                              className="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                              onClick={() => toggleGroup(g.admin_pcode)}
+                              aria-label={open ? 'Collapse' : 'Expand'}
+                            >
+                              {open ? '−' : '+'}
+                            </button>
+                            <label className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={full}
+                                ref={(el) => {
+                                  if (el) el.indeterminate = partial;
+                                }}
+                                onChange={(e) =>
+                                  handleToggleAdm1(g.admin_pcode, g.children, e.target.checked)
+                                }
+                              />
+                              <span className="font-medium">{g.name}</span>
+                              <span className="text-gray-500">({g.admin_pcode})</span>
+                              <span className={chip}>{g.children.length} provinces</span>
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* ADM2 children */}
+                        {open && (
+                          <div className="px-3 py-2">
+                            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                              {g.children.map((c) => {
+                                const checked = selectedAdm2.has(c.admin_pcode);
+                                return (
+                                  <li key={c.admin_pcode}>
+                                    <label className="flex items-center gap-2 text-sm rounded px-2 py-1 hover:bg-gray-50">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => handleToggleAdm2(c.admin_pcode)}
+                                      />
+                                      <span className="truncate">{c.name}</span>
+                                      <span className="text-gray-500">{c.admin_pcode}</span>
+                                    </label>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        )}
                       </li>
                     );
                   })}
@@ -279,23 +437,22 @@ export default function AffectedAreaModal({
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3 border-t flex items-center justify-between">
-          <div className="text-xs text-gray-600">
-            {activeTab === 'ADM1'
-              ? 'Select one or more Regions. Then switch to Provinces to refine.'
-              : 'Refine provinces within selected regions. These will be saved as the affected area.'}
+        <div className="flex items-center justify-between px-4 py-3 border-t bg-white">
+          <div className="text-sm text-gray-600">
+            Selected provinces:&nbsp;
+            <span className="font-medium">{selectedAdm2.size}</span>
           </div>
-          <div className="flex gap-2">
-            {activeTab === 'ADM2' && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-3 py-2 rounded text-white text-sm"
-                style={{ background: 'var(--gsc-blue,#004b87)' }}
-              >
-                {saving ? 'Saving…' : 'Save Affected Area'}
-              </button>
-            )}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className={classNames(btn, btnGhost)}>
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              className={classNames(btn, btnPrimary)}
+              disabled={loading}
+            >
+              Save Affected Area
+            </button>
           </div>
         </div>
       </div>
