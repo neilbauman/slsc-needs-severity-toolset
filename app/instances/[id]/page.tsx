@@ -1,13 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
 
-const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer     = dynamic(() => import('react-leaflet').then(m => m.TileLayer),     { ssr: false });
+// lazy-load React Leaflet bits
+const MapContainer = dynamic(
+  () => import('react-leaflet').then((m) => m.MapContainer as any),
+  { ssr: false }
+);
+const TileLayer = dynamic(
+  () => import('react-leaflet').then((m) => m.TileLayer as any),
+  { ssr: false }
+);
+const GeoJSON = dynamic(
+  () => import('react-leaflet').then((m) => m.GeoJSON as any),
+  { ssr: false }
+);
 
 export default function InstancePage() {
   const supabase = createClient();
@@ -16,9 +27,25 @@ export default function InstancePage() {
 
   const [instance, setInstance] = useState<any>(null);
   const [showAffected, setShowAffected] = useState(false);
+
   const [frameworkAvg, setFrameworkAvg] = useState<number | null>(null);
   const [finalAvg, setFinalAvg] = useState<number | null>(null);
   const [priority, setPriority] = useState<{ pcode: string; score: number }[]>([]);
+
+  // map data
+  const [adm1Features, setAdm1Features] = useState<any[]>([]);
+  const [mapReady, setMapReady] = useState(false);
+
+  const selectedAdm1 = useMemo<string[]>(() => instance?.admin_scope ?? [], [instance]);
+
+  const selectedFeatureCollection = useMemo(() => {
+    const set = new Set(selectedAdm1);
+    const feats = adm1Features.filter((f) => set.has(f.properties.admin_pcode));
+    return {
+      type: 'FeatureCollection',
+      features: feats,
+    } as any;
+  }, [adm1Features, selectedAdm1]);
 
   const loadInstance = async () => {
     const { data: inst } = await supabase.from('instances').select('*').eq('id', id).single();
@@ -36,20 +63,44 @@ export default function InstancePage() {
       .eq('pillar', 'Final')
       .order('score', { ascending: false })
       .limit(15);
-
     setPriority(prio ?? []);
+  };
+
+  const loadAdm1 = async () => {
+    // fetch ADM1 boundaries from RPC (expects arg name "in_level")
+    const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
+      in_level: 'ADM1',
+    });
+    if (!error && Array.isArray(data)) {
+      // normalize into Feature[]
+      const feats = data.map((r: any) => ({
+        type: 'Feature',
+        geometry: r.geom,
+        properties: {
+          admin_pcode: r.admin_pcode,
+          name: r.name,
+        },
+      }));
+      setAdm1Features(feats);
+    } else {
+      setAdm1Features([]);
+    }
   };
 
   useEffect(() => {
     loadInstance();
   }, [id]);
 
-  const recomputeFramework = async () => {
+  useEffect(() => {
+    loadAdm1();
+  }, []);
+
+  const handleFrameworkRecompute = async () => {
     await supabase.rpc('score_framework_aggregate', { in_instance_id: id });
     loadInstance();
   };
 
-  const recomputeFinal = async () => {
+  const handleFinalRecompute = async () => {
     await supabase.rpc('score_final_aggregate', { in_instance_id: id });
     loadInstance();
   };
@@ -61,32 +112,82 @@ export default function InstancePage() {
           {instance?.name ?? 'Instance'}
         </h1>
         <div className="space-x-2">
-          <button onClick={() => router.push('/instances')} className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50">Back</button>
-          <button onClick={() => router.push('/datasets')} className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50">Datasets</button>
-          <button onClick={() => setShowAffected(true)} className="px-3 py-1.5 rounded text-sm bg-[var(--gsc-green,#2e7d32)] text-white hover:opacity-90">
+          <button
+            onClick={() => router.push('/instances')}
+            className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50"
+          >
+            Back
+          </button>
+          <button
+            onClick={() => router.push('/datasets')}
+            className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50"
+          >
+            Datasets
+          </button>
+          <button
+            onClick={() => setShowAffected(true)}
+            className="px-3 py-1.5 rounded text-sm bg-[var(--gsc-green,#2e7d32)] text-white hover:opacity-90"
+          >
             Define Affected Area
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-12 gap-4">
+        {/* Map & context */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
             <span className="text-gray-400 text-xs">
-              {(instance?.admin_scope ?? []).length} ADM1 selected
+              {selectedAdm1.length} ADM1 selected
             </span>
           </div>
-          <div className="h-[520px] rounded overflow-hidden border">
-            <MapContainer center={[12.8797, 121.774]} zoom={5} scrollWheelZoom={false} className="h-full w-full">
-              <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <div className="h-[520px] rounded overflow-hidden border relative z-0">
+            <MapContainer
+              center={[12.8797, 121.774]}
+              zoom={5}
+              scrollWheelZoom={false}
+              className="h-full w-full"
+              whenReady={() => setMapReady(true)}
+            >
+              <TileLayer
+                attribution="&copy; OpenStreetMap"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {/* Show a faint outline of all ADM1 */}
+              {mapReady && adm1Features.length > 0 && (
+                <GeoJSON
+                  data={{ type: 'FeatureCollection', features: adm1Features } as any}
+                  style={() => ({
+                    color: '#888',
+                    weight: 1,
+                    opacity: 0.5,
+                    fillOpacity: 0.0,
+                  })}
+                />
+              )}
+              {/* Highlight selected ADM1 */}
+              {mapReady && selectedFeatureCollection.features?.length > 0 && (
+                <GeoJSON
+                  data={selectedFeatureCollection}
+                  style={() => ({
+                    color: '#d35400', // GSC orange outline
+                    weight: 2,
+                    opacity: 0.9,
+                    fillColor: '#2e7d32', // GSC green fill
+                    fillOpacity: 0.25,
+                  })}
+                />
+              )}
             </MapContainer>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Define affected area or ensure <code>admin_boundaries.geom</code> is available as GeoJSON.
+            Selections are based on <code>instances.admin_scope</code>. Use{' '}
+            <span className="font-medium">Define Affected Area</span> to update.
           </p>
         </div>
 
+        {/* Metrics / Controls */}
         <div className="col-span-5 space-y-4">
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <div className="text-sm font-semibold text-gray-700 mb-2">Key Metrics</div>
@@ -109,10 +210,16 @@ export default function InstancePage() {
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <div className="text-sm font-semibold text-gray-700 mb-2">Recompute</div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={recomputeFramework} className="flex-1 bg-[var(--gsc-blue,#004b87)] text-white py-2 rounded hover:opacity-90 text-sm">
+              <button
+                onClick={handleFrameworkRecompute}
+                className="flex-1 bg-[var(--gsc-blue,#004b87)] text-white py-2 rounded hover:opacity-90 text-sm"
+              >
                 Recompute Framework
               </button>
-              <button onClick={recomputeFinal} className="flex-1 bg-[var(--gsc-green,#2e7d32)] text-white py-2 rounded hover:opacity-90 text-sm">
+              <button
+                onClick={handleFinalRecompute}
+                className="flex-1 bg-[var(--gsc-green,#2e7d32)] text-white py-2 rounded hover:opacity-90 text-sm"
+              >
                 Recompute Final
               </button>
             </div>
@@ -128,12 +235,19 @@ export default function InstancePage() {
                 </tr>
               </thead>
               <tbody>
-                {priority.map(p => (
+                {priority.map((p) => (
                   <tr key={p.pcode} className="border-b last:border-none">
                     <td className="py-1">{p.pcode}</td>
                     <td className="py-1 text-right">{p.score.toFixed(3)}</td>
                   </tr>
                 ))}
+                {priority.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="py-2 text-center text-gray-400">
+                      No data.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -144,7 +258,10 @@ export default function InstancePage() {
         <AffectedAreaModal
           instance={instance}
           onClose={() => setShowAffected(false)}
-          onSaved={loadInstance}
+          onSaved={async () => {
+            await loadInstance();
+            setShowAffected(false);
+          }}
         />
       )}
     </div>
