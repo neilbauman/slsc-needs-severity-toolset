@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 
-/* lazy leaflet loading */
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer     = dynamic(() => import('react-leaflet').then(m => m.TileLayer),     { ssr: false });
 const GeoJSON       = dynamic(() => import('react-leaflet').then(m => m.GeoJSON),       { ssr: false });
@@ -15,7 +14,7 @@ type Instance = {
   admin_scope: string[] | null;
 };
 
-type AdmRow = { admin_pcode: string; name: string; geom: any };
+type Adm1Row = { admin_pcode: string; name: string; geom: any };
 
 type Props = {
   instance: Instance;
@@ -25,61 +24,87 @@ type Props = {
 
 export default function AffectedAreaModal({ instance, onClose, onSaved }: Props) {
   const supabase = createClient();
-  const [rows, setRows] = useState<AdmRow[]>([]);
+  const [adm1Rows, setAdm1Rows] = useState<Adm1Row[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set(instance.admin_scope ?? []));
   const [loading, setLoading] = useState(true);
   const geoRef = useRef<any>(null);
 
-  /** Load ADM1 features */
+  /** Load ADM1 list + geometries */
   useEffect(() => {
     let mounted = true;
     (async () => {
       setLoading(true);
-      const { data } = await supabase.rpc('get_admin_boundaries_geojson', { in_level: 'ADM1' });
-      if (mounted && data) setRows(data as AdmRow[]);
+
+      // Basic metadata list (names + codes)
+      const { data: rows } = await supabase
+        .from('admin_boundaries')
+        .select('admin_pcode, name')
+        .eq('admin_level', 'ADM1')
+        .order('name', { ascending: true });
+
+      // Geometries via RPC (ensures consistent geometry format)
+      const { data: geomRows } = await supabase.rpc('get_admin_boundaries_geojson', { in_level: 'ADM1' });
+
+      if (!mounted) return;
+
+      // Combine metadata with geometry
+      const map = new Map<string, any>();
+      (geomRows ?? []).forEach((g: any) => map.set(g.admin_pcode, g.geom));
+
+      const merged = (rows ?? []).map(r => ({
+        admin_pcode: r.admin_pcode,
+        name: r.name,
+        geom: map.get(r.admin_pcode),
+      }));
+
+      setAdm1Rows(merged);
       setLoading(false);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  /** Build GeoJSON feature collection */
+  /** Build GeoJSON for display */
   const features = useMemo(() => {
     return {
       type: 'FeatureCollection',
-      features: rows.map(r => ({
-        type: 'Feature',
-        geometry: r.geom,
-        properties: {
-          name: r.name,
-          admin_pcode: r.admin_pcode,
-          selected: selected.has(r.admin_pcode),
-        },
-      })),
+      features: adm1Rows
+        .filter(r => r.geom)
+        .map(r => ({
+          type: 'Feature',
+          geometry: r.geom,
+          properties: {
+            name: r.name,
+            admin_pcode: r.admin_pcode,
+            selected: selected.has(r.admin_pcode),
+          },
+        })),
     } as any;
-  }, [rows, selected]);
+  }, [adm1Rows, selected]);
 
-  /** Fit to bounds */
+  /** Fit map to visible features */
   useEffect(() => {
     try {
       if (geoRef.current && (features.features?.length ?? 0) > 0) {
         const layer = geoRef.current;
-        const b = layer.getBounds?.();
-        if (b && b.isValid()) {
+        const bounds = layer.getBounds?.();
+        if (bounds && bounds.isValid()) {
           const map = (layer as any)?._map ?? null;
-          if (map && map.fitBounds) map.fitBounds(b.pad(0.05));
+          if (map && map.fitBounds) map.fitBounds(bounds.pad(0.05));
         }
       }
     } catch {}
   }, [features]);
 
-  /** Toggle region selection */
+  /** Toggle ADM1 selection */
   const toggle = (code: string) => {
     const next = new Set(selected);
     next.has(code) ? next.delete(code) : next.add(code);
     setSelected(next);
   };
 
-  /** Save to instances table */
+  /** Save */
   const handleSave = async () => {
     await supabase.from('instances')
       .update({ admin_scope: Array.from(selected) })
@@ -88,13 +113,13 @@ export default function AffectedAreaModal({ instance, onClose, onSaved }: Props)
     onClose();
   };
 
-  const styleFn = (f: any) => {
-    const isSelected = f.properties.selected;
+  const styleFn = (feature: any) => {
+    const sel = feature?.properties?.selected;
     return {
-      color: isSelected ? '#2e7d32' : '#999',
-      weight: isSelected ? 2 : 1,
-      fillColor: isSelected ? '#2e7d32' : '#ccc',
-      fillOpacity: isSelected ? 0.35 : 0.1,
+      color: sel ? '#2e7d32' : '#999',
+      weight: sel ? 2 : 1,
+      fillColor: sel ? '#2e7d32' : '#ccc',
+      fillOpacity: sel ? 0.35 : 0.1,
     };
   };
 
@@ -126,13 +151,13 @@ export default function AffectedAreaModal({ instance, onClose, onSaved }: Props)
 
         {/* Body */}
         <div className="grid grid-cols-12">
-          {/* Region list */}
+          {/* ADM1 list */}
           <div className="col-span-4 border-r overflow-y-auto" style={{ maxHeight: '78vh' }}>
             {loading ? (
               <div className="p-4 text-sm text-gray-500">Loading regions…</div>
             ) : (
               <div className="p-2 space-y-1">
-                {rows.map(r => (
+                {adm1Rows.map(r => (
                   <label
                     key={r.admin_pcode}
                     className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50"
