@@ -6,13 +6,13 @@ import { createClient } from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
 
-// lazy-load React Leaflet
+// Lazy-load React Leaflet components
 const MapContainer = dynamic(
-  () => import('react-leaflet').then(mod => mod.MapContainer),
+  () => import('react-leaflet').then((mod) => mod.MapContainer),
   { ssr: false }
 );
 const TileLayer = dynamic(
-  () => import('react-leaflet').then(mod => mod.TileLayer),
+  () => import('react-leaflet').then((mod) => mod.TileLayer),
   { ssr: false }
 );
 
@@ -27,13 +27,22 @@ export default function InstancePage() {
   const [finalAvg, setFinalAvg] = useState<number | null>(null);
   const [priority, setPriority] = useState<{ pcode: string; score: number }[]>([]);
 
-  // --- Load instance + summary metrics
+  // Load instance + metrics
   const loadInstance = async () => {
-    const { data: inst } = await supabase.from('instances').select('*').eq('id', id).single();
+    const { data: inst } = await supabase
+      .from('instances')
+      .select('*')
+      .eq('id', id)
+      .single();
     setInstance(inst);
 
-    const { data: fw } = await supabase.rpc('get_framework_avg', { instance_uuid: id });
-    const { data: fin } = await supabase.rpc('get_final_avg', { instance_uuid: id });
+    const { data: fw } = await supabase.rpc('get_framework_avg', {
+      instance_uuid: id,
+    });
+    const { data: fin } = await supabase.rpc('get_final_avg', {
+      instance_uuid: id,
+    });
+
     setFrameworkAvg(fw?.framework_avg ?? null);
     setFinalAvg(fin?.final_avg ?? null);
 
@@ -44,6 +53,7 @@ export default function InstancePage() {
       .eq('pillar', 'Final')
       .order('score', { ascending: false })
       .limit(15);
+
     setPriority(prio ?? []);
   };
 
@@ -51,7 +61,7 @@ export default function InstancePage() {
     loadInstance();
   }, [id]);
 
-  // --- recompute handlers
+  // Recompute handlers
   const handleFrameworkRecompute = async () => {
     await supabase.rpc('score_framework_aggregate', { in_instance_id: id });
     loadInstance();
@@ -64,6 +74,7 @@ export default function InstancePage() {
 
   return (
     <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
           {instance?.name ?? 'Instance'}
@@ -90,14 +101,14 @@ export default function InstancePage() {
         </div>
       </div>
 
-      {/* --- Main Grid --- */}
+      {/* Main Grid */}
       <div className="grid grid-cols-12 gap-4">
         {/* Map */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
             <span className="text-gray-400 text-xs">
-              {instance?.admin_scope?.length ?? 0} ADM1 selected
+              {instance?.admin_scope?.length ?? 0} ADM2 selected
             </span>
           </div>
           <div className="h-[520px] rounded overflow-hidden border">
@@ -114,14 +125,18 @@ export default function InstancePage() {
             </MapContainer>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Define affected area or ensure <code>admin_boundaries.geom</code> is available as GeoJSON.
+            Define affected area or ensure{' '}
+            <code>admin_boundaries.geom</code> is available as GeoJSON.
           </p>
         </div>
 
-        {/* Metrics / Controls */}
+        {/* Metrics & Controls */}
         <div className="col-span-5 space-y-4">
+          {/* Key Metrics */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">Key Metrics</div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              Key Metrics
+            </div>
             <div className="grid grid-cols-2 gap-3 text-center">
               <div className="bg-[var(--gsc-light-gray,#e5e7eb)] rounded-lg py-3">
                 <div className="text-xs text-gray-600">Framework Avg</div>
@@ -138,8 +153,11 @@ export default function InstancePage() {
             </div>
           </div>
 
+          {/* Recompute */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">Recompute</div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              Recompute
+            </div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleFrameworkRecompute}
@@ -156,8 +174,11 @@ export default function InstancePage() {
             </div>
           </div>
 
+          {/* Priority Locations */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">Priority Locations (Top 15)</div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              Priority Locations (Top 15)
+            </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-gray-500 text-xs border-b">
@@ -178,13 +199,14 @@ export default function InstancePage() {
         </div>
       </div>
 
+      {/* --- Affected Area Modal --- */}
       {showAffected && instance && (
-  <AffectedAreaModal
-    instance={instance}
-    onClose={() => setShowAffected(false)}
-    onSaved={loadInstance}
-  />
-)}
+        <AffectedAreaModal
+          instance={instance}
+          onClose={() => setShowAffected(false)}
+          onSaved={loadInstance}
+        />
+      )}
     </div>
   );
 }
