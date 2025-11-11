@@ -6,7 +6,6 @@ import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
 
-/* lazy leaflet (no SSR) */
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer     = dynamic(() => import('react-leaflet').then(m => m.TileLayer),     { ssr: false });
 
@@ -43,7 +42,6 @@ export default function InstancePage() {
 
   useEffect(() => {
     loadInstance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const recomputeFramework = async () => {
@@ -77,7 +75,7 @@ export default function InstancePage() {
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
             <span className="text-gray-400 text-xs">
-              {(instance?.admin_scope ?? []).filter((p: string) => p.length === 4).length} ADM1 selected
+              {(instance?.admin_scope ?? []).length} ADM1 selected
             </span>
           </div>
           <div className="h-[520px] rounded overflow-hidden border">
