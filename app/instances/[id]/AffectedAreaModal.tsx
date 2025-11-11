@@ -1,107 +1,115 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabaseClient';
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
+const TileLayer    = dynamic(() => import('react-leaflet').then(m => m.TileLayer),    { ssr: false });
+const GeoJSON      = dynamic(() => import('react-leaflet').then(m => m.GeoJSON),      { ssr: false });
 
-export default function AffectedAreaModal({ instanceId, onClose, onSaved }: {
+type Props = {
   instanceId: string;
   onClose: () => void;
   onSaved: () => void;
-}) {
-  const [geojson, setGeojson] = useState<any>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [saving, setSaving] = useState(false);
+};
+
+export default function AffectedAreaModal({ instanceId, onClose, onSaved }: Props) {
+  const [admGeo, setAdmGeo] = useState<any | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const loadAdm1 = async () => {
-      const { data, error } = await supabase
-        .from('admin_boundaries')
-        .select('admin_pcode, name, geom')
-        .eq('admin_level', 1);
-      if (!error && data) {
-        setGeojson({
-          type: 'FeatureCollection',
-          features: data.map((d: any) => ({
-            type: 'Feature',
-            geometry: d.geom,
-            properties: { admin_pcode: d.admin_pcode, name: d.name }
-          }))
-        });
-      }
-    };
-    loadAdm1();
-  }, []);
+    const load = async () => {
+      const [{ data: inst }, { data: adm }] = await Promise.all([
+        supabase.from('instances').select('admin_scope').eq('id', instanceId).single(),
+        supabase.from('admin_boundaries').select('admin_pcode,name,geom').eq('admin_level', 1),
+      ]);
 
-  const toggleSelect = (code: string) => {
-    setSelected(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
+      setSelected(new Set(inst?.admin_scope ?? []));
+      setAdmGeo({
+        type: 'FeatureCollection',
+        features: (adm || []).map((d: any) => ({
+          type: 'Feature',
+          geometry: d.geom,
+          properties: { admin_pcode: d.admin_pcode, name: d.name },
+        })),
+      });
+    };
+    load();
+  }, [instanceId]);
+
+  const toggle = (pcode: string) => {
+    setSelected(prev => {
+      const n = new Set(prev);
+      n.has(pcode) ? n.delete(pcode) : n.add(pcode);
+      return n;
+    });
   };
 
-  const saveScope = async () => {
-    setSaving(true);
-    await supabase
-      .from('instances')
-      .update({ admin_scope: selected })
-      .eq('id', instanceId);
-    setSaving(false);
+  const save = async () => {
+    await supabase.from('instances').update({ admin_scope: Array.from(selected) }).eq('id', instanceId);
     onSaved();
     onClose();
   };
 
+  const mapStyle = useMemo(
+    () => ({
+      chosen: { color: '#374151', weight: 1, fillColor: '#2e7d32', fillOpacity: 0.5 },
+      unchosen: { color: '#bfbfbf', weight: 1, fillColor: '#f5f2ee', fillOpacity: 0.3 },
+    }),
+    []
+  );
+
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
-      <div className="bg-white rounded-lg shadow-xl p-4 w-[900px] max-h-[90vh] overflow-y-auto">
-        <h2 className="text-xl font-semibold mb-3">Define Affected Area (ADM1)</h2>
-        <div className="flex gap-4">
-          <div className="w-2/3 h-[500px]">
-            {geojson && (
-              <MapContainer center={[12.8797, 121.774]} zoom={5} className="h-full w-full">
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <GeoJSON
-                  data={geojson}
-                  style={(f) => ({
-                    color: selected.includes(f.properties.admin_pcode) ? '#2e7d32' : '#999',
-                    weight: 1,
-                    fillOpacity: selected.includes(f.properties.admin_pcode) ? 0.5 : 0.1,
-                    fillColor: selected.includes(f.properties.admin_pcode) ? '#2e7d32' : '#e5e7eb'
-                  })}
-                  onEachFeature={(feature, layer) => {
-                    layer.on({
-                      click: () => toggleSelect(feature.properties.admin_pcode)
-                    });
-                    layer.bindPopup(feature.properties.name);
-                  }}
-                />
-              </MapContainer>
-            )}
-          </div>
-          <div className="w-1/3 overflow-y-auto border rounded p-2 text-sm h-[500px]">
-            <p className="font-medium mb-1">Select provinces:</p>
-            {geojson && geojson.features.map((f: any) => (
-              <label key={f.properties.admin_pcode} className="block">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(f.properties.admin_pcode)}
-                  onChange={() => toggleSelect(f.properties.admin_pcode)}
-                  className="mr-2"
-                />
-                {f.properties.name}
-              </label>
-            ))}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[5000]">
+      <div className="bg-white rounded-lg shadow-xl w-[min(1000px,95vw)] max-h-[90vh] overflow-hidden z-[5001]">
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Define Affected Area (ADM1)</h2>
+          <div className="text-xs text-gray-500">{selected.size} selected</div>
+        </div>
+
+        <div className="p-3">
+          <div className="grid grid-cols-12 gap-3">
+            <div className="col-span-9">
+              <div className="h-[60vh] rounded overflow-hidden">
+                {admGeo && (
+                  <MapContainer center={[12.8797, 121.774]} zoom={5} scrollWheelZoom={false} className="h-full w-full z-[0]">
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <GeoJSON
+                      data={admGeo}
+                      style={(f) =>
+                        (selected.has(f.properties.admin_pcode) ? mapStyle.chosen : mapStyle.unchosen) as any
+                      }
+                      onEachFeature={(feature, layer) => {
+                        const p = feature.properties.admin_pcode;
+                        layer.on('click', () => toggle(p));
+                        layer.bindPopup(`<b>${feature.properties.name}</b><br/>${p}`);
+                      }}
+                    />
+                  </MapContainer>
+                )}
+              </div>
+            </div>
+
+            <div className="col-span-3">
+              <div className="text-xs text-gray-600 mb-2">Tip: click provinces on the map to (de)select.</div>
+              <div className="h-[60vh] overflow-auto border rounded p-2 text-sm">
+                {[...selected].sort().map((p) => (
+                  <div key={p} className="flex justify-between items-center py-1 border-b">
+                    <span>{p}</span>
+                    <button className="text-red-600 text-xs" onClick={() => toggle(p)}>remove</button>
+                  </div>
+                ))}
+                {!selected.size && <div className="text-gray-400 text-sm">Nothing selected.</div>}
+              </div>
+            </div>
           </div>
         </div>
-        <div className="flex justify-end mt-4 gap-2">
-          <button onClick={onClose} className="px-4 py-1 border rounded">Cancel</button>
-          <button
-            disabled={saving}
-            onClick={saveScope}
-            className="px-4 py-1 bg-gsc-blue text-white rounded"
-          >
-            {saving ? 'Saving...' : 'Save Area'}
+
+        <div className="px-4 py-3 border-t flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1 border rounded text-sm">Cancel</button>
+          <button onClick={save} className="px-3 py-1 rounded text-sm text-white" style={{ background: '#2e7d32' }}>
+            Save
           </button>
         </div>
       </div>
