@@ -1,27 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
-import FrameworkScoringModal from '@/components/FrameworkScoringModal';
+import { createClient } from '@/lib/supabase/supabaseClient';
+import InstanceRecomputePanel from '@/components/InstanceRecomputePanel';
 
-type InstanceRow = {
+type Instance = {
   id: string;
   name: string;
-  created_at?: string;
+  created_at: string;
 };
 
 export default function InstancesPage() {
-  const [instances, setInstances] = useState<InstanceRow[]>([]);
+  const supabase = createClient();
+  const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [showDatasetConfig, setShowDatasetConfig] = useState<InstanceRow | null>(null);
-  const [showFrameworkScoring, setShowFrameworkScoring] = useState<InstanceRow | null>(null);
-
+  // Fetch all instances on load
   const loadInstances = async () => {
     setLoading(true);
     setError(null);
+
     const { data, error } = await supabase
       .from('instances')
       .select('id, name, created_at')
@@ -29,11 +28,10 @@ export default function InstancesPage() {
 
     if (error) {
       setError(error.message);
-      setLoading(false);
-      return;
+    } else if (data) {
+      setInstances(data);
     }
 
-    setInstances((data || []) as InstanceRow[]);
     setLoading(false);
   };
 
@@ -42,86 +40,50 @@ export default function InstancesPage() {
   }, []);
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Instances</h1>
-        <p className="text-gray-600">
-          Configure datasets and compute framework and overall vulnerability scores.
-        </p>
-      </div>
+    <main className="p-6 flex flex-col gap-6">
+      <h1 className="text-2xl font-bold text-gray-800">Instances</h1>
 
-      <div className="bg-white rounded-lg shadow border">
-        <div className="grid grid-cols-12 bg-gray-50 px-4 py-3 text-sm font-semibold">
-          <div className="col-span-6">Instance</div>
-          <div className="col-span-3">Created</div>
-          <div className="col-span-3 text-right">Actions</div>
+      {loading && <div className="text-gray-600">Loading instances…</div>}
+      {error && (
+        <div className="text-red-700 bg-red-50 border border-red-200 p-3 rounded-md">
+          ⚠️ {error}
         </div>
+      )}
 
-        {loading && (
-          <div className="px-4 py-6 text-gray-600">Loading…</div>
-        )}
+      {!loading && !error && instances.length === 0 && (
+        <div className="text-gray-500">No instances found.</div>
+      )}
 
-        {!loading && error && (
-          <div className="px-4 py-6 text-red-600">{error}</div>
-        )}
-
-        {!loading && !error && instances.length === 0 && (
-          <div className="px-4 py-6 text-gray-600">No instances found.</div>
-        )}
-
-        {!loading && !error && instances.length > 0 && (
-          <div className="divide-y">
-            {instances.map((inst) => (
-              <div
-                key={inst.id}
-                className="grid grid-cols-12 items-center px-4 py-3 hover:bg-gray-50"
-              >
-                <div className="col-span-6">
-                  <div className="font-medium">{inst.name}</div>
-                  <div className="text-xs text-gray-500">{inst.id}</div>
-                </div>
-                <div className="col-span-3 text-sm text-gray-700">
-                  {inst.created_at
-                    ? new Date(inst.created_at).toLocaleString()
-                    : '—'}
-                </div>
-                <div className="col-span-3 flex justify-end gap-2">
-                  <button
-                    className="px-3 py-2 rounded border text-sm hover:bg-gray-100"
-                    onClick={() => setShowDatasetConfig(inst)}
-                  >
-                    Configure Datasets
-                  </button>
-                  <button
-                    className="px-3 py-2 rounded bg-green-600 text-white text-sm hover:bg-green-700"
-                    onClick={() => setShowFrameworkScoring(inst)}
-                  >
-                    Framework Scoring
-                  </button>
+      {!loading && instances.length > 0 && (
+        <div className="grid gap-8">
+          {instances.map((instance) => (
+            <div
+              key={instance.id}
+              className="border border-gray-200 rounded-lg shadow-sm bg-white p-6"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-800">{instance.name}</h2>
+                  <p className="text-sm text-gray-500">
+                    Created {new Date(instance.created_at).toLocaleString()}
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* Dataset-level modal */}
-      {showDatasetConfig && (
-        <InstanceDatasetConfigModal
-          instance={showDatasetConfig}
-          onClose={() => setShowDatasetConfig(null)}
-          onSaved={loadInstances}
-        />
+              {/* Recompute buttons and panel */}
+              <div className="mt-4">
+                <InstanceRecomputePanel
+                  instanceId={instance.id}
+                  onReload={() => {
+                    // When recompute finishes, refresh this page's instance data or map
+                    loadInstances();
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       )}
-
-      {/* Framework + Overall scoring modal */}
-      {showFrameworkScoring && (
-        <FrameworkScoringModal
-          instance={showFrameworkScoring}
-          onClose={() => setShowFrameworkScoring(null)}
-          onSaved={loadInstances}
-        />
-      )}
-    </div>
+    </main>
   );
 }
