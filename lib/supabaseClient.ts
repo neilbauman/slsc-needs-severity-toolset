@@ -1,17 +1,20 @@
-// Minimal browser-side Supabase client with named export `createClient`
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
 
 if (!url || !key) {
-  // Fail fast in build/runtime if env is missing
-  // eslint-disable-next-line no-console
   console.warn(
-    'Supabase env missing: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY'
+    '⚠️ Supabase environment vars missing: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY'
   );
 }
 
+// Create a shared singleton for modules that used "import { supabase }"
+export const supabase = createSupabaseClient(url, key);
+
+// Export a function for newer modules that use "createClient()"
 export function createClient() {
-  return createSupabaseClient(url, key);
+  return supabase;
 }
+
+export default supabase;
