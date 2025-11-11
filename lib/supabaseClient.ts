@@ -1,20 +1,13 @@
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+'use client';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+import { createClient as createSBClient } from '@supabase/supabase-js';
 
-if (!url || !key) {
-  console.warn(
-    '⚠️ Supabase environment vars missing: NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY'
-  );
+let cached:any;
+
+export function createClient(){
+  if (cached) return cached;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  cached = createSBClient(url, anon, { auth: { persistSession: true } });
+  return cached;
 }
-
-// Create a shared singleton for modules that used "import { supabase }"
-export const supabase = createSupabaseClient(url, key);
-
-// Export a function for newer modules that use "createClient()"
-export function createClient() {
-  return supabase;
-}
-
-export default supabase;
