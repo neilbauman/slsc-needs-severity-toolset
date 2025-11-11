@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import { createClient } from '@/lib/supabaseClient';
 import type { FeatureCollection, Feature, Geometry } from 'geojson';
 import 'leaflet/dist/leaflet.css';
@@ -21,7 +21,6 @@ export default function AffectedAreaModal({
   onSaved: (updatedScope: string[]) => Promise<void>;
 }) {
   const supabase = createClient();
-
   const [rows, setRows] = useState<AdmRow[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set(initialScope ?? []));
   const [loading, setLoading] = useState(true);
@@ -54,17 +53,7 @@ export default function AffectedAreaModal({
     })();
   }, [level, search, supabase]);
 
-  // Fit map to data
-  useEffect(() => {
-    if (geoRef.current) {
-      try {
-        const b = geoRef.current.getBounds();
-        if (b.isValid()) geoRef.current._map?.fitBounds(b.pad(0.05));
-      } catch {}
-    }
-  }, [rows]);
-
-  // Selection logic
+  // Selection helpers
   const toggle = (p: string) =>
     setSelected((s) => {
       const n = new Set(s);
@@ -129,6 +118,20 @@ export default function AffectedAreaModal({
     );
   }, [search, rows]);
 
+  // Internal helper component to fit bounds safely
+  function FitBoundsOnLoad({ geoRef }: { geoRef: React.RefObject<L.GeoJSON | null> }) {
+    const map = useMap();
+    useEffect(() => {
+      if (geoRef.current) {
+        try {
+          const b = geoRef.current.getBounds();
+          if (b.isValid()) map.fitBounds(b.pad(0.05));
+        } catch {}
+      }
+    }, [map, geoRef, rows.length]);
+    return null;
+  }
+
   return (
     <div
       className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/40"
@@ -170,6 +173,7 @@ export default function AffectedAreaModal({
                   onEachFeature={onEach}
                 />
               )}
+              <FitBoundsOnLoad geoRef={geoRef} />
             </MapContainer>
           </div>
 
