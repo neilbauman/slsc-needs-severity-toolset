@@ -2,141 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
-/* -------------------------------------------------
-   Global Theme Colors (GSC Palette)
--------------------------------------------------- */
-:root {
-  --gsc-red: #630710;        /* GSC deep red */
-  --gsc-blue: #004b87;       /* GSC institutional blue */
-  --gsc-green: #2e7d32;      /* GSC green */
-  --gsc-orange: #d35400;     /* GSC orange */
-  --gsc-gray: #374151;       /* Neutral gray/slate */
-  --gsc-light-gray: #e5e7eb; /* Light gray */
-  --gsc-beige: #f5f2ee;      /* Neutral beige background */
+/* ==== GSC palette ==== */
+:root{
+  --gsc-red:#630710;
+  --gsc-blue:#004b87;
+  --gsc-green:#2e7d32;
+  --gsc-orange:#d35400;
+  --gsc-gray:#374151;
+  --gsc-light-gray:#e5e7eb;
+  --gsc-beige:#f5f2ee;
 }
 
-/* -------------------------------------------------
-   Base Layout & Typography
--------------------------------------------------- */
-body {
-  background-color: var(--gsc-beige);
-  color: var(--gsc-gray);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 14px;
-  margin: 0;
-  padding: 0;
+html,body,#__next{height:100%;}
+body{
+  background:var(--gsc-beige);
+  color:var(--gsc-gray);
+  font-feature-settings:"cv02","cv03","cv04","cv11";
 }
 
-h1, h2, h3, h4 {
-  color: var(--gsc-blue);
-  margin-bottom: 0.5rem;
+/* Buttons */
+.btn{
+  @apply inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition;
+}
+.btn-primary{
+  background:var(--gsc-blue);
+  color:#fff;
+}
+.btn-primary:hover{ filter:brightness(1.05); }
+.btn-secondary{
+  background:var(--gsc-light-gray);
+  color:var(--gsc-gray);
+}
+.btn-danger{
+  background:var(--gsc-red);
+  color:#fff;
 }
 
-button {
-  font-size: 13px;
-  border-radius: 6px;
-  font-weight: 500;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: background 0.2s ease;
+/* Cards */
+.card{
+  @apply rounded-xl bg-white shadow-md border border-gray-200;
 }
 
-button.primary {
-  background-color: var(--gsc-orange);
-  color: white;
+/* Modal base */
+.modal-backdrop{
+  @apply fixed inset-0 bg-black/40 z-40;
 }
-button.primary:hover {
-  background-color: #b34700;
-}
-
-button.secondary {
-  background-color: var(--gsc-light-gray);
-  color: var(--gsc-gray);
-}
-button.secondary:hover {
-  background-color: #d1d5db;
+.modal{
+  @apply fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-xl shadow-xl w-[min(100vw-2rem,900px)];
 }
 
-/* -------------------------------------------------
-   Dashboard Layout Helpers
--------------------------------------------------- */
-.dashboard-container {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 16px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+/* React-Leaflet container helpers */
+.leaflet-container{
+  width:100%;
+  height:100%;
+  border-radius:0.5rem;
+  outline:1px solid #e5e7eb;
+}
+.map-pane{
+  height:360px; /* keeps modal compact */
 }
 
-/* Map container */
-#map {
-  width: 100%;
-  height: 480px;
-  border: 1px solid var(--gsc-light-gray);
-  border-radius: 8px;
-  margin-top: 12px;
-}
-
-/* Metric cards */
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-top: 16px;
-}
-.metric-card {
-  background-color: var(--gsc-light-gray);
-  border-radius: 8px;
-  padding: 12px;
-  text-align: center;
-  font-weight: 600;
-}
-.metric-value {
-  font-size: 18px;
-  color: var(--gsc-blue);
-  margin-top: 4px;
-}
-
-/* Priority table */
-.priority-table {
-  width: 100%;
-  margin-top: 16px;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.priority-table th {
-  background-color: var(--gsc-blue);
-  color: white;
-  padding: 8px;
-  text-align: left;
-}
-.priority-table td {
-  padding: 8px;
-  border-bottom: 1px solid var(--gsc-light-gray);
-}
-.priority-table tr.high-risk {
-  background-color: rgba(99, 7, 16, 0.1);
-}
-
-/* -------------------------------------------------
-   Print Styling (Letter-sized layout)
--------------------------------------------------- */
-@media print {
-  body {
-    background: white;
-    -webkit-print-color-adjust: exact;
-  }
-  .no-print {
-    display: none !important;
-  }
-  .dashboard-container {
-    max-width: 8.5in;
-    margin: 0;
-    box-shadow: none;
-    border: none;
-  }
-  #map {
-    height: 6in;
-  }
+/* Print-friendly letter page for dashboards */
+@media print{
+  @page{ size:Letter; margin:0.5in; }
+  .no-print{ display:none !important; }
+  .print-safe{ break-inside:avoid; }
 }
