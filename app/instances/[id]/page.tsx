@@ -178,13 +178,13 @@ export default function InstancePage() {
         </div>
       </div>
 
-      {showAffected && (
-        <AffectedAreaModal
-          instanceId={id as string}
-          onClose={() => setShowAffected(false)}
-          onSaved={loadInstance}
-        />
-      )}
+      {showAffected && instance && (
+  <AffectedAreaModal
+    instance={instance}
+    onClose={() => setShowAffected(false)}
+    onSaved={loadInstance}
+  />
+)}
     </div>
   );
 }
