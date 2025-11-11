@@ -1,14 +1,15 @@
-// components/AffectedAreaModal.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import { createClient } from '@/lib/supabaseClient';
-import type { Feature, Geometry } from 'geojson';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 
 type AdmRow = {
   admin_pcode: string;
   name: string;
-  geom: Geometry;
+  geom: GeoJSON.Geometry;
 };
 
 export default function AffectedAreaModal({
@@ -24,72 +25,38 @@ export default function AffectedAreaModal({
 }) {
   const supabase = createClient();
 
+  const [rows, setRows] = useState<AdmRow[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set(initialScope ?? []));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [rows, setRows] = useState<AdmRow[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(initialScope ?? [])
-  );
   const [q, setQ] = useState('');
 
-  // Load ADM1 features via RPC (falls back to SELECT if RPC blocked)
+  const geoRef = useRef<L.GeoJSON | null>(null);
+
+  // Load data
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
+    (async () => {
       setLoading(true);
-
-      // Try RPC first
-      const rpc = await supabase
-        .rpc('get_admin_boundaries_geojson', { in_level: 'ADM1' })
-        .select();
-
-      let data: any[] | null = null;
-      let error = rpc.error;
-
-      if (!error) {
-        data = rpc.data as any[];
-      } else {
-        // Fallback: direct SELECT with ST_AsGeoJSON (requires SELECT + RLS policy)
-        const fb = await supabase
-          .from('admin_boundaries')
-          .select('admin_pcode,name,geom')
-          .eq('admin_level', 'ADM1')
-          .order('name', { ascending: true });
-
-        error = fb.error;
-        data = fb.data as any[] | null;
-      }
-
-      if (cancelled) return;
-
+      const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
+        in_admin_level: 'ADM1',
+      });
       if (error) {
-        console.error('Failed to load ADM1:', error.message || error);
+        console.error(error);
         setRows([]);
       } else {
-        // Normalize into AdmRow list
-        const normalized: AdmRow[] = (data ?? []).map((r: any) => ({
-          admin_pcode: r.admin_pcode,
-          name: r.name,
-          geom:
-            (r.geom && (r.geom as Geometry)) ||
-            (r.geometry as Geometry) ||
-            (typeof r.geom_json === 'string'
-              ? (JSON.parse(r.geom_json) as Geometry)
-              : r.geom_json),
-        }));
-        setRows(normalized);
+        setRows(
+          (data ?? []).map((r: any) => ({
+            admin_pcode: r.admin_pcode,
+            name: r.name,
+            geom: r.geom,
+          }))
+        );
       }
-
       setLoading(false);
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
+    })();
   }, [supabase]);
 
+  // Filter list by search
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     if (!qq) return rows;
@@ -100,44 +67,47 @@ export default function AffectedAreaModal({
     );
   }, [q, rows]);
 
-  const allSelected = selected.size === rows.length && rows.length > 0;
-
-  function toggle(p: string) {
+  const toggleSelect = (pcode: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(p)) next.delete(p);
-      else next.add(p);
+      next.has(pcode) ? next.delete(pcode) : next.add(pcode);
       return next;
     });
-  }
+  };
 
-  function selectAll() {
-    if (rows.length === 0) return;
-    setSelected(new Set(rows.map((r) => r.admin_pcode)));
-  }
-
-  function clearAll() {
-    setSelected(new Set());
-  }
-
-  async function handleSave() {
+  const handleSave = async () => {
     setSaving(true);
     const scope = Array.from(selected);
-
     const { error } = await supabase
       .from('instances')
       .update({ admin_scope: scope })
       .eq('id', instanceId);
-
     setSaving(false);
-
-    if (error) {
-      alert('Failed to save affected area: ' + error.message);
-      return;
-    }
+    if (error) return alert(error.message);
     await onSaved(scope);
     onClose();
-  }
+  };
+
+  const onEachFeature = (feature: any, layer: L.Layer) => {
+    const pcode = feature.properties?.admin_pcode;
+    const name = feature.properties?.name;
+    if (!pcode) return;
+    layer.on({
+      click: () => toggleSelect(pcode),
+    });
+    layer.bindTooltip(name);
+  };
+
+  const styleFeature = (feature: any) => {
+    const pcode = feature.properties?.admin_pcode;
+    const isSelected = pcode && selected.has(pcode);
+    return {
+      color: isSelected ? '#2e7d32' : '#999',
+      weight: 1.5,
+      fillColor: isSelected ? '#81c784' : '#f0f0f0',
+      fillOpacity: isSelected ? 0.6 : 0.2,
+    };
+  };
 
   return (
     <div
@@ -145,11 +115,9 @@ export default function AffectedAreaModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="bg-white rounded-lg shadow-xl w-[1100px] max-w-[95vw] max-h-[88vh] flex flex-col border">
+      <div className="bg-white rounded-lg shadow-xl w-[1100px] max-w-[95vw] max-h-[90vh] flex flex-col border">
         <div className="px-4 py-3 border-b bg-[var(--gsc-beige,#f5f2ee)] text-[var(--gsc-gray,#374151)] flex items-center justify-between">
-          <div className="font-semibold text-sm">
-            Configure Affected Area (ADM1)
-          </div>
+          <div className="font-semibold text-sm">Define Affected Area (ADM1)</div>
           <button
             className="px-3 py-1 rounded border text-sm hover:bg-gray-50"
             onClick={onClose}
@@ -158,9 +126,43 @@ export default function AffectedAreaModal({
           </button>
         </div>
 
-        <div className="flex-1 grid grid-cols-2 gap-0 overflow-hidden">
-          {/* Left: list */}
-          <div className="border-r flex flex-col">
+        <div className="flex-1 grid grid-cols-2 overflow-hidden">
+          {/* Left: map */}
+          <div className="relative h-[600px]">
+            <MapContainer
+              center={[12.8797, 121.774]}
+              zoom={6}
+              style={{ height: '100%', width: '100%' }}
+              scrollWheelZoom={true}
+            >
+              <TileLayer
+                attribution="© OpenStreetMap"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {!loading && rows.length > 0 && (
+                <GeoJSON
+                  key={selected.size}
+                  data={{
+                    type: 'FeatureCollection',
+                    features: rows.map((r) => ({
+                      type: 'Feature',
+                      geometry: r.geom,
+                      properties: {
+                        admin_pcode: r.admin_pcode,
+                        name: r.name,
+                      },
+                    })),
+                  }}
+                  style={styleFeature}
+                  onEachFeature={onEachFeature}
+                  ref={geoRef as any}
+                />
+              )}
+            </MapContainer>
+          </div>
+
+          {/* Right: list */}
+          <div className="border-l flex flex-col">
             <div className="p-3 flex items-center gap-2 border-b">
               <input
                 value={q}
@@ -168,33 +170,11 @@ export default function AffectedAreaModal({
                 placeholder="Search by name or pcode..."
                 className="w-full px-3 py-2 rounded border text-sm"
               />
-              <button
-                className="px-2 py-1 text-xs rounded border hover:bg-gray-50"
-                onClick={selectAll}
-                disabled={rows.length === 0}
-              >
-                Select all
-              </button>
-              <button
-                className="px-2 py-1 text-xs rounded border hover:bg-gray-50"
-                onClick={clearAll}
-                disabled={selected.size === 0}
-              >
-                Clear all
-              </button>
             </div>
 
             <div className="flex-1 overflow-auto">
               {loading ? (
                 <div className="p-6 text-sm text-gray-500">Loading…</div>
-              ) : rows.length === 0 ? (
-                <div className="p-6 text-sm text-gray-500">
-                  No ADM1 features found.
-                  <div className="mt-2">
-                    Check SQL permissions for{' '}
-                    <code>get_admin_boundaries_geojson</code> and RLS.
-                  </div>
-                </div>
               ) : (
                 <ul className="divide-y">
                   {filtered.map((r) => {
@@ -202,19 +182,17 @@ export default function AffectedAreaModal({
                     return (
                       <li
                         key={r.admin_pcode}
-                        className="flex items-center justify-between px-3 py-2 hover:bg-gray-50"
+                        className={`flex items-center justify-between px-3 py-2 ${
+                          checked ? 'bg-green-50' : 'hover:bg-gray-50'
+                        } cursor-pointer`}
+                        onClick={() => toggleSelect(r.admin_pcode)}
                       >
-                        <label className="flex items-center gap-3 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggle(r.admin_pcode)}
-                          />
-                          <span className="text-sm font-medium">
-                            {r.name}
-                          </span>
-                        </label>
-                        <span className="text-xs text-gray-500">
+                        <span className="text-sm font-medium">{r.name}</span>
+                        <span
+                          className={`text-xs ${
+                            checked ? 'text-green-700' : 'text-gray-500'
+                          }`}
+                        >
                           {r.admin_pcode}
                         </span>
                       </li>
@@ -225,32 +203,7 @@ export default function AffectedAreaModal({
             </div>
 
             <div className="px-3 py-2 border-t text-xs text-gray-600">
-              Selected: {selected.size} of {rows.length}{' '}
-              {allSelected ? '(All)' : ''}
-            </div>
-          </div>
-
-          {/* Right: simple summary */}
-          <div className="flex flex-col">
-            <div className="p-3 border-b text-sm font-medium">Selection</div>
-            <div className="flex-1 overflow-auto p-3">
-              {selected.size === 0 ? (
-                <div className="text-sm text-gray-500">No results.</div>
-              ) : (
-                <ul className="text-sm space-y-1">
-                  {Array.from(selected)
-                    .sort()
-                    .map((p) => {
-                      const row = rows.find((r) => r.admin_pcode === p);
-                      return (
-                        <li key={p} className="flex justify-between gap-3">
-                          <span className="truncate">{row?.name ?? p}</span>
-                          <span className="text-gray-500">{p}</span>
-                        </li>
-                      );
-                    })}
-                </ul>
-              )}
+              Selected: {selected.size} of {rows.length}
             </div>
           </div>
         </div>
@@ -267,7 +220,7 @@ export default function AffectedAreaModal({
             disabled={saving}
             className="px-3 py-2 rounded text-white text-sm"
             style={{
-              background: 'var(--gsc-blue, #004b87)',
+              background: 'var(--gsc-blue,#004b87)',
             }}
           >
             {saving ? 'Saving…' : 'Save Affected Area'}
