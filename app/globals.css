@@ -19,7 +19,8 @@ body{
   color:var(--gsc-gray);
   font-feature-settings:"cv02","cv03","cv04","cv11";
 }
-
+/* keep base page maps below modals */
+.leaflet-container { z-index: 0 !important; }
 /* Buttons */
 .btn{
   @apply inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition;
