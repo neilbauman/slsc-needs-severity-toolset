@@ -6,17 +6,29 @@ import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
 
-// lazy-load React Leaflet bits
+// --- Lazy React-Leaflet components with proper typing ---
 const MapContainer = dynamic(
-  () => import('react-leaflet').then((m) => m.MapContainer as any),
+  () =>
+    import('react-leaflet').then((m) => {
+      const C = m.MapContainer as React.FC<any>;
+      return C;
+    }),
   { ssr: false }
 );
 const TileLayer = dynamic(
-  () => import('react-leaflet').then((m) => m.TileLayer as any),
+  () =>
+    import('react-leaflet').then((m) => {
+      const C = m.TileLayer as React.FC<any>;
+      return C;
+    }),
   { ssr: false }
 );
 const GeoJSON = dynamic(
-  () => import('react-leaflet').then((m) => m.GeoJSON as any),
+  () =>
+    import('react-leaflet').then((m) => {
+      const C = m.GeoJSON as React.FC<any>;
+      return C;
+    }),
   { ssr: false }
 );
 
@@ -32,19 +44,14 @@ export default function InstancePage() {
   const [finalAvg, setFinalAvg] = useState<number | null>(null);
   const [priority, setPriority] = useState<{ pcode: string; score: number }[]>([]);
 
-  // map data
   const [adm1Features, setAdm1Features] = useState<any[]>([]);
   const [mapReady, setMapReady] = useState(false);
 
   const selectedAdm1 = useMemo<string[]>(() => instance?.admin_scope ?? [], [instance]);
-
   const selectedFeatureCollection = useMemo(() => {
     const set = new Set(selectedAdm1);
     const feats = adm1Features.filter((f) => set.has(f.properties.admin_pcode));
-    return {
-      type: 'FeatureCollection',
-      features: feats,
-    } as any;
+    return { type: 'FeatureCollection', features: feats } as any;
   }, [adm1Features, selectedAdm1]);
 
   const loadInstance = async () => {
@@ -67,24 +74,17 @@ export default function InstancePage() {
   };
 
   const loadAdm1 = async () => {
-    // fetch ADM1 boundaries from RPC (expects arg name "in_level")
     const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
       in_level: 'ADM1',
     });
     if (!error && Array.isArray(data)) {
-      // normalize into Feature[]
       const feats = data.map((r: any) => ({
         type: 'Feature',
         geometry: r.geom,
-        properties: {
-          admin_pcode: r.admin_pcode,
-          name: r.name,
-        },
+        properties: { admin_pcode: r.admin_pcode, name: r.name },
       }));
       setAdm1Features(feats);
-    } else {
-      setAdm1Features([]);
-    }
+    } else setAdm1Features([]);
   };
 
   useEffect(() => {
@@ -99,7 +99,6 @@ export default function InstancePage() {
     await supabase.rpc('score_framework_aggregate', { in_instance_id: id });
     loadInstance();
   };
-
   const handleFinalRecompute = async () => {
     await supabase.rpc('score_final_aggregate', { in_instance_id: id });
     loadInstance();
@@ -134,7 +133,7 @@ export default function InstancePage() {
       </div>
 
       <div className="grid grid-cols-12 gap-4">
-        {/* Map & context */}
+        {/* Map */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
@@ -154,7 +153,6 @@ export default function InstancePage() {
                 attribution="&copy; OpenStreetMap"
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {/* Show a faint outline of all ADM1 */}
               {mapReady && adm1Features.length > 0 && (
                 <GeoJSON
                   data={{ type: 'FeatureCollection', features: adm1Features } as any}
@@ -162,19 +160,18 @@ export default function InstancePage() {
                     color: '#888',
                     weight: 1,
                     opacity: 0.5,
-                    fillOpacity: 0.0,
+                    fillOpacity: 0,
                   })}
                 />
               )}
-              {/* Highlight selected ADM1 */}
               {mapReady && selectedFeatureCollection.features?.length > 0 && (
                 <GeoJSON
                   data={selectedFeatureCollection}
                   style={() => ({
-                    color: '#d35400', // GSC orange outline
+                    color: '#d35400',
                     weight: 2,
                     opacity: 0.9,
-                    fillColor: '#2e7d32', // GSC green fill
+                    fillColor: '#2e7d32',
                     fillOpacity: 0.25,
                   })}
                 />
@@ -182,12 +179,11 @@ export default function InstancePage() {
             </MapContainer>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Selections are based on <code>instances.admin_scope</code>. Use{' '}
-            <span className="font-medium">Define Affected Area</span> to update.
+            Use “Define Affected Area” to edit selections. Selected ADM1s are filled green.
           </p>
         </div>
 
-        {/* Metrics / Controls */}
+        {/* Metrics */}
         <div className="col-span-5 space-y-4">
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <div className="text-sm font-semibold text-gray-700 mb-2">Key Metrics</div>
@@ -226,7 +222,9 @@ export default function InstancePage() {
           </div>
 
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">Priority Locations (Top 15)</div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">
+              Priority Locations (Top 15)
+            </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-gray-500 text-xs border-b">
