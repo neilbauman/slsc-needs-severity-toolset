@@ -9,12 +9,9 @@ type Props = {
 };
 
 /**
- * Calls your server-side SQL to aggregate pillar results (P1..P3) into
+ * Calls your server-side SQL to aggregate pillars (P1..P3) into
  * the "SSC Framework Roll-up" dataset for the given instance.
- *
- * It first tries score_framework_aggregate(instance_id uuid).
- * If your DB requires the legacy signature score_framework_aggregate(jsonb, uuid),
- * it retries automatically with a minimal default config JSON.
+ * Tries score_framework_aggregate(uuid) first, then falls back to (jsonb, uuid).
  */
 export default function ComputeFrameworkRollupButton({ instanceId, onComplete }: Props) {
   const supabase = createClient();
@@ -23,48 +20,8 @@ export default function ComputeFrameworkRollupButton({ instanceId, onComplete }:
   const [error, setError] = useState<string | null>(null);
 
   const defaultConfig = {
-    // minimal placeholder knobs — your SQL function can ignore or use these
-    methods: {
-      P1: 'weighted_mean',
-      P2: 'weighted_mean',
-      P3: 'weighted_mean',
-    },
-    weights: {
-      P1: 1,
-      P2: 1,
-      P3: 1,
-    },
-  };
-
-  const callRpc = async () => {
-    // Try new/simple signature first
-    let { data, error } = await supabase.rpc('score_framework_aggregate', {
-      in_instance_id: instanceId,
-    });
-
-    if (error) {
-      // Fallback: legacy signature that expects a JSONB config and instance_id
-      const second = await supabase.rpc('score_framework_aggregate', {
-        in_config: defaultConfig,
-        in_instance_id: instanceId,
-      });
-      data = second.data;
-      error = second.error;
-      if (error) throw error;
-    }
-
-    // Normalize response (table-returning function vs void+notice)
-    if (Array.isArray(data) && data.length > 0) {
-      // Try to detect common columns
-      const row = data[0] as any;
-      setResult({
-        status: row.status ?? 'done',
-        upserted_rows: row.upserted_rows ?? row.updated_rows ?? 0,
-        framework_avg: row.framework_avg ?? row.avg_score ?? null,
-      });
-    } else {
-      setResult({ status: 'done', upserted_rows: 0, framework_avg: 0 });
-    }
+    methods: { P1: 'weighted_mean', P2: 'weighted_mean', P3: 'weighted_mean' },
+    weights: { P1: 1, P2: 1, P3: 1 },
   };
 
   const handleCompute = async () => {
@@ -73,8 +30,34 @@ export default function ComputeFrameworkRollupButton({ instanceId, onComplete }:
     setResult(null);
 
     try {
-      await callRpc();
-      if (onComplete) onComplete();
+      // Try simple signature first
+      let { data, error } = await supabase.rpc('score_framework_aggregate', {
+        in_instance_id: instanceId,
+      });
+
+      if (error) {
+        // Legacy signature fallback: (jsonb, uuid)
+        const second = await supabase.rpc('score_framework_aggregate', {
+          in_config: defaultConfig,
+          in_instance_id: instanceId,
+        });
+        data = second.data;
+        error = second.error;
+        if (error) throw error;
+      }
+
+      if (Array.isArray(data) && data.length > 0) {
+        const row = data[0] as any;
+        setResult({
+          status: row.status ?? 'done',
+          upserted_rows: row.upserted_rows ?? row.updated_rows ?? 0,
+          framework_avg: row.framework_avg ?? row.avg_score ?? null,
+        });
+      } else {
+        setResult({ status: 'done', upserted_rows: 0, framework_avg: 0 });
+      }
+
+      onComplete?.();
     } catch (err: any) {
       setError(err?.message ?? 'Unexpected error');
     } finally {
@@ -86,7 +69,7 @@ export default function ComputeFrameworkRollupButton({ instanceId, onComplete }:
     <div className="flex flex-col items-center gap-2 border rounded-lg p-4 bg-white shadow-sm w-full max-w-md">
       <h3 className="text-lg font-semibold text-gray-800">Compute Framework Roll-up</h3>
       <p className="text-sm text-gray-600 text-center">
-        Aggregates P1–P3 pillar scores into the <b>SSC Framework Roll-up</b> dataset for this instance.
+        Aggregates P1–P3 pillar scores into the <b>SSC Framework Roll-up</b>.
       </p>
 
       <button
@@ -108,7 +91,7 @@ export default function ComputeFrameworkRollupButton({ instanceId, onComplete }:
 
       {error && (
         <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-2 w-full text-center mt-2">
-          ⚠️ {error}
+        ⚠️ {error}
         </div>
       )}
     </div>
