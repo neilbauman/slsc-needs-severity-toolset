@@ -1,32 +1,40 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
-import type { GeoJSON as GeoJSONType } from 'geojson';
-import type { GeoJSON as LeafletGeoJSON } from 'leaflet';
-import L from 'leaflet';
+import { useEffect, useState, useRef } from 'react';
 import { createClient } from '@/lib/supabaseClient';
+import dynamic from 'next/dynamic';
+import type { Feature, FeatureCollection } from 'geojson';
+import type { GeoJSON as LeafletGeoJSON } from 'leaflet';
 
-type Props = {
+const MapContainer = dynamic(
+  () => import('react-leaflet').then(mod => mod.MapContainer),
+  { ssr: false }
+);
+const TileLayer = dynamic(
+  () => import('react-leaflet').then(mod => mod.TileLayer),
+  { ssr: false }
+);
+const GeoJSON = dynamic(
+  () => import('react-leaflet').then(mod => mod.GeoJSON),
+  { ssr: false }
+);
+
+export default function AffectedAreaModal({
+  instanceId,
+  onClose,
+  onSaved,
+}: {
   instanceId: string;
   onClose: () => void;
-  onSaved: () => Promise<void>;
-};
-
-type AdmRow = {
-  admin_pcode: string;
-  name: string;
-  geom: any; // ST_AsGeoJSON(...)::json
-};
-
-export default function AffectedAreaModal({ instanceId, onClose, onSaved }: Props) {
+  onSaved: () => void;
+}) {
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [features, setFeatures] = useState<GeoJSONType.Feature[]>([]);
+  const [features, setFeatures] = useState<Feature[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const layerRef = useRef<LeafletGeoJSON | null>(null);
-
+  
   // ---- fetch admin_scope + ADM1 polygons as GeoJSON
   useEffect(() => {
     (async () => {
