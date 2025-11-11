@@ -1,162 +1,43 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { createClient } from '@/lib/supabaseClient';
-import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
-import InstanceScoringModal from '@/components/InstanceScoringModal';
 
-type Instance = { id: string; name: string };
-
-export default function InstanceRecomputePanel({ instance }: { instance: Instance }) {
+export default function InstanceRecomputePanel({ instanceId }:{ instanceId:string }){
   const supabase = createClient();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string|null>(null);
 
-  const [busyFw, setBusyFw] = useState(false);
-  const [busyFinal, setBusyFinal] = useState(false);
-  const [errorFw, setErrorFw] = useState<string | null>(null);
-  const [errorFinal, setErrorFinal] = useState<string | null>(null);
-
-  const [showDatasets, setShowDatasets] = useState(false);
-  const [showFramework, setShowFramework] = useState(false);
-
-  const header = useMemo(
-    () => (
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-base font-medium">
-          {instance.name}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs hover:bg-gray-50"
-            onClick={() => setShowDatasets(true)}
-          >
-            Configure datasets
-          </button>
-          <button
-            className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs hover:bg-gray-50"
-            onClick={() => setShowFramework(true)}
-          >
-            Configure framework scoring
-          </button>
-        </div>
-      </div>
-    ),
-    [instance.name]
-  );
-
-  async function runFramework() {
-    setBusyFw(true);
-    setErrorFw(null);
-    // RPC wrapper: the SQL function already does upserts; just call it.
-    const { error } = await supabase.rpc('score_framework_aggregate', {
-      in_instance_id: instance.id,
-      // config is persisted by the modal; backend function reads from tables,
-      // so no JSON is required here.
-    } as any);
-    if (error) setErrorFw(error.message);
-    setBusyFw(false);
-  }
-
-  async function runFinal() {
-    setBusyFinal(true);
-    setErrorFinal(null);
-    const { error } = await supabase.rpc('score_final_aggregate', {
-      in_instance_id: instance.id,
-    } as any);
-    if (error) setErrorFinal(error.message);
-    setBusyFinal(false);
-  }
-
-  async function runPipeline() {
-    await runFramework();
-    await runFinal();
-  }
+  const run = async (fn: 'framework'|'final') => {
+    setBusy(true); setMsg(null);
+    try{
+      // call Postgres functions via RPC (assuming you created http callables or use SQL over pg net)
+      // Here we hit a simple REST endpoint you can wire later, for now we trigger SQL via Supabase SQL RPC
+      const fnName = fn === 'framework' ? 'score_framework_aggregate' : 'score_final_aggregate';
+      const { data, error } = await supabase.rpc(fnName, { in_instance_id: instanceId });
+      if (error) throw error;
+      setMsg(`${fn === 'framework' ? 'Framework' : 'Final'} recompute OK`);
+    }catch(e:any){
+      console.error(e);
+      setMsg(e.message || 'Error');
+    }finally{
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="mt-2">
-      {header}
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {/* Framework card */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="text-sm font-semibold">Compute Framework Roll-up</div>
-          <p className="mt-1 text-xs text-gray-500">
-            Aggregates pillar scores into the <span className="font-medium">SSC Framework Roll-up</span>.
-          </p>
-
-          <button
-            onClick={runFramework}
-            disabled={busyFw}
-            className="mt-3 w-full rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
-          >
-            {busyFw ? 'Recomputing…' : 'Recompute Framework Scores'}
-          </button>
-
-          {errorFw && (
-            <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-              ⚠ {errorFw}
-            </div>
-          )}
+    <div className="card p-3 no-print">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold">Recompute</div>
+          <div className="text-xs text-gray-500">Run DB-side rollups after tuning.</div>
         </div>
-
-        {/* Final card */}
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="text-sm font-semibold">Compute Final Roll-up</div>
-          <p className="mt-1 text-xs text-gray-500">
-            Recalculates the weighted <span className="font-medium">final vulnerability scores</span>.
-          </p>
-
-          <button
-            onClick={runFinal}
-            disabled={busyFinal}
-            className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            {busyFinal ? 'Recomputing…' : 'Recompute Final Scores'}
-          </button>
-
-          {errorFinal && (
-            <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-              ⚠ {errorFinal}
-            </div>
-          )}
+        <div className="flex gap-2">
+          <button className="btn btn-secondary" disabled={busy} onClick={()=>run('framework')}>Recompute Framework</button>
+          <button className="btn btn-primary" disabled={busy} onClick={()=>run('final')}>Recompute Final</button>
         </div>
       </div>
-
-      {/* Pipeline row */}
-      <div className="mt-3 rounded-lg border border-gray-200 bg-white p-4">
-        <div className="text-sm font-semibold">Run Full Pipeline</div>
-        <p className="mt-1 text-xs text-gray-500">
-          Recompute <span className="font-medium">Framework</span> first, then <span className="font-medium">Final</span>.
-        </p>
-
-        <button
-          onClick={runPipeline}
-          disabled={busyFw || busyFinal}
-          className="mt-3 w-full rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-        >
-          {busyFw || busyFinal ? 'Running…' : 'Run Framework ➜ Final'}
-        </button>
-
-        <p className="mt-1 text-[11px] text-gray-500">
-          Tip: you can also click the two cards above in sequence for a full recompute.
-        </p>
-      </div>
-
-      {/* Modals */}
-      {showDatasets && (
-        <InstanceDatasetConfigModal
-          instance={instance}
-          onClose={() => setShowDatasets(false)}
-          onSaved={async () => setShowDatasets(false)}
-        />
-      )}
-
-      {showFramework && (
-        <InstanceScoringModal
-          instance={instance}
-          onClose={() => setShowFramework(false)}
-          onSaved={async () => setShowFramework(false)}
-        />
-      )}
+      {msg && <div className="text-xs mt-2">{msg}</div>}
     </div>
   );
 }
