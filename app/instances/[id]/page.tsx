@@ -9,7 +9,10 @@ import type { MapContainerProps } from 'react-leaflet';
 import InstanceRecomputePanel from '@/components/InstanceRecomputePanel';
 
 // dynamic Leaflet imports
-const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const MapContainer = dynamic<MapContainerProps>(
+  () => import('react-leaflet').then(m => m.MapContainer),
+  { ssr: false }
+);
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
 
@@ -60,11 +63,9 @@ export default function InstanceDashboard() {
     return { type: 'FeatureCollection', features: feats } as any;
   }, [adm1, inst]);
 
-  // simple KPIs
   const totalAreas = inst?.admin_scope?.length ?? 0;
   const frameworkAvg = framework.length ? framework.reduce((s, r) => s + r.score, 0) / framework.length : 0;
   const finalAvg = finals.length ? finals.reduce((s, r) => s + r.score, 0) / finals.length : 0;
-
   const top = useMemo(() => [...finals].sort((a, b) => b.score - a.score).slice(0, 15), [finals]);
 
   return (
@@ -95,32 +96,29 @@ export default function InstanceDashboard() {
           </div>
 
           <div style={{ height: '520px' }}>
-            {(MapContainer as React.ComponentType<MapContainerProps>)({
-              center: [12.8797, 121.7740],
-              zoom: 5,
-              scrollWheelZoom: false,
-              className: 'h-full w-full',
-              children: (
-                <>
-                  <TileLayer
-                    attribution="&copy; OpenStreetMap"
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  {affectedFC.features.length > 0 && (
-                    <GeoJSON
-                      key={affectedFC.features.length}
-                      data={affectedFC as any}
-                      style={() => ({
-                        color: '#1f77b4',
-                        weight: 2,
-                        fillColor: '#1f77b4',
-                        fillOpacity: 0.25,
-                      })}
-                    />
-                  )}
-                </>
-              ),
-            })}
+            <MapContainer
+              center={[12.8797, 121.7740]}
+              zoom={5}
+              scrollWheelZoom={false}
+              className="h-full w-full"
+            >
+              <TileLayer
+                attribution="&copy; OpenStreetMap"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {affectedFC.features.length > 0 && (
+                <GeoJSON
+                  key={affectedFC.features.length}
+                  data={affectedFC as any}
+                  style={() => ({
+                    color: '#1f77b4',
+                    weight: 2,
+                    fillColor: '#1f77b4',
+                    fillOpacity: 0.25,
+                  })}
+                />
+              )}
+            </MapContainer>
           </div>
 
           {affectedFC.features.length === 0 && (
