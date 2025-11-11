@@ -70,7 +70,6 @@ export default function InstancePage() {
       </div>
 
       <div className="grid grid-cols-12 gap-4">
-        {/* Map */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
@@ -88,7 +87,6 @@ export default function InstancePage() {
           </p>
         </div>
 
-        {/* Metrics + Actions */}
         <div className="col-span-5 space-y-4">
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <div className="text-sm font-semibold text-gray-700 mb-2">Key Metrics</div>
