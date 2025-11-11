@@ -2,15 +2,141 @@
 @tailwind components;
 @tailwind utilities;
 
-import "leaflet/dist/leaflet.css";
-
-body {
-  @apply bg-gray-100 text-gray-900;
+/* -------------------------------------------------
+   Global Theme Colors (GSC Palette)
+-------------------------------------------------- */
+:root {
+  --gsc-red: #630710;        /* GSC deep red */
+  --gsc-blue: #004b87;       /* GSC institutional blue */
+  --gsc-green: #2e7d32;      /* GSC green */
+  --gsc-orange: #d35400;     /* GSC orange */
+  --gsc-gray: #374151;       /* Neutral gray/slate */
+  --gsc-light-gray: #e5e7eb; /* Light gray */
+  --gsc-beige: #f5f2ee;      /* Neutral beige background */
 }
+
+/* -------------------------------------------------
+   Base Layout & Typography
+-------------------------------------------------- */
+body {
+  background-color: var(--gsc-beige);
+  color: var(--gsc-gray);
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+h1, h2, h3, h4 {
+  color: var(--gsc-blue);
+  margin-bottom: 0.5rem;
+}
+
+button {
+  font-size: 13px;
+  border-radius: 6px;
+  font-weight: 500;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+button.primary {
+  background-color: var(--gsc-orange);
+  color: white;
+}
+button.primary:hover {
+  background-color: #b34700;
+}
+
+button.secondary {
+  background-color: var(--gsc-light-gray);
+  color: var(--gsc-gray);
+}
+button.secondary:hover {
+  background-color: #d1d5db;
+}
+
+/* -------------------------------------------------
+   Dashboard Layout Helpers
+-------------------------------------------------- */
+.dashboard-container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* Map container */
 #map {
   width: 100%;
-  height: 500px; /* or ~6in to fit letter-sized layout */
+  height: 480px;
   border: 1px solid var(--gsc-light-gray);
   border-radius: 8px;
-  margin-top: 1rem;
+  margin-top: 12px;
+}
+
+/* Metric cards */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+.metric-card {
+  background-color: var(--gsc-light-gray);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  font-weight: 600;
+}
+.metric-value {
+  font-size: 18px;
+  color: var(--gsc-blue);
+  margin-top: 4px;
+}
+
+/* Priority table */
+.priority-table {
+  width: 100%;
+  margin-top: 16px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.priority-table th {
+  background-color: var(--gsc-blue);
+  color: white;
+  padding: 8px;
+  text-align: left;
+}
+.priority-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--gsc-light-gray);
+}
+.priority-table tr.high-risk {
+  background-color: rgba(99, 7, 16, 0.1);
+}
+
+/* -------------------------------------------------
+   Print Styling (Letter-sized layout)
+-------------------------------------------------- */
+@media print {
+  body {
+    background: white;
+    -webkit-print-color-adjust: exact;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .dashboard-container {
+    max-width: 8.5in;
+    margin: 0;
+    box-shadow: none;
+    border: none;
+  }
+  #map {
+    height: 6in;
+  }
 }
