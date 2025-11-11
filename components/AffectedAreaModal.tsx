@@ -53,30 +53,28 @@ export default function AffectedAreaModal({ instance, onClose, onSaved }: Props)
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Map features
-  const features: Feature[] = useMemo(() => {
-    const f: Feature[] = [];
-    adm1.forEach((r) => {
-      if (r.geom) {
+  
+const features: Feature[] = useMemo(() => {
+  const f: Feature[] = [];
+
+  // include ADM2 geometries for selected ADM1s
+  Object.entries(adm2ByAdm1).forEach(([adm1Code, rows]) => {
+    const adm1Selected = selected.has(adm1Code);
+    rows.forEach(r => {
+      const adm2Selected = selected.has(r.admin_pcode);
+      // draw if explicitly selected or parent ADM1 selected
+      if ((adm1Selected || adm2Selected) && r.geom) {
         f.push({
           type: 'Feature',
           geometry: r.geom,
-          properties: { admin_pcode: r.admin_pcode, name: r.name, level: 'ADM1' }
+          properties: { admin_pcode: r.admin_pcode, name: r.name, level: 'ADM2', parent: adm1Code }
         });
       }
     });
-    Object.values(adm2ByAdm1).forEach(rows => {
-      rows.forEach(r => {
-        if (r.geom) {
-          f.push({
-            type: 'Feature',
-            geometry: r.geom,
-            properties: { admin_pcode: r.admin_pcode, name: r.name, level: 'ADM2' }
-          });
-        }
-      });
-    });
-    return f;
-  }, [adm1, adm2ByAdm1]);
+  });
+
+  return f;
+}, [adm2ByAdm1, selected]);
 
   const fc: FeatureCollection = useMemo(
     () => ({ type: 'FeatureCollection', features }),
