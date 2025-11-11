@@ -1,16 +1,13 @@
 'use client';
 
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import { createClient } from '@/lib/supabaseClient';
+import type { FeatureCollection, Feature, Geometry } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
-type AdmRow = {
-  admin_pcode: string;
-  name: string;
-  geom: GeoJSON.Geometry;
-};
+type AdmRow = { admin_pcode: string; name: string; geom: Geometry };
 
 export default function AffectedAreaModal({
   instanceId,
@@ -29,51 +26,54 @@ export default function AffectedAreaModal({
   const [selected, setSelected] = useState<Set<string>>(new Set(initialScope ?? []));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [q, setQ] = useState('');
-
+  const [search, setSearch] = useState('');
+  const [level, setLevel] = useState<'ADM1' | 'ADM2'>('ADM1');
   const geoRef = useRef<L.GeoJSON | null>(null);
 
-  // Load data
+  // Fetch polygons
   useEffect(() => {
     (async () => {
       setLoading(true);
       const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
-        in_admin_level: 'ADM1',
+        in_admin_level: level,
+        in_search: search || null,
       });
       if (error) {
-        console.error(error);
+        console.error(error.message);
         setRows([]);
       } else {
         setRows(
           (data ?? []).map((r: any) => ({
             admin_pcode: r.admin_pcode,
             name: r.name,
-            geom: r.geom,
+            geom: r.geom as Geometry,
           }))
         );
       }
       setLoading(false);
     })();
-  }, [supabase]);
+  }, [level, search, supabase]);
 
-  // Filter list by search
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    if (!qq) return rows;
-    return rows.filter(
-      (r) =>
-        r.name.toLowerCase().includes(qq) ||
-        r.admin_pcode.toLowerCase().includes(qq)
-    );
-  }, [q, rows]);
+  // Fit map to data
+  useEffect(() => {
+    if (geoRef.current) {
+      try {
+        const b = geoRef.current.getBounds();
+        if (b.isValid()) geoRef.current._map?.fitBounds(b.pad(0.05));
+      } catch {}
+    }
+  }, [rows]);
 
-  const toggleSelect = (pcode: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(pcode) ? next.delete(pcode) : next.add(pcode);
-      return next;
+  // Selection logic
+  const toggle = (p: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(p) ? n.delete(p) : n.add(p);
+      return n;
     });
-  };
+
+  const selectAll = () => setSelected(new Set(rows.map((r) => r.admin_pcode)));
+  const clearAll = () => setSelected(new Set());
 
   const handleSave = async () => {
     setSaving(true);
@@ -88,26 +88,46 @@ export default function AffectedAreaModal({
     onClose();
   };
 
-  const onEachFeature = (feature: any, layer: L.Layer) => {
-    const pcode = feature.properties?.admin_pcode;
-    const name = feature.properties?.name;
-    if (!pcode) return;
-    layer.on({
-      click: () => toggleSelect(pcode),
-    });
-    layer.bindTooltip(name);
-  };
-
-  const styleFeature = (feature: any) => {
-    const pcode = feature.properties?.admin_pcode;
-    const isSelected = pcode && selected.has(pcode);
+  // Map feature styling
+  const style = (f: any) => {
+    const p = f.properties?.admin_pcode;
+    const on = p && selected.has(p);
     return {
-      color: isSelected ? '#2e7d32' : '#999',
-      weight: 1.5,
-      fillColor: isSelected ? '#81c784' : '#f0f0f0',
-      fillOpacity: isSelected ? 0.6 : 0.2,
+      color: on ? '#2e7d32' : '#888',
+      weight: 1.2,
+      fillColor: on ? '#81c784' : '#ccc',
+      fillOpacity: on ? 0.6 : 0.2,
     };
   };
+  const onEach = (f: any, l: L.Layer) => {
+    const p = f.properties?.admin_pcode;
+    if (!p) return;
+    l.on({ click: () => toggle(p) });
+    l.bindTooltip(f.properties?.name || p);
+  };
+
+  // Build FeatureCollection
+  const fc: FeatureCollection = {
+    type: 'FeatureCollection',
+    features: rows.map(
+      (r) =>
+        ({
+          type: 'Feature',
+          geometry: r.geom,
+          properties: { admin_pcode: r.admin_pcode, name: r.name },
+        }) as Feature
+    ),
+  };
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.admin_pcode.toLowerCase().includes(q)
+    );
+  }, [search, rows]);
 
   return (
     <div
@@ -116,8 +136,11 @@ export default function AffectedAreaModal({
       aria-modal="true"
     >
       <div className="bg-white rounded-lg shadow-xl w-[1100px] max-w-[95vw] max-h-[90vh] flex flex-col border">
+        {/* Header */}
         <div className="px-4 py-3 border-b bg-[var(--gsc-beige,#f5f2ee)] text-[var(--gsc-gray,#374151)] flex items-center justify-between">
-          <div className="font-semibold text-sm">Define Affected Area (ADM1)</div>
+          <div className="font-semibold text-sm">
+            Configure Affected Area ({level})
+          </div>
           <button
             className="px-3 py-1 rounded border text-sm hover:bg-gray-50"
             onClick={onClose}
@@ -126,14 +149,14 @@ export default function AffectedAreaModal({
           </button>
         </div>
 
+        {/* Body */}
         <div className="flex-1 grid grid-cols-2 overflow-hidden">
-          {/* Left: map */}
+          {/* Map */}
           <div className="relative h-[600px]">
             <MapContainer
               center={[12.8797, 121.774]}
               zoom={6}
               style={{ height: '100%', width: '100%' }}
-              scrollWheelZoom={true}
             >
               <TileLayer
                 attribution="© OpenStreetMap"
@@ -141,35 +164,44 @@ export default function AffectedAreaModal({
               />
               {!loading && rows.length > 0 && (
                 <GeoJSON
-                  key={selected.size}
-                  data={{
-                    type: 'FeatureCollection',
-                    features: rows.map((r) => ({
-                      type: 'Feature',
-                      geometry: r.geom,
-                      properties: {
-                        admin_pcode: r.admin_pcode,
-                        name: r.name,
-                      },
-                    })),
-                  }}
-                  style={styleFeature}
-                  onEachFeature={onEachFeature}
                   ref={geoRef as any}
+                  data={fc as any}
+                  style={style}
+                  onEachFeature={onEach}
                 />
               )}
             </MapContainer>
           </div>
 
-          {/* Right: list */}
+          {/* List */}
           <div className="border-l flex flex-col">
             <div className="p-3 flex items-center gap-2 border-b">
+              <select
+                value={level}
+                onChange={(e) => setLevel(e.target.value as any)}
+                className="border rounded px-2 py-1 text-sm"
+              >
+                <option value="ADM1">ADM1 (Regions)</option>
+                <option value="ADM2">ADM2 (Provinces)</option>
+              </select>
               <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search by name or pcode..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search..."
                 className="w-full px-3 py-2 rounded border text-sm"
               />
+              <button
+                onClick={selectAll}
+                className="px-2 py-1 text-xs rounded border hover:bg-gray-50"
+              >
+                Select all
+              </button>
+              <button
+                onClick={clearAll}
+                className="px-2 py-1 text-xs rounded border hover:bg-gray-50"
+              >
+                Clear all
+              </button>
             </div>
 
             <div className="flex-1 overflow-auto">
@@ -178,19 +210,19 @@ export default function AffectedAreaModal({
               ) : (
                 <ul className="divide-y">
                   {filtered.map((r) => {
-                    const checked = selected.has(r.admin_pcode);
+                    const on = selected.has(r.admin_pcode);
                     return (
                       <li
                         key={r.admin_pcode}
-                        className={`flex items-center justify-between px-3 py-2 ${
-                          checked ? 'bg-green-50' : 'hover:bg-gray-50'
-                        } cursor-pointer`}
-                        onClick={() => toggleSelect(r.admin_pcode)}
+                        onClick={() => toggle(r.admin_pcode)}
+                        className={`flex items-center justify-between px-3 py-2 cursor-pointer ${
+                          on ? 'bg-green-50' : 'hover:bg-gray-50'
+                        }`}
                       >
                         <span className="text-sm font-medium">{r.name}</span>
                         <span
                           className={`text-xs ${
-                            checked ? 'text-green-700' : 'text-gray-500'
+                            on ? 'text-green-700' : 'text-gray-500'
                           }`}
                         >
                           {r.admin_pcode}
@@ -201,13 +233,13 @@ export default function AffectedAreaModal({
                 </ul>
               )}
             </div>
-
             <div className="px-3 py-2 border-t text-xs text-gray-600">
-              Selected: {selected.size} of {rows.length}
+              Selected {selected.size} of {rows.length}
             </div>
           </div>
         </div>
 
+        {/* Footer */}
         <div className="px-4 py-3 border-t flex items-center justify-end gap-2">
           <button
             className="px-3 py-2 rounded border text-sm hover:bg-gray-50"
@@ -219,9 +251,7 @@ export default function AffectedAreaModal({
             onClick={handleSave}
             disabled={saving}
             className="px-3 py-2 rounded text-white text-sm"
-            style={{
-              background: 'var(--gsc-blue,#004b87)',
-            }}
+            style={{ background: 'var(--gsc-blue,#004b87)' }}
           >
             {saving ? 'Saving…' : 'Save Affected Area'}
           </button>
