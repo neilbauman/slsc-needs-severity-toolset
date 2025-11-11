@@ -6,13 +6,13 @@ import { createClient } from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
 
-// Lazy-load React Leaflet components
+// Lazy-load React Leaflet (no SSR)
 const MapContainer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.MapContainer),
+  () => import('react-leaflet').then(m => m.MapContainer),
   { ssr: false }
 );
 const TileLayer = dynamic(
-  () => import('react-leaflet').then((mod) => mod.TileLayer),
+  () => import('react-leaflet').then(m => m.TileLayer),
   { ssr: false }
 );
 
@@ -27,54 +27,49 @@ export default function InstancePage() {
   const [finalAvg, setFinalAvg] = useState<number | null>(null);
   const [priority, setPriority] = useState<{ pcode: string; score: number }[]>([]);
 
-  // Load instance + metrics
   const loadInstance = async () => {
+    if (!id) return;
     const { data: inst } = await supabase
       .from('instances')
       .select('*')
-      .eq('id', id)
+      .eq('id', id as string)
       .single();
     setInstance(inst);
 
-    const { data: fw } = await supabase.rpc('get_framework_avg', {
-      instance_uuid: id,
-    });
-    const { data: fin } = await supabase.rpc('get_final_avg', {
-      instance_uuid: id,
-    });
-
+    const { data: fw } = await supabase.rpc('get_framework_avg', { instance_uuid: id as string });
+    const { data: fin } = await supabase.rpc('get_final_avg', { instance_uuid: id as string });
     setFrameworkAvg(fw?.framework_avg ?? null);
     setFinalAvg(fin?.final_avg ?? null);
 
     const { data: prio } = await supabase
       .from('scored_instance_values')
       .select('pcode, score')
-      .eq('instance_id', id)
+      .eq('instance_id', id as string)
       .eq('pillar', 'Final')
       .order('score', { ascending: false })
       .limit(15);
-
     setPriority(prio ?? []);
   };
 
   useEffect(() => {
     loadInstance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Recompute handlers
   const handleFrameworkRecompute = async () => {
-    await supabase.rpc('score_framework_aggregate', { in_instance_id: id });
-    loadInstance();
+    if (!id) return;
+    await supabase.rpc('score_framework_aggregate', { in_instance_id: id as string });
+    await loadInstance();
   };
 
   const handleFinalRecompute = async () => {
-    await supabase.rpc('score_final_aggregate', { in_instance_id: id });
-    loadInstance();
+    if (!id) return;
+    await supabase.rpc('score_final_aggregate', { in_instance_id: id as string });
+    await loadInstance();
   };
 
   return (
     <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen">
-      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
           {instance?.name ?? 'Instance'}
@@ -101,17 +96,17 @@ export default function InstancePage() {
         </div>
       </div>
 
-      {/* Main Grid */}
+      {/* Main Content */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Map */}
+        {/* Map card */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
             <span className="text-gray-400 text-xs">
-              {instance?.admin_scope?.length ?? 0} ADM2 selected
+              {(instance?.admin_scope ?? []).length} selected
             </span>
           </div>
-          <div className="h-[520px] rounded overflow-hidden border">
+          <div className="h-[520px] rounded overflow-hidden border relative z-0">
             <MapContainer
               center={[12.8797, 121.774]}
               zoom={5}
@@ -125,18 +120,15 @@ export default function InstancePage() {
             </MapContainer>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Define affected area or ensure{' '}
-            <code>admin_boundaries.geom</code> is available as GeoJSON.
+            Use <span className="font-medium">Define Affected Area</span> to pick ADM1/ADM2. Map will
+            reflect your saved selection.
           </p>
         </div>
 
-        {/* Metrics & Controls */}
+        {/* Metrics + Actions */}
         <div className="col-span-5 space-y-4">
-          {/* Key Metrics */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">
-              Key Metrics
-            </div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">Key Metrics</div>
             <div className="grid grid-cols-2 gap-3 text-center">
               <div className="bg-[var(--gsc-light-gray,#e5e7eb)] rounded-lg py-3">
                 <div className="text-xs text-gray-600">Framework Avg</div>
@@ -153,11 +145,8 @@ export default function InstancePage() {
             </div>
           </div>
 
-          {/* Recompute */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">
-              Recompute
-            </div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">Recompute</div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleFrameworkRecompute}
@@ -174,7 +163,6 @@ export default function InstancePage() {
             </div>
           </div>
 
-          {/* Priority Locations */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <div className="text-sm font-semibold text-gray-700 mb-2">
               Priority Locations (Top 15)
@@ -193,13 +181,19 @@ export default function InstancePage() {
                     <td className="py-1 text-right">{p.score.toFixed(3)}</td>
                   </tr>
                 ))}
+                {priority.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="py-2 text-center text-gray-400">
+                      No results.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      {/* --- Affected Area Modal --- */}
       {showAffected && instance && (
         <AffectedAreaModal
           instance={instance}
