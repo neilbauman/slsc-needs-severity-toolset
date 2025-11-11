@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase/supabaseClient';
+import { createClient } from '@/lib/supabaseClient';
 
 type Props = {
   instanceId: string;
