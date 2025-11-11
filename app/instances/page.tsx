@@ -13,72 +13,51 @@ type Instance = {
 export default function InstancesPage() {
   const supabase = createClient();
   const [instances, setInstances] = useState<Instance[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadInstances = async () => {
-    setLoading(true);
-    setError(null);
-
-    const { data, error } = await supabase
-      .from('instances')
-      .select('id, name, created_at')
-      .order('created_at', { ascending: false });
-
-    if (error) setError(error.message);
-    else if (data) setInstances(data);
-
-    setLoading(false);
-  };
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadInstances();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('instances')
+        .select('id, name, created_at')
+        .order('created_at', { ascending: false });
+      if (!error && data) setInstances(data as Instance[]);
+      setLoading(false);
+    })();
+  }, [supabase]);
 
   return (
-    <main className="p-6 flex flex-col gap-6">
-      <h1 className="text-2xl font-bold text-gray-800">Instances</h1>
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <h1 className="text-xl sm:text-2xl font-semibold mb-3">Instances</h1>
 
-      {loading && <div className="text-gray-600">Loading instances…</div>}
-      {error && (
-        <div className="text-red-700 bg-red-50 border border-red-200 p-3 rounded-md">
-          ⚠️ {error}
-        </div>
-      )}
-
-      {!loading && !error && instances.length === 0 && (
-        <div className="text-gray-500">No instances found.</div>
-      )}
-
-      {!loading && instances.length > 0 && (
-        <div className="grid gap-8">
-          {instances.map((instance) => (
+      {loading ? (
+        <div className="text-sm text-gray-500">Loading…</div>
+      ) : instances.length === 0 ? (
+        <div className="text-sm text-gray-500">No instances yet.</div>
+      ) : (
+        <div className="grid gap-4">
+          {instances.map((inst) => (
             <div
-              key={instance.id}
-              className="border border-gray-200 rounded-lg shadow-sm bg-white p-6"
+              key={inst.id}
+              className="rounded-lg border border-gray-200 bg-white p-4"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-gray-800">{instance.name}</h2>
-                  <p className="text-sm text-gray-500">
-                    Created {new Date(instance.created_at).toLocaleString()}
-                  </p>
+                  <div className="text-lg font-semibold">
+                    {inst.name}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Created {new Date(inst.created_at).toLocaleString()}
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-4">
-                <InstanceRecomputePanel
-                  instanceId={instance.id}
-                  onReload={() => {
-                    loadInstances();
-                  }}
-                />
-              </div>
+              <InstanceRecomputePanel instance={inst} />
             </div>
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }
