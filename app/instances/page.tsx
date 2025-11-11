@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/supabaseClient';
+import { createClient } from '@/lib/supabaseClient';
 import InstanceRecomputePanel from '@/components/InstanceRecomputePanel';
 
 type Instance = {
