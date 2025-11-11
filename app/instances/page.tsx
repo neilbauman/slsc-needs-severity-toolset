@@ -16,7 +16,6 @@ export default function InstancesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch all instances on load
   const loadInstances = async () => {
     setLoading(true);
     setError(null);
@@ -26,17 +25,15 @@ export default function InstancesPage() {
       .select('id, name, created_at')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      setError(error.message);
-    } else if (data) {
-      setInstances(data);
-    }
+    if (error) setError(error.message);
+    else if (data) setInstances(data);
 
     setLoading(false);
   };
 
   useEffect(() => {
     loadInstances();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -70,12 +67,10 @@ export default function InstancesPage() {
                 </div>
               </div>
 
-              {/* Recompute buttons and panel */}
               <div className="mt-4">
                 <InstanceRecomputePanel
                   instanceId={instance.id}
                   onReload={() => {
-                    // When recompute finishes, refresh this page's instance data or map
                     loadInstances();
                   }}
                 />
