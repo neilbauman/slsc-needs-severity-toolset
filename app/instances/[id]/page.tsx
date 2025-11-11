@@ -2,19 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
+import { createClient } from '@/lib/supabaseClient';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
 
-// Lazy-load React Leaflet (no SSR)
-const MapContainer = dynamic(
-  () => import('react-leaflet').then(m => m.MapContainer),
-  { ssr: false }
-);
-const TileLayer = dynamic(
-  () => import('react-leaflet').then(m => m.TileLayer),
-  { ssr: false }
-);
+/* lazy leaflet (no SSR) */
+const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const TileLayer     = dynamic(() => import('react-leaflet').then(m => m.TileLayer),     { ssr: false });
 
 export default function InstancePage() {
   const supabase = createClient();
@@ -28,26 +22,22 @@ export default function InstancePage() {
   const [priority, setPriority] = useState<{ pcode: string; score: number }[]>([]);
 
   const loadInstance = async () => {
-    if (!id) return;
-    const { data: inst } = await supabase
-      .from('instances')
-      .select('*')
-      .eq('id', id as string)
-      .single();
+    const { data: inst } = await supabase.from('instances').select('*').eq('id', id).single();
     setInstance(inst);
 
-    const { data: fw } = await supabase.rpc('get_framework_avg', { instance_uuid: id as string });
-    const { data: fin } = await supabase.rpc('get_final_avg', { instance_uuid: id as string });
+    const { data: fw } = await supabase.rpc('get_framework_avg', { instance_uuid: id });
+    const { data: fin } = await supabase.rpc('get_final_avg', { instance_uuid: id });
     setFrameworkAvg(fw?.framework_avg ?? null);
     setFinalAvg(fin?.final_avg ?? null);
 
     const { data: prio } = await supabase
       .from('scored_instance_values')
       .select('pcode, score')
-      .eq('instance_id', id as string)
+      .eq('instance_id', id)
       .eq('pillar', 'Final')
       .order('score', { ascending: false })
       .limit(15);
+
     setPriority(prio ?? []);
   };
 
@@ -56,16 +46,14 @@ export default function InstancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const handleFrameworkRecompute = async () => {
-    if (!id) return;
-    await supabase.rpc('score_framework_aggregate', { in_instance_id: id as string });
-    await loadInstance();
+  const recomputeFramework = async () => {
+    await supabase.rpc('score_framework_aggregate', { in_instance_id: id });
+    loadInstance();
   };
 
-  const handleFinalRecompute = async () => {
-    if (!id) return;
-    await supabase.rpc('score_final_aggregate', { in_instance_id: id as string });
-    await loadInstance();
+  const recomputeFinal = async () => {
+    await supabase.rpc('score_final_aggregate', { in_instance_id: id });
+    loadInstance();
   };
 
   return (
@@ -75,53 +63,30 @@ export default function InstancePage() {
           {instance?.name ?? 'Instance'}
         </h1>
         <div className="space-x-2">
-          <button
-            onClick={() => router.push('/instances')}
-            className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50"
-          >
-            Back
-          </button>
-          <button
-            onClick={() => router.push('/datasets')}
-            className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50"
-          >
-            Datasets
-          </button>
-          <button
-            onClick={() => setShowAffected(true)}
-            className="px-3 py-1.5 rounded text-sm bg-[var(--gsc-green,#2e7d32)] text-white hover:opacity-90"
-          >
+          <button onClick={() => router.push('/instances')} className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50">Back</button>
+          <button onClick={() => router.push('/datasets')} className="px-3 py-1.5 border rounded text-sm bg-white hover:bg-gray-50">Datasets</button>
+          <button onClick={() => setShowAffected(true)} className="px-3 py-1.5 rounded text-sm bg-[var(--gsc-green,#2e7d32)] text-white hover:opacity-90">
             Define Affected Area
           </button>
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Map card */}
+        {/* Map */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
             <span>Affected Area</span>
             <span className="text-gray-400 text-xs">
-              {(instance?.admin_scope ?? []).length} selected
+              {(instance?.admin_scope ?? []).filter((p: string) => p.length === 4).length} ADM1 selected
             </span>
           </div>
-          <div className="h-[520px] rounded overflow-hidden border relative z-0">
-            <MapContainer
-              center={[12.8797, 121.774]}
-              zoom={5}
-              scrollWheelZoom={false}
-              className="h-full w-full"
-            >
-              <TileLayer
-                attribution="&copy; OpenStreetMap"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
+          <div className="h-[520px] rounded overflow-hidden border">
+            <MapContainer center={[12.8797, 121.774]} zoom={5} scrollWheelZoom={false} className="h-full w-full">
+              <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             </MapContainer>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Use <span className="font-medium">Define Affected Area</span> to pick ADM1/ADM2. Map will
-            reflect your saved selection.
+            Define affected area or ensure <code>admin_boundaries.geom</code> is available as GeoJSON.
           </p>
         </div>
 
@@ -148,25 +113,17 @@ export default function InstancePage() {
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <div className="text-sm font-semibold text-gray-700 mb-2">Recompute</div>
             <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleFrameworkRecompute}
-                className="flex-1 bg-[var(--gsc-blue,#004b87)] text-white py-2 rounded hover:opacity-90 text-sm"
-              >
+              <button onClick={recomputeFramework} className="flex-1 bg-[var(--gsc-blue,#004b87)] text-white py-2 rounded hover:opacity-90 text-sm">
                 Recompute Framework
               </button>
-              <button
-                onClick={handleFinalRecompute}
-                className="flex-1 bg-[var(--gsc-green,#2e7d32)] text-white py-2 rounded hover:opacity-90 text-sm"
-              >
+              <button onClick={recomputeFinal} className="flex-1 bg-[var(--gsc-green,#2e7d32)] text-white py-2 rounded hover:opacity-90 text-sm">
                 Recompute Final
               </button>
             </div>
           </div>
 
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-2">
-              Priority Locations (Top 15)
-            </div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">Priority Locations (Top 15)</div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-gray-500 text-xs border-b">
@@ -175,19 +132,12 @@ export default function InstancePage() {
                 </tr>
               </thead>
               <tbody>
-                {priority.map((p) => (
+                {priority.map(p => (
                   <tr key={p.pcode} className="border-b last:border-none">
                     <td className="py-1">{p.pcode}</td>
                     <td className="py-1 text-right">{p.score.toFixed(3)}</td>
                   </tr>
                 ))}
-                {priority.length === 0 && (
-                  <tr>
-                    <td colSpan={2} className="py-2 text-center text-gray-400">
-                      No results.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
