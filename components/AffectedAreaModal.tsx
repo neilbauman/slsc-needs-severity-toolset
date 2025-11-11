@@ -1,23 +1,31 @@
+// components/AffectedAreaModal.tsx
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
-import type { Feature, FeatureCollection } from 'geojson';
+import type { Feature, FeatureCollection, Geometry } from 'geojson';
 import type { GeoJSON as LeafletGeoJSON } from 'leaflet';
 
 const MapContainer = dynamic(
-  () => import('react-leaflet').then(mod => mod.MapContainer),
+  () => import('react-leaflet').then((m) => m.MapContainer),
   { ssr: false }
 );
 const TileLayer = dynamic(
-  () => import('react-leaflet').then(mod => mod.TileLayer),
+  () => import('react-leaflet').then((m) => m.TileLayer),
   { ssr: false }
 );
 const GeoJSON = dynamic(
-  () => import('react-leaflet').then(mod => mod.GeoJSON),
+  () => import('react-leaflet').then((m) => m.GeoJSON),
   { ssr: false }
 );
+
+type AdmRow = {
+  admin_level: string;
+  admin_pcode: string;
+  name: string;
+  geom: Geometry; // comes back as GeoJSON geometry from the SQL function/view
+};
 
 export default function AffectedAreaModal({
   instanceId,
@@ -31,219 +39,257 @@ export default function AffectedAreaModal({
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [rows, setRows] = useState<AdmRow[]>([]);
   const [features, setFeatures] = useState<Feature[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
   const layerRef = useRef<LeafletGeoJSON | null>(null);
-  
-  // ---- fetch admin_scope + ADM1 polygons as GeoJSON
+
+  // Load ADM1 boundaries and current instance selection
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       setLoading(true);
+      try {
+        // 1) Preload instance selection
+        const { data: inst, error: instErr } = await supabase
+          .from('instances')
+          .select('admin_scope')
+          .eq('id', instanceId)
+          .single();
 
-      const [{ data: inst, error: instErr }, { data: rows, error: admErr }] = await Promise.all([
-        supabase.from('instances').select('admin_scope').eq('id', instanceId).single(),
-        supabase
-          .from('admin_boundaries')
-          .select('admin_pcode,name,ST_AsGeoJSON(geom)::json geom')
-          .eq('admin_level', 'ADM1'),
-      ]);
+        if (instErr) throw instErr;
+        const startSel = new Set<string>((inst?.admin_scope as string[] | null) ?? []);
+        if (cancelled) return;
+        setSelected(startSel);
 
-      if (instErr) console.error(instErr);
-      if (admErr) console.error(admErr);
+        // 2) Load ADM1 boundaries via RPC (expects rows with admin_pcode, name, geom)
+        const { data: rpcData, error: rpcErr } = await supabase.rpc(
+          'get_admin_boundaries_geojson',
+          { level: 'ADM1' } // if your arg name differs (e.g. admin_level), adjust here
+        );
 
-      const startSel = new Set<string>(inst?.admin_scope ?? []);
-      setSelected(startSel);
+        if (rpcErr) throw rpcErr;
 
-      const feats: GeoJSONType.Feature[] =
-        (rows ?? []).map((r: AdmRow) => ({
+        const list: AdmRow[] = (rpcData ?? []) as AdmRow[];
+        if (cancelled) return;
+        setRows(list);
+
+        const feats: Feature[] = (list ?? []).map((r) => ({
           type: 'Feature',
           geometry: r.geom,
-          properties: { admin_pcode: r.admin_pcode, name: r.name },
-        })) ?? [];
-
-      setFeatures(feats);
-      setLoading(false);
-      // Fit map to PH roughly after first render; bounds handled below
+          properties: {
+            admin_pcode: r.admin_pcode,
+            name: r.name,
+            admin_level: r.admin_level,
+          },
+        }));
+        setFeatures(feats);
+      } catch (e) {
+        console.error('AffectedAreaModal load error', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [instanceId, supabase]);
 
-  // ---- Derived feature collection
-  const fc: GeoJSONType.FeatureCollection = useMemo(
-    () => ({ type: 'FeatureCollection', features }),
+  const fc = useMemo<FeatureCollection<Geometry>>(
+    () => ({
+      type: 'FeatureCollection',
+      features,
+    }),
     [features]
   );
 
-  // ---- Toggle selection on polygon click
-  const toggleFeature = (pcode: string) => {
-    setSelected(prev => {
-      const n = new Set(prev);
-      if (n.has(pcode)) n.delete(pcode);
-      else n.add(pcode);
-      return n;
+  const filteredRows = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    if (!s) return rows;
+    return rows.filter(
+      (r) =>
+        r.name.toLowerCase().includes(s) ||
+        r.admin_pcode.toLowerCase().includes(s)
+    );
+  }, [rows, search]);
+
+  const toggleCode = (code: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
     });
   };
 
-  // ---- Style helpers
-  const baseStyle = {
-    weight: 1,
-    color: '#374151',
-    fillOpacity: 0.12,
+  const selectAll = () => {
+    setSelected(new Set(rows.map((r) => r.admin_pcode)));
   };
 
-  const styleFn = (f?: GeoJSONType.Feature) => {
-    const p = (f?.properties as any) || {};
-    const isSel = selected.has(p.admin_pcode);
+  const clearAll = () => {
+    setSelected(new Set());
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      const arr = Array.from(selected);
+      const { error } = await supabase
+        .from('instances')
+        .update({ admin_scope: arr })
+        .eq('id', instanceId);
+      if (error) throw error;
+      onSaved();
+      onClose();
+    } catch (e) {
+      console.error('Save affected area failed', e);
+      setSaving(false);
+    }
+  };
+
+  // Leaflet styling: highlight selected ADM1 with thicker border & light fill
+  const styleFor = (feat: Feature) => {
+    const code = feat.properties?.['admin_pcode'] as string | undefined;
+    const isOn = code ? selected.has(code) : false;
     return {
-      ...baseStyle,
-      color: isSel ? '#2e7d32' : '#94a3b8', // green when selected
-      fillColor: isSel ? '#2e7d32' : '#64748b',
-      fillOpacity: isSel ? 0.22 : 0.08,
-      weight: isSel ? 2 : 1,
+      color: isOn ? '#004b87' : '#374151', // GSC blue vs neutral gray
+      weight: isOn ? 2 : 1,
+      fillColor: isOn ? '#e5f0fa' : '#f5f2ee',
+      fillOpacity: isOn ? 0.6 : 0.35,
     };
   };
 
-  const onEach = (feature: any, layer: L.Layer) => {
-    const p = feature?.properties || {};
-    layer.on('click', () => toggleFeature(p.admin_pcode));
-    layer.bindTooltip(`${p.name} (${p.admin_pcode})`, { sticky: true });
-  };
-
-  // Refresh styles when selection changes
-  useEffect(() => {
-    if (layerRef.current) {
-      layerRef.current.setStyle(styleFn as any);
+  const onEachFeature = (feat: Feature, layer: any) => {
+    const code = feat.properties?.['admin_pcode'] as string | undefined;
+    const nm = feat.properties?.['name'] as string | undefined;
+    if (code) {
+      layer.on('click', () => toggleCode(code));
+      layer.bindTooltip(`${nm ?? ''} (${code})`);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
-
-  // ---- Save to DB
-  const handleSave = async () => {
-    setSaving(true);
-    const arr = Array.from(selected);
-    const { error } = await supabase
-      .from('instances')
-      .update({ admin_scope: arr })
-      .eq('id', instanceId);
-    setSaving(false);
-    if (error) {
-      console.error(error);
-      alert('Save failed. See console for details.');
-      return;
-    }
-    await onSaved();
-    onClose();
   };
-
-  // ---- Fit bounds
-  const bounds = useMemo(() => {
-    // If you have no features yet, use a sensible PH view
-    if (!features.length) return L.latLngBounds(L.latLng(4.3, 116.8), L.latLng(21.3, 126.6));
-    const b = L.latLngBounds();
-    features.forEach((f: any) => {
-      const g = L.geoJSON(f.geometry);
-      b.extend(g.getBounds());
-    });
-    return b.pad(0.05);
-  }, [features]);
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-[min(1200px,95vw)] max-h-[90vh] flex flex-col">
-        <div className="px-4 py-3 border-b text-sm font-medium text-gray-700">
-          Define Affected Area (ADM1)
-          <span className="ml-2 text-gray-400">· {selected.size} selected</span>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl mx-4 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-[var(--gsc-beige,#f5f2ee)]">
+          <h2 className="text-base font-semibold text-[var(--gsc-blue,#004b87)]">
+            Configure Affected Area (ADM1)
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded px-3 py-1.5 text-sm border hover:bg-[var(--gsc-light-gray,#e5e7eb)]"
+          >
+            Close
+          </button>
         </div>
 
-        <div className="p-3 grid grid-cols-12 gap-3 overflow-hidden">
-          <div className="col-span-8 min-h-[520px]">
-            <div className="h-[520px] rounded-md overflow-hidden border">
-              {!loading && (
+        {/* Body */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 h-[70vh]">
+          {/* Map */}
+          <div className="relative">
+            <div className="absolute inset-0">
+              {!loading && features.length > 0 ? (
                 <MapContainer
-                  bounds={bounds}
+                  center={[12.8797, 121.774]}
+                  zoom={5}
                   scrollWheelZoom={false}
-                  className="h-full w-full leaflet-in-modal"
+                  className="h-full w-full z-[61] rounded-none"
                 >
                   <TileLayer
                     attribution="&copy; OpenStreetMap"
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
                   <GeoJSON
+                    key={features.length}
                     data={fc as any}
-                    style={styleFn as any}
-                    onEachFeature={onEach}
-                    ref={(r) => (layerRef.current = (r as any)?._layer as LeafletGeoJSON)}
+                    style={styleFor as any}
+                    onEachFeature={onEachFeature as any}
+                    ref={layerRef as any}
                   />
                 </MapContainer>
+              ) : (
+                <div className="h-full w-full flex items-center justify-center text-sm text-gray-500">
+                  {loading ? 'Loading boundaries…' : 'No ADM1 features found.'}
+                </div>
               )}
             </div>
-            <p className="mt-2 text-[11px] text-gray-500">
-              Tip: click provinces to (de)select. Selections are stored in <code>instances.admin_scope</code>.
-            </p>
           </div>
 
-          <div className="col-span-4">
-            <div className="h-[520px] rounded-md border p-3 overflow-auto text-sm">
-              <div className="font-medium mb-2">Selected provinces</div>
-              {selected.size === 0 && <div className="text-gray-400">Nothing selected.</div>}
-              {selected.size > 0 && (
-                <ul className="space-y-1">
-                  {Array.from(selected)
-                    .sort()
-                    .map((code) => {
-                      const nm =
-                        (features.find(
-                          (f) => (f.properties as any)?.admin_pcode === code
-                        )?.properties as any)?.name ?? '';
-                      return (
-                        <li
-                          key={code}
-                          className="flex items-center justify-between border rounded px-2 py-1"
-                        >
-                          <span className="truncate">{nm}</span>
-                          <button
-                            onClick={() => toggleFeature(code)}
-                            className="text-xs text-red-600 hover:underline ml-2"
-                          >
-                            remove
-                          </button>
-                        </li>
-                      );
-                    })}
-                </ul>
+          {/* List & controls */}
+          <div className="flex flex-col border-l">
+            <div className="p-3 flex items-center gap-2 border-b bg-white sticky top-0 z-[62]">
+              <input
+                className="flex-1 border rounded px-2 py-1 text-sm"
+                placeholder="Search by name or pcode…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <button
+                onClick={selectAll}
+                className="text-xs px-2 py-1 rounded border hover:bg-[var(--gsc-light-gray,#e5e7eb)]"
+              >
+                Select all
+              </button>
+              <button
+                onClick={clearAll}
+                className="text-xs px-2 py-1 rounded border hover:bg-[var(--gsc-light-gray,#e5e7eb)]"
+              >
+                Clear all
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              {filteredRows.map((r) => {
+                const on = selected.has(r.admin_pcode);
+                return (
+                  <label
+                    key={r.admin_pcode}
+                    className="flex items-center gap-2 px-3 py-2 border-b text-sm cursor-pointer hover:bg-[var(--gsc-beige,#f5f2ee)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggleCode(r.admin_pcode)}
+                    />
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-gray-500 ml-auto">{r.admin_pcode}</span>
+                  </label>
+                );
+              })}
+              {filteredRows.length === 0 && (
+                <div className="p-4 text-sm text-gray-500">No results.</div>
               )}
             </div>
           </div>
         </div>
 
-        <div className="px-3 py-3 border-t flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-2 text-sm rounded border border-gray-300 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-3 py-2 text-sm rounded bg-[var(--gsc-blue,#004b87)] text-white hover:opacity-90 disabled:opacity-60"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+        {/* Footer */}
+        <div className="flex items-center justify-between px-4 py-3 border-t bg-white">
+          <div className="text-xs text-gray-600">
+            Selected: {selected.size} of {rows.length}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="rounded px-3 py-1.5 text-sm border hover:bg-[var(--gsc-light-gray,#e5e7eb)]"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={saving}
+              onClick={handleSave}
+              className="rounded px-3 py-1.5 text-sm text-white"
+              style={{
+                background: 'var(--gsc-blue, #004b87)',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save Affected Area'}
+            </button>
+          </div>
         </div>
       </div>
-
-      {/* Ensure Leaflet never floats above the modal */}
-      <style jsx global>{`
-        .leaflet-in-modal {
-          z-index: 0 !important;
-        }
-        .leaflet-pane,
-        .leaflet-top,
-        .leaflet-bottom {
-          z-index: 0 !important;
-        }
-      `}</style>
     </div>
   );
 }
