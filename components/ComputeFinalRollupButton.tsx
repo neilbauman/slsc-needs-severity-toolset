@@ -23,7 +23,6 @@ export default function ComputeFinalRollupButton({ instanceId, onComplete }: Pro
       const { data, error } = await supabase.rpc('score_final_aggregate', {
         in_instance_id: instanceId,
       });
-
       if (error) throw error;
 
       if (Array.isArray(data) && data.length > 0) {
@@ -32,7 +31,7 @@ export default function ComputeFinalRollupButton({ instanceId, onComplete }: Pro
         setResult({ status: 'done', upserted_rows: 0, final_avg: 0 });
       }
 
-      if (onComplete) onComplete();
+      onComplete?.();
     } catch (err: any) {
       setError(err.message || 'Unexpected error');
     } finally {
@@ -44,8 +43,7 @@ export default function ComputeFinalRollupButton({ instanceId, onComplete }: Pro
     <div className="flex flex-col items-center gap-2 border rounded-lg p-4 bg-white shadow-sm w-full max-w-md">
       <h3 className="text-lg font-semibold text-gray-800">Compute Final Roll-up</h3>
       <p className="text-sm text-gray-600 text-center">
-        This recalculates the weighted final vulnerability scores (Framework × Hazard × Underlying) for the selected
-        instance.
+        Recalculates the weighted final vulnerability scores for this instance.
       </p>
 
       <button
@@ -60,7 +58,7 @@ export default function ComputeFinalRollupButton({ instanceId, onComplete }: Pro
 
       {result && (
         <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2 w-full text-center mt-2">
-          ✅ {result.status.toUpperCase()} — {result.upserted_rows} rows • Avg Score {result.final_avg?.toFixed(3)}
+          ✅ {result.status.toUpperCase()} — {result.upserted_rows} rows • Avg {result.final_avg?.toFixed(3)}
         </div>
       )}
 
