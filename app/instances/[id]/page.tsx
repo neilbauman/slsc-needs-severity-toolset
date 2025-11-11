@@ -1,18 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 import AffectedAreaModal from '@/components/AffectedAreaModal';
+import L from 'leaflet';
 
-// Lazy-load react-leaflet for SSR
+// Lazy load React Leaflet components
 const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
   { ssr: false }
 );
 const TileLayer = dynamic(
   () => import('react-leaflet').then((mod) => mod.TileLayer),
+  { ssr: false }
+);
+const GeoJSON = dynamic(
+  () => import('react-leaflet').then((mod) => mod.GeoJSON),
   { ssr: false }
 );
 
@@ -24,9 +29,12 @@ export default function InstancePage() {
   const [instance, setInstance] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [priority, setPriority] = useState<any[]>([]);
+  const [adm3Geo, setAdm3Geo] = useState<any>(null);
   const [showAffected, setShowAffected] = useState(false);
 
-  // --- Load instance + metrics + priority table
+  const mapRef = useRef<L.Map | null>(null);
+
+  // --- Load all instance data
   const loadInstanceData = async () => {
     const { data: inst } = await supabase.from('instances').select('*').eq('id', id).single();
     setInstance(inst);
@@ -39,11 +47,84 @@ export default function InstancePage() {
       limit_n: 15,
     });
     setPriority(priorityData ?? []);
+
+    // Load ADM3 boundaries and overlay scores
+    const { data: geo } = await supabase.rpc('get_admin_boundaries_geojson', { in_level: 'ADM3' });
+    if (!geo || !geo.features) return;
+
+    // Get ADM3 scores from Final pillar for this instance
+    const { data: scores } = await supabase
+      .from('scored_instance_values')
+      .select('pcode, score')
+      .eq('instance_id', id)
+      .eq('pillar', 'Final');
+
+    // Create score lookup
+    const scoreMap: Record<string, number> = {};
+    scores?.forEach((s) => {
+      scoreMap[s.pcode] = Number(s.score);
+    });
+
+    // Filter ADM3s in affected ADM1s
+    const adm1Scope = inst?.admin_scope || [];
+    const filtered = geo.features.filter((f: any) => {
+      const code = f.properties?.admin_pcode || '';
+      return adm1Scope.some((adm1: string) => code.startsWith(adm1));
+    });
+
+    // Attach score attribute
+    filtered.forEach((f: any) => {
+      const code = f.properties?.admin_pcode;
+      f.properties.score = scoreMap[code] ?? null;
+    });
+
+    setAdm3Geo({ type: 'FeatureCollection', features: filtered });
   };
 
   useEffect(() => {
     loadInstanceData();
   }, [id]);
+
+  // --- Define color scale
+  const getColor = (score: number | null) => {
+    if (score === null || score === undefined) return '#ccc';
+    if (score <= 1.5) return '#2e7d32'; // green
+    if (score <= 2.5) return '#a2b837'; // yellow-green
+    if (score <= 3.5) return '#f6d32d'; // yellow
+    if (score <= 4.5) return '#e67e22'; // orange
+    return '#630710'; // deep red
+  };
+
+  const onEachFeature = (feature: any, layer: L.Layer) => {
+    const props = feature.properties;
+    const score = props?.score ?? 'N/A';
+    const name = props?.name ?? props?.admin_pcode ?? 'Unknown';
+    layer.bindTooltip(`${name}<br/>Final Score: ${score}`, {
+      sticky: true,
+    });
+  };
+
+  const styleFeature = (feature: any) => ({
+    color: '#555',
+    weight: 0.5,
+    fillColor: getColor(feature?.properties?.score ?? null),
+    fillOpacity: 0.7,
+  });
+
+  const whenReady = (map: L.Map) => {
+    mapRef.current = map;
+    if (adm3Geo?.features?.length) {
+      const bounds = L.geoJSON(adm3Geo).getBounds();
+      map.fitBounds(bounds, { padding: [20, 20] });
+    }
+  };
+
+  useEffect(() => {
+    if (mapRef.current && adm3Geo?.features?.length) {
+      const bounds = L.geoJSON(adm3Geo).getBounds();
+      mapRef.current.fitBounds(bounds, { padding: [20, 20] });
+    }
+  }, [adm3Geo]);
 
   return (
     <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen">
@@ -68,12 +149,11 @@ export default function InstancePage() {
         </div>
       </div>
 
-      {/* --- Dashboard Grid --- */}
       <div className="grid grid-cols-12 gap-5">
-        {/* Left: Map */}
+        {/* Map */}
         <div className="col-span-7 bg-white border rounded-lg shadow-sm p-3">
           <div className="flex items-center justify-between mb-2 text-sm font-medium text-gray-700">
-            <span>Affected Area</span>
+            <span>Affected Area (ADM3 Final Scores)</span>
             <span className="text-gray-400 text-xs">
               {instance?.admin_scope?.length ?? 0} ADM1 selected
             </span>
@@ -83,28 +163,29 @@ export default function InstancePage() {
             <MapContainer
               center={[12.8797, 121.774]}
               zoom={5}
-              scrollWheelZoom={false}
+              whenReady={(e) => whenReady(e.target)}
+              scrollWheelZoom={true}
               className="h-full w-full"
             >
               <TileLayer
                 attribution="&copy; OpenStreetMap"
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
+              {adm3Geo && (
+                <GeoJSON data={adm3Geo} style={styleFeature} onEachFeature={onEachFeature} />
+              )}
             </MapContainer>
           </div>
 
           <p className="text-xs text-gray-500 mt-2">
-            Affected regions: {instance?.admin_scope?.join(', ') || 'None defined'}.
+            Displaying ADM3 polygons within affected ADM1 scope, colored by Final Score.
           </p>
         </div>
 
-        {/* Right: Metrics and Tables */}
+        {/* Metrics + Table */}
         <div className="col-span-5 flex flex-col gap-4">
-          {/* Summary Metrics */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-3">
-              Summary Metrics
-            </div>
+            <div className="text-sm font-semibold text-gray-700 mb-3">Summary Metrics</div>
             <div className="grid grid-cols-2 gap-3 text-center">
               <div className="bg-[var(--gsc-light-gray,#e5e7eb)] rounded-lg py-3">
                 <div className="text-xs text-gray-600">Framework Avg</div>
@@ -139,7 +220,6 @@ export default function InstancePage() {
             </div>
           </div>
 
-          {/* Priority Locations Table */}
           <div className="bg-white border rounded-lg shadow-sm p-4 overflow-auto max-h-[420px]">
             <div className="text-sm font-semibold text-gray-700 mb-2">
               Priority Locations (Top 15)
@@ -163,10 +243,7 @@ export default function InstancePage() {
                   </tr>
                 )}
                 {priority.map((p) => (
-                  <tr
-                    key={p.pcode}
-                    className="border-b last:border-none hover:bg-gray-50 transition"
-                  >
+                  <tr key={p.pcode} className="border-b last:border-none hover:bg-gray-50">
                     <td className="py-1">{p.adm2_name ?? '-'}</td>
                     <td className="py-1">{p.adm3_name ?? '-'}</td>
                     <td className="py-1 text-right">{p.final_score?.toFixed(3) ?? '-'}</td>
