@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
-import { Card } from '@/components/ui/card';
 
 // Dynamic imports for react-leaflet to avoid SSR issues
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
@@ -44,7 +43,7 @@ export default function InstancePage() {
   // --- Color scale
   const getColor = (score: number | null) => {
     if (score == null) return '#ccc';
-    if (score >= 4) return '#b30000'; // dark red
+    if (score >= 4) return '#b30000';
     if (score >= 3) return '#e34a33';
     if (score >= 2) return '#fc8d59';
     if (score >= 1) return '#fdbb84';
@@ -55,10 +54,7 @@ export default function InstancePage() {
     const props = feature.properties || {};
     const name = props.name || props.admin_pcode;
     const score = props.final_score ?? '–';
-    layer.bindTooltip(
-      `${name}<br/><b>Final:</b> ${score}`,
-      { sticky: true }
-    );
+    layer.bindTooltip(`${name}<br/><b>Final:</b> ${score}`, { sticky: true });
   };
 
   const style = (feature: any) => ({
@@ -76,34 +72,35 @@ export default function InstancePage() {
 
       {/* --- Summary Metrics --- */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <Card className="p-4 text-center">
+        <div className="p-4 bg-white border rounded text-center shadow-sm">
           <div className="text-xs text-gray-600">Framework Avg</div>
           <div className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
             {metrics?.framework_avg?.toFixed(3) ?? '-'}
           </div>
-        </Card>
-        <Card className="p-4 text-center">
+        </div>
+        <div className="p-4 bg-white border rounded text-center shadow-sm">
           <div className="text-xs text-gray-600">Final Avg</div>
           <div className="text-xl font-semibold text-[var(--gsc-red,#630710)]">
             {metrics?.final_avg?.toFixed(3) ?? '-'}
           </div>
-        </Card>
-        <Card className="p-4 text-center">
+        </div>
+        <div className="p-4 bg-white border rounded text-center shadow-sm">
           <div className="text-xs text-gray-600">People Affected</div>
           <div className="text-lg font-semibold text-gray-800">
             {metrics?.people_affected?.toLocaleString() ?? '-'}
           </div>
-        </Card>
-        <Card className="p-4 text-center">
+        </div>
+        <div className="p-4 bg-white border rounded text-center shadow-sm">
           <div className="text-xs text-gray-600">People in Need</div>
           <div className="text-lg font-semibold text-gray-800">
             {metrics?.people_in_need?.toLocaleString() ?? '-'}
           </div>
-        </Card>
+        </div>
       </div>
 
-      {/* --- Map --- */}
+      {/* --- Map + Table --- */}
       <div className="grid grid-cols-12 gap-4">
+        {/* Map */}
         <div className="col-span-9">
           <div className="h-[600px] w-full border rounded shadow overflow-hidden relative">
             <MapContainer
@@ -134,7 +131,7 @@ export default function InstancePage() {
           </div>
         </div>
 
-        {/* --- Table --- */}
+        {/* Table */}
         <div className="col-span-3 bg-white border rounded-lg shadow-sm p-3 overflow-y-auto max-h-[600px]">
           <div className="text-sm font-semibold mb-2 text-gray-700">
             Top Locations
