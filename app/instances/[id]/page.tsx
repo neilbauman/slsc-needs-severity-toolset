@@ -29,23 +29,23 @@ export default function InstanceDashboard() {
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // --- load instance, summary, and map data
   useEffect(() => {
     if (!id) return;
     (async () => {
       setLoading(true);
-      // instance
       const { data: inst } = await supabase.from('instances').select('*').eq('id', id).single();
       setInstance(inst);
 
-      // summary metrics
       const { data: sum } = await supabase.rpc('get_instance_summary', { in_instance: id });
       setSummary(sum?.[0] ?? null);
 
-      // scores
-      const { data: sc } = await supabase.rpc('get_priority_locations', { in_instance: id, limit_n: 500 });
+      const { data: sc } = await supabase.rpc('get_priority_locations', {
+        in_instance: id,
+        limit_n: 10000,
+      });
       setScores(sc ?? []);
 
-      // geojson boundaries
       const { data: gj } = await supabase.rpc('get_admin_boundaries_geojson', { in_level: 'ADM3' });
       setGeojson(gj ?? null);
 
@@ -53,44 +53,89 @@ export default function InstanceDashboard() {
     })();
   }, [id]);
 
-  // merge scores into geojson
+  // normalize codes and enrich geojson
+  const normalize = (code: any) => {
+    if (!code) return '';
+    return String(code).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  };
+
+  const matchKey = (code: string, keys: string[]) => {
+    const normalized = normalize(code);
+    // find best match by prefix
+    return (
+      keys.find((k) => normalized.startsWith(k)) ||
+      keys.find((k) => k.startsWith(normalized)) ||
+      null
+    );
+  };
+
   const enriched = useMemo(() => {
     if (!geojson || !scores?.length) return geojson;
     const scoreMap: Record<string, any> = {};
-    for (const s of scores) scoreMap[s.pcode] = s;
+    const keys: string[] = [];
+
+    for (const s of scores) {
+      const key = normalize(s.pcode.slice(0, 9));
+      scoreMap[key] = s;
+      keys.push(key);
+    }
+
     return {
       ...geojson,
-      features: geojson.features.map((f: any) => {
-        const code = f.properties?.admin_pcode;
+      features: (geojson.features ?? []).map((f: any) => {
+        const code = normalize(f?.properties?.admin_pcode);
+        const matchedKey = matchKey(code, keys);
+        const match = matchedKey ? scoreMap[matchedKey] : null;
         return {
           ...f,
-          properties: { ...f.properties, ...scoreMap[code] }
+          properties: {
+            ...f.properties,
+            final_score: match?.final_score ?? null,
+            population: match?.population ?? null,
+            people_in_need: match?.people_in_need ?? null,
+            adm3_name: match?.adm3_name ?? f?.properties?.name ?? null,
+            adm2_name: match?.adm2_name ?? null,
+          },
         };
-      })
+      }),
     };
   }, [geojson, scores]);
 
   const colorForScore = (s: number | null) => {
-    if (s == null) return '#ccc';
-    if (s <= 1.5) return '#2e7d32';
-    if (s <= 2.5) return '#d35400';
-    if (s <= 3.5) return '#e3b505';
-    if (s <= 4.5) return '#e67e22';
-    return '#630710';
+    if (s == null || isNaN(Number(s))) return '#cccccc';
+    if (s < 1.5) return '#2e7d32'; // green
+    if (s < 2.5) return '#d35400'; // orange
+    if (s < 3.5) return '#e3b505'; // yellow
+    if (s < 4.5) return '#e67e22'; // dark orange
+    return '#630710'; // deep red
   };
 
   const onEachFeature = (feature: any, layer: any) => {
-    const p = feature.properties || {};
-    const label = `
-      <strong>${p.name ?? p.admin_pcode}</strong><br/>
-      Final score: ${p.final_score ?? '–'}<br/>
-      Population: ${p.population ?? 0}<br/>
-      People in need: ${p.people_in_need ?? 0}
-    `;
-    layer.bindTooltip(label);
+    const p = feature?.properties || {};
+    const name =
+      p.adm3_name || p.name || p.admin_pcode || p.adm2_name || '—';
+    const score =
+      p.final_score == null
+        ? '—'
+        : Number(p.final_score).toFixed(3);
+    const pop =
+      p.population == null
+        ? '—'
+        : Number(p.population).toLocaleString();
+    const pin =
+      p.people_in_need == null
+        ? '—'
+        : Number(p.people_in_need).toLocaleString();
+
+    layer.bindTooltip(
+      `<strong>${name}</strong><br/>Final: <b>${score}</b><br/>Pop: ${pop}<br/>People in need: ${pin}`,
+      { sticky: true }
+    );
   };
 
-  if (loading) return <div className="p-6">Loading…</div>;
+  if (loading) {
+    return <div className="p-6">Loading dashboard...</div>;
+  }
 
   return (
     <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen space-y-4">
@@ -125,8 +170,8 @@ export default function InstanceDashboard() {
               style={(feat: any) => ({
                 color: '#374151',
                 weight: 0.5,
-                fillColor: colorForScore(feat.properties?.final_score),
-                fillOpacity: 0.8
+                fillColor: colorForScore(feat?.properties?.final_score),
+                fillOpacity: 0.8,
               })}
               onEachFeature={onEachFeature}
             />
@@ -147,12 +192,20 @@ export default function InstanceDashboard() {
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: any; color: string }) {
+function Stat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: any;
+  color: string;
+}) {
   const palette: Record<string, string> = {
     blue: '#004b87',
     red: '#630710',
     green: '#2e7d32',
-    gray: '#374151'
+    gray: '#374151',
   };
   return (
     <div className="bg-white p-4 rounded border shadow-sm text-center">
