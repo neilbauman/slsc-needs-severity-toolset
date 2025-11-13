@@ -1,114 +1,114 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
-interface RawDatasetInfo {
-  dataset_id: string;
-  name: string | null;
-  numeric_count: number;
-  categorical_count: number;
-}
-
-export default function RawDatasetListPage() {
-  const [rows, setRows] = useState<RawDatasetInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function RawDatasetsPage() {
+  const [numericCounts, setNumericCounts] = useState<any[]>([]);
+  const [categoricalCounts, setCategoricalCounts] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
+    const load = async () => {
+      try {
+        // Numeric raw counts
+        const { data: num, error: numErr } = await supabase
+          .from('dataset_values_numeric_raw')
+          .select('dataset_id');
 
-      const { data: numeric } = await supabase
-        .from("dataset_values_numeric_raw")
-        .select("dataset_id, count(*)", { count: "exact" })
-        .group("dataset_id");
+        if (numErr) throw numErr;
 
-      const { data: categorical } = await supabase
-        .from("dataset_values_categorical_raw")
-        .select("dataset_id, count(*)", { count: "exact" })
-        .group("dataset_id");
+        const numericGrouped = Object.entries(
+          num.reduce((acc: any, row: any) => {
+            acc[row.dataset_id] = (acc[row.dataset_id] || 0) + 1;
+            return acc;
+          }, {})
+        ).map(([dataset_id, count]) => ({ dataset_id, count }));
 
-      const map = new Map<string, RawDatasetInfo>();
+        // Categorical raw counts
+        const { data: cat, error: catErr } = await supabase
+          .from('dataset_values_categorical_raw')
+          .select('dataset_id');
 
-      numeric?.forEach((r: any) => {
-        map.set(r.dataset_id, {
-          dataset_id: r.dataset_id,
-          name: null,
-          numeric_count: r.count,
-          categorical_count: 0,
-        });
-      });
+        if (catErr) throw catErr;
 
-      categorical?.forEach((r: any) => {
-        if (!map.has(r.dataset_id)) {
-          map.set(r.dataset_id, {
-            dataset_id: r.dataset_id,
-            name: null,
-            numeric_count: 0,
-            categorical_count: r.count,
-          });
-        } else {
-          map.get(r.dataset_id)!.categorical_count = r.count;
-        }
-      });
+        const categoricalGrouped = Object.entries(
+          cat.reduce((acc: any, row: any) => {
+            acc[row.dataset_id] = (acc[row.dataset_id] || 0) + 1;
+            return acc;
+          }, {})
+        ).map(([dataset_id, count]) => ({ dataset_id, count }));
 
-      const ids = Array.from(map.keys());
-
-      if (ids.length > 0) {
-        const { data: ds } = await supabase
-          .from("datasets")
-          .select("id, name")
-          .in("id", ids);
-
-        ds?.forEach((d: any) => {
-          if (map.has(d.id)) {
-            map.get(d.id)!.name = d.name;
-          }
-        });
+        setNumericCounts(numericGrouped);
+        setCategoricalCounts(categoricalGrouped);
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message);
       }
-
-      setRows(Array.from(map.values()));
-      setLoading(false);
-    }
+    };
 
     load();
   }, []);
 
-  if (loading) return <p className="p-4">Loading…</p>;
-
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-bold">Raw Dataset Staging Area</h1>
+    <div className="p-6">
+      <h1 className="text-xl font-semibold mb-4">Raw Uploaded Datasets</h1>
 
-      {rows.length === 0 ? (
-        <p>No raw datasets found.</p>
-      ) : (
-        <table className="w-full text-sm border">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="p-2 border">Dataset</th>
-              <th className="p-2 border">Numeric Rows</th>
-              <th className="p-2 border">Categorical Rows</th>
-              <th className="p-2 border"></th>
+      {error && <p className="text-red-600">{error}</p>}
+
+      <h2 className="text-lg font-semibold mt-6">Numeric Datasets</h2>
+      <table className="border mt-2 text-sm w-full">
+        <thead className="bg-gray-100">
+          <tr>
+            <th className="p-2 border">Dataset ID</th>
+            <th className="p-2 border">Rows</th>
+            <th className="p-2 border">View</th>
+          </tr>
+        </thead>
+        <tbody>
+          {numericCounts.map((r) => (
+            <tr key={r.dataset_id}>
+              <td className="p-2 border">{r.dataset_id}</td>
+              <td className="p-2 border">{r.count}</td>
+              <td className="p-2 border">
+                <a
+                  className="text-blue-600 underline"
+                  href={`/datasets/raw/${r.dataset_id}`}
+                >
+                  View
+                </a>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.dataset_id}>
-                <td className="p-2 border">{r.name || r.dataset_id}</td>
-                <td className="p-2 border">{r.numeric_count}</td>
-                <td className="p-2 border">{r.categorical_count}</td>
-                <td className="p-2 border text-blue-600">
-                  <Link href={`/datasets/raw/${r.dataset_id}`}>
-                    View / Clean →
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+          ))}
+        </tbody>
+      </table>
+
+      <h2 className="text-lg font-semibold mt-8">Categorical Datasets</h2>
+      <table className="border mt-2 text-sm w-full">
+        <thead className="bg-gray-100">
+          <tr>
+            <th className="p-2 border">Dataset ID</th>
+            <th className="p-2 border">Rows</th>
+            <th className="p-2 border">View</th>
+          </tr>
+        </thead>
+        <tbody>
+          {categoricalCounts.map((r) => (
+            <tr key={r.dataset_id}>
+              <td className="p-2 border">{r.dataset_id}</td>
+              <td className="p-2 border">{r.count}</td>
+              <td className="p-2 border">
+                <a
+                  className="text-blue-600 underline"
+                  href={`/datasets/raw/${r.dataset_id}`}
+                >
+                  View
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
