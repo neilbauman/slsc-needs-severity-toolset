@@ -25,7 +25,6 @@ export default function RawDatasetDetailPage({ params }: any) {
     async function load() {
       setLoading(true);
 
-      // dataset metadata
       const { data: ds } = await supabase
         .from("datasets")
         .select("*")
@@ -33,7 +32,6 @@ export default function RawDatasetDetailPage({ params }: any) {
         .single();
       setDataset(ds);
 
-      // numeric rows
       const { data: num } = await supabase
         .from("dataset_values_numeric_raw")
         .select("*")
@@ -41,7 +39,6 @@ export default function RawDatasetDetailPage({ params }: any) {
         .limit(5000);
       setNumericRows(num || []);
 
-      // categorical rows
       const { data: cat } = await supabase
         .from("dataset_values_categorical_raw")
         .select("*")
