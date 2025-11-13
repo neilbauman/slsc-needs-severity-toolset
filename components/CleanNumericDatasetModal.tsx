@@ -1,453 +1,235 @@
+// components/CleanNumericDatasetModal.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-type CleanNumericDatasetModalProps = {
-  datasetId: string;
-  datasetName?: string;
-  onClose: () => void;
-  onCleaned?: () => void;
-};
-
-type RawNumericRow = {
-  id: string;
-  dataset_id: string;
+type PreviewRow = {
   admin_pcode_raw: string | null;
   admin_name_raw: string | null;
   value_raw: string | null;
-  raw_row: Record<string, any> | null;
+  region_code: string | null;
+  province_code: string | null;
+  muni_code: string | null;
+  adm1_pcode_psa_to_namria: string | null;
+  adm2_pcode_psa_to_namria: string | null;
+  adm2_pcode_match: string | null;
+  adm2_name_match: string | null;
+  admin_pcode_clean: string | null;
+  admin_name_clean: string | null;
+  match_status: 'matched' | 'no_adm2_match' | 'no_adm3_name_match' | string;
 };
 
-type AdminBoundary = {
-  admin_pcode: string;
-  name: string;
-  admin_level?: string | null;
+type CleanNumericDatasetModalProps = {
+  datasetId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCleaned?: () => void;
 };
 
-type MatchStatus = 'matched' | 'unmatched';
-
-type MappedRow = {
-  raw: RawNumericRow;
-  matchedBoundary?: AdminBoundary;
-  status: MatchStatus;
-};
-
-type LoadingState = 'idle' | 'loading' | 'applying';
-
-/**
- * CleanNumericDatasetModal
- *
- * - Loads RAW numeric rows for a dataset from dataset_values_numeric_raw
- * - Loads admin boundaries from admin_boundaries
- * - Applies deterministic Rule B on the client for PREVIEW:
- *   • normalize names
- *   • drop trailing "000" from raw pcodes
- *   • match vs canonical admin_pcode & name
- * - Shows stats + first 20 rows with match status
- * - On "Apply cleaning", calls RPC clean_numeric_dataset(dataset_id)
- *   which:
- *     • reads RAW table
- *     • applies same deterministic logic server-side
- *     • inserts into dataset_values_numeric
- *     • marks dataset.is_cleaned = true
- */
 export default function CleanNumericDatasetModal({
   datasetId,
-  datasetName,
-  onClose,
+  open,
+  onOpenChange,
   onCleaned,
 }: CleanNumericDatasetModalProps) {
-  const [loadingState, setLoadingState] = useState<LoadingState>('loading');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [rows, setRows] = useState<PreviewRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const [rawRows, setRawRows] = useState<RawNumericRow[]>([]);
-  const [rawCount, setRawCount] = useState<number | null>(null);
-
-  const [adminBoundaries, setAdminBoundaries] = useState<AdminBoundary[]>([]);
-
-  // ---------------------------------------------------------------------------
-  // Helpers – normalization + Rule B
-  // ---------------------------------------------------------------------------
-
-  function normalizeName(name: string | null | undefined): string {
-    if (!name) return '';
-    let n = name.toUpperCase().trim();
-
-    // Remove common noise for PH admin names
-    n = n.replace(/\(CAPITAL\)/gi, '');
-    n = n.replace(/\bCITY OF\b/gi, '');
-    n = n.replace(/\bMUNICIPALITY OF\b/gi, '');
-    n = n.replace(/\bMUNICIPALITY\b/gi, '');
-    n = n.replace(/\bCITY\b/gi, '');
-    n = n.replace(/[.,]/g, ' ');
-    n = n.replace(/\s+/g, ' ').trim();
-
-    return n;
-  }
-
-  function normalizePcode(raw: string | null | undefined): string | null {
-    if (!raw) return null;
-    let c = raw.toUpperCase().trim();
-
-    // Rule B: drop trailing 000 (e.g. PH012801000 => PH012801)
-    if (c.endsWith('000')) {
-      c = c.slice(0, -3);
-    }
-
-    return c || null;
-  }
-
-  function mapRows(
-    rows: RawNumericRow[],
-    boundaries: AdminBoundary[]
-  ): MappedRow[] {
-    if (!rows.length || !boundaries.length) {
-      return rows.map((r) => ({
-        raw: r,
-        status: 'unmatched',
-      }));
-    }
-
-    // Build lookups for deterministic matching
-    const boundariesByName = new Map<string, AdminBoundary[]>();
-    const boundariesByPcode = new Map<string, AdminBoundary>();
-
-    for (const b of boundaries) {
-      const nameKey = normalizeName(b.name);
-      if (!boundariesByName.has(nameKey)) {
-        boundariesByName.set(nameKey, []);
-      }
-      boundariesByName.get(nameKey)!.push(b);
-
-      const pcodeKey = b.admin_pcode.toUpperCase().trim();
-      if (!boundariesByPcode.has(pcodeKey)) {
-        boundariesByPcode.set(pcodeKey, b);
-      }
-    }
-
-    return rows.map((raw) => {
-      const normName = normalizeName(raw.admin_name_raw);
-      const normPcode = normalizePcode(raw.admin_pcode_raw);
-
-      let matchedBoundary: AdminBoundary | undefined;
-
-      // 1. Pcode-based match first
-      if (normPcode) {
-        const direct = boundariesByPcode.get(normPcode);
-        if (direct) {
-          matchedBoundary = direct;
-        }
-      }
-
-      // 2. Name-based match if still not matched
-      if (!matchedBoundary && normName) {
-        const candidates = boundariesByName.get(normName) || [];
-
-        if (candidates.length === 1) {
-          matchedBoundary = candidates[0];
-        } else if (candidates.length > 1 && normPcode) {
-          // If multiple candidates by name, pick one that shares the pcode prefix
-          const byPrefix = candidates.find((c) =>
-            c.admin_pcode.toUpperCase().startsWith(normPcode)
-          );
-          if (byPrefix) {
-            matchedBoundary = byPrefix;
-          }
-        }
-      }
-
-      return {
-        raw,
-        matchedBoundary,
-        status: matchedBoundary ? 'matched' : 'unmatched',
-      };
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Data loading – RAW rows + admin boundaries
-  // ---------------------------------------------------------------------------
-
   useEffect(() => {
-    let cancelled = false;
+    if (!open) return;
 
-    async function load() {
-      try {
-        setLoadingState('loading');
-        setError(null);
-
-        // RAW preview rows for this dataset
-        const { data: rawData, error: rawError, count } = await supabase
-          .from('dataset_values_numeric_raw')
-          .select(
-            'id, dataset_id, admin_pcode_raw, admin_name_raw, value_raw, raw_row',
-            { count: 'exact' }
-          )
-          .eq('dataset_id', datasetId)
-          .limit(200);
-
-        if (rawError) throw rawError;
-
-        // Canonical admin boundaries
-        const { data: boundaryData, error: boundaryError } = await supabase
-          .from('admin_boundaries')
-          .select('admin_pcode, name, admin_level');
-
-        if (boundaryError) throw boundaryError;
-
-        if (cancelled) return;
-
-        setRawRows((rawData || []) as RawNumericRow[]);
-        setRawCount(count ?? (rawData ? rawData.length : 0));
-        setAdminBoundaries((boundaryData || []) as AdminBoundary[]);
-        setLoadingState('idle');
-      } catch (err: any) {
-        if (cancelled) return;
-        console.error('Failed to load cleaning preview', err);
-        setError(err?.message || 'Failed to load cleaning preview.');
-        setLoadingState('idle');
-      }
-    }
-
-    load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [datasetId]);
-
-  const mappedRows: MappedRow[] = useMemo(
-    () => mapRows(rawRows, adminBoundaries),
-    [rawRows, adminBoundaries]
-  );
-
-  const stats = useMemo(() => {
-    const total = rawCount ?? rawRows.length;
-    let matched = 0;
-
-    for (const r of mappedRows) {
-      if (r.status === 'matched') matched += 1;
-    }
-
-    const unmatched = total - matched;
-
-    return { total, matched, unmatched };
-  }, [mappedRows, rawCount, rawRows.length]);
-
-  // ---------------------------------------------------------------------------
-  // Apply Cleaning – call RPC clean_numeric_dataset(dataset_id)
-  // ---------------------------------------------------------------------------
-
-  async function handleApplyCleaning() {
-    try {
-      setLoadingState('applying');
+    const loadPreview = async () => {
+      setLoadingPreview(true);
       setError(null);
 
-      const { error: rpcError } = await supabase.rpc('clean_numeric_dataset', {
-        dataset_id: datasetId,
+      const { data, error } = await supabase.rpc('preview_numeric_cleaning_v2', {
+        in_dataset: datasetId,
       });
 
-      if (rpcError) throw rpcError;
+      if (error) {
+        console.error('Error loading preview_numeric_cleaning_v2:', error);
+        setError(error.message);
+        setRows([]);
+      } else {
+        setRows((data || []) as PreviewRow[]);
+      }
 
-      setLoadingState('idle');
+      setLoadingPreview(false);
+    };
 
-      if (onCleaned) onCleaned();
-      onClose();
-    } catch (err: any) {
-      console.error('Failed to apply cleaning', err);
-      setError(err?.message || 'Failed to apply cleaning.');
-      setLoadingState('idle');
+    loadPreview();
+  }, [open, datasetId]);
+
+  const handleApply = async () => {
+    setApplying(true);
+    setError(null);
+
+    const { error } = await supabase.rpc('apply_numeric_cleaning_psa_to_namria', {
+      in_dataset: datasetId,
+    });
+
+    if (error) {
+      console.error('Error applying numeric cleaning:', error);
+      setError(error.message);
+      setApplying(false);
+      return;
     }
-  }
 
-  const isBusy = loadingState !== 'idle';
+    setApplying(false);
+    onOpenChange(false);
+    if (onCleaned) onCleaned();
+  };
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const matchCounts = rows.reduce(
+    (acc, row) => {
+      const status = row.match_status || 'unknown';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  const previewRows = rows.slice(0, 100);
+
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-6xl rounded-xl bg-white shadow-xl">
-        {/* Header */}
-        <div className="flex items-start justify-between border-b px-6 py-4">
-          <div>
-            <h2 className="text-lg font-semibold">
-              Clean Numeric Dataset{' '}
-              {datasetName ? (
-                <span className="ml-1 text-sm font-normal text-gray-500">
-                  ({datasetName})
-                </span>
-              ) : null}
-            </h2>
-            <p className="mt-1 text-xs text-gray-500">
-              Applies deterministic matching (Rule B) to this raw numeric
-              dataset. Matched rows go into the cleaned table; unmatched rows
-              stay in RAW for later fuzzy/manual tools.
-            </p>
-          </div>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
+      <div className="max-h-[90vh] w-[95vw] max-w-6xl overflow-hidden rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h2 className="text-lg font-semibold">Clean numeric dataset (PSA → NAMRIA ADM3)</h2>
           <button
-            type="button"
-            onClick={onClose}
-            className="ml-4 inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"
+            className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-100"
+            onClick={() => onOpenChange(false)}
           >
-            <span className="sr-only">Close</span>×
+            ✕
           </button>
         </div>
 
-        {/* Body */}
-        <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
-          {loadingState === 'loading' && (
-            <div className="py-10 text-center text-sm text-gray-500">
-              Loading raw rows and admin boundaries…
-            </div>
-          )}
+        <div className="flex flex-col gap-3 px-4 py-3 text-sm">
+          <p className="text-gray-700">
+            This preview shows how PSA ADM3 codes will be mapped to NAMRIA ADM3 boundaries using
+            region / province / municipality code logic, then checked against{' '}
+            <code>admin_boundaries</code>.
+          </p>
 
           {error && (
-            <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              {error}
+            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <strong>Error:</strong> {error}
             </div>
           )}
 
-          {loadingState !== 'loading' && !error && (
-            <>
-              {/* Stats cards */}
-              <div className="mb-4 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-lg border bg-gray-50 px-4 py-3">
-                  <div className="text-xs font-medium text-gray-500">
-                    Total raw rows
-                  </div>
-                  <div className="mt-1 text-lg font-semibold text-gray-900">
-                    {stats.total}
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-green-50 px-4 py-3">
-                  <div className="text-xs font-medium text-green-700">
-                    Deterministic matches
-                  </div>
-                  <div className="mt-1 text-lg font-semibold text-green-800">
-                    {stats.matched}
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-amber-50 px-4 py-3">
-                  <div className="text-xs font-medium text-amber-700">
-                    Unmatched (remain in RAW)
-                  </div>
-                  <div className="mt-1 text-lg font-semibold text-amber-800">
-                    {stats.unmatched}
-                  </div>
-                </div>
+          <div className="flex flex-wrap gap-4 text-xs">
+            <div className="rounded border bg-gray-50 px-3 py-2">
+              <div className="font-semibold">Row counts by status</div>
+              <div className="mt-1 space-y-0.5">
+                <div>matched: {matchCounts['matched'] || 0}</div>
+                <div>no_adm2_match: {matchCounts['no_adm2_match'] || 0}</div>
+                <div>no_adm3_name_match: {matchCounts['no_adm3_name_match'] || 0}</div>
+                {Object.entries(matchCounts)
+                  .filter(
+                    ([status]) =>
+                      !['matched', 'no_adm2_match', 'no_adm3_name_match'].includes(status)
+                  )
+                  .map(([status, count]) => (
+                    <div key={status}>
+                      {status}: {count}
+                    </div>
+                  ))}
               </div>
+            </div>
 
-              <p className="mb-3 text-xs text-gray-500">
-                Preview uses deterministic Rule B:
-                <br />
-                • normalize administrative names
-                <br />
-                • drop trailing <code>000</code> from raw pcodes
-                <br />
-                • match against admin_boundaries by pcode and/or name
-              </p>
-
-              {/* Preview table */}
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="min-w-full text-left text-xs">
-                  <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
-                    <tr>
-                      <th className="px-3 py-2">Raw Name</th>
-                      <th className="px-3 py-2">Raw Pcode</th>
-                      <th className="px-3 py-2">Matched Pcode</th>
-                      <th className="px-3 py-2">Matched Name</th>
-                      <th className="px-3 py-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 bg-white">
-                    {mappedRows.slice(0, 20).map((row) => (
-                      <tr key={row.raw.id}>
-                        <td className="px-3 py-2">
-                          {row.raw.admin_name_raw || (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.raw.admin_pcode_raw || (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.matchedBoundary?.admin_pcode || (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.matchedBoundary?.name || (
-                            <span className="text-gray-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.status === 'matched' ? (
-                            <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-medium text-green-800">
-                              matched
-                            </span>
-                          ) : (
-                            <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-                              unmatched
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-
-                    {mappedRows.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={5}
-                          className="px-3 py-6 text-center text-xs text-gray-500"
-                        >
-                          No raw rows found for this dataset.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {mappedRows.length > 20 && (
-                <div className="mt-2 text-[11px] text-gray-400">
-                  Showing first 20 rows of {mappedRows.length} loaded.
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between border-t px-6 py-3">
-          <div className="text-[11px] text-gray-500">
-            You can apply cleaning even if some rows remain unmatched. Matched
-            rows are copied into the cleaned numeric table, while unmatched rows
-            are left in RAW for later fuzzy/manual processing.
+            <div className="rounded border bg-gray-50 px-3 py-2">
+              <div className="font-semibold">Notes</div>
+              <ul className="mt-1 list-disc pl-4">
+                <li>
+                  <code>adm2_pcode_psa_to_namria</code> is derived from region + province codes.
+                </li>
+                <li>
+                  A row is <strong>matched</strong> only when an ADM3 child is found under the
+                  matched ADM2 with the same municipality code.
+                </li>
+                <li>
+                  Only <strong>matched</strong> rows will be inserted into{' '}
+                  <code>dataset_values_numeric</code>.
+                </li>
+              </ul>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="mt-2 max-h-[50vh] overflow-auto rounded border text-xs">
+            {loadingPreview ? (
+              <div className="flex items-center justify-center px-4 py-6 text-gray-500">
+                Loading preview…
+              </div>
+            ) : previewRows.length === 0 ? (
+              <div className="flex items-center justify-center px-4 py-6 text-gray-500">
+                No preview rows returned.
+              </div>
+            ) : (
+              <table className="min-w-full border-collapse">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="border px-2 py-1 text-left">admin_pcode_raw</th>
+                    <th className="border px-2 py-1 text-left">admin_name_raw</th>
+                    <th className="border px-2 py-1 text-left">value_raw</th>
+                    <th className="border px-2 py-1 text-left">region</th>
+                    <th className="border px-2 py-1 text-left">province</th>
+                    <th className="border px-2 py-1 text-left">muni</th>
+                    <th className="border px-2 py-1 text-left">adm1_pcode_psa_to_namria</th>
+                    <th className="border px-2 py-1 text-left">adm2_pcode_psa_to_namria</th>
+                    <th className="border px-2 py-1 text-left">adm2_pcode_match</th>
+                    <th className="border px-2 py-1 text-left">adm2_name_match</th>
+                    <th className="border px-2 py-1 text-left">admin_pcode_clean</th>
+                    <th className="border px-2 py-1 text-left">admin_name_clean</th>
+                    <th className="border px-2 py-1 text-left">match_status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewRows.map((row, idx) => (
+                    <tr key={idx} className="even:bg-gray-50">
+                      <td className="border px-2 py-1">{row.admin_pcode_raw}</td>
+                      <td className="border px-2 py-1">{row.admin_name_raw}</td>
+                      <td className="border px-2 py-1">{row.value_raw}</td>
+                      <td className="border px-2 py-1">{row.region_code}</td>
+                      <td className="border px-2 py-1">{row.province_code}</td>
+                      <td className="border px-2 py-1">{row.muni_code}</td>
+                      <td className="border px-2 py-1">{row.adm1_pcode_psa_to_namria}</td>
+                      <td className="border px-2 py-1">{row.adm2_pcode_psa_to_namria}</td>
+                      <td className="border px-2 py-1">{row.adm2_pcode_match}</td>
+                      <td className="border px-2 py-1">{row.adm2_name_match}</td>
+                      <td className="border px-2 py-1">{row.admin_pcode_clean}</td>
+                      <td className="border px-2 py-1">{row.admin_name_clean}</td>
+                      <td className="border px-2 py-1">{row.match_status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t px-4 py-3">
+          <div className="text-xs text-gray-500">
+            Only rows with <strong>match_status = 'matched'</strong> will be applied.
+          </div>
+          <div className="flex gap-2">
             <button
-              type="button"
-              onClick={onClose}
-              disabled={isBusy}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded border px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
+              onClick={() => onOpenChange(false)}
+              disabled={applying}
             >
               Cancel
             </button>
             <button
-              type="button"
-              onClick={handleApplyCleaning}
-              disabled={isBusy || mappedRows.length === 0}
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded bg-blue-600 px-3 py-1 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              onClick={handleApply}
+              disabled={applying || loadingPreview}
             >
-              {loadingState === 'applying'
-                ? 'Applying cleaning…'
-                : 'Apply cleaning'}
+              {applying ? 'Applying…' : 'Apply cleaning'}
             </button>
           </div>
         </div>
