@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 type CleanNumericDatasetModalProps = {
   datasetId: string;
@@ -15,17 +15,17 @@ type RawNumericRow = {
   dataset_id: string;
   admin_pcode_raw: string | null;
   admin_name_raw: string | null;
+  value_raw: string | null;
   raw_row: Record<string, any> | null;
 };
 
 type AdminBoundary = {
   admin_pcode: string;
-  admin_name: string;
-  admin_level?: number | null;
-  country_code?: string | null;
+  name: string;
+  admin_level?: string | null;
 };
 
-type MatchStatus = "matched" | "unmatched";
+type MatchStatus = 'matched' | 'unmatched';
 
 type MappedRow = {
   raw: RawNumericRow;
@@ -33,32 +33,32 @@ type MappedRow = {
   status: MatchStatus;
 };
 
-type LoadingState = "idle" | "loading" | "applying";
+type LoadingState = 'idle' | 'loading' | 'applying';
 
 /**
  * CleanNumericDatasetModal
  *
  * - Loads RAW numeric rows for a dataset from dataset_values_numeric_raw
- * - Loads PH ADM3 boundaries (canonical layer)
+ * - Loads admin boundaries from admin_boundaries
  * - Applies deterministic Rule B on the client for PREVIEW:
  *   • normalize names
  *   • drop trailing "000" from raw pcodes
- *   • match vs canonical ADM3 pcodes & names
+ *   • match vs canonical admin_pcode & name
  * - Shows stats + first 20 rows with match status
  * - On "Apply cleaning", calls RPC clean_numeric_dataset(dataset_id)
- *   which will:
- *     • read RAW table
- *     • apply same deterministic logic server-side
- *     • insert into dataset_values_numeric
- *     • mark dataset as is_cleaned = true
+ *   which:
+ *     • reads RAW table
+ *     • applies same deterministic logic server-side
+ *     • inserts into dataset_values_numeric
+ *     • marks dataset.is_cleaned = true
  */
-const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
+export default function CleanNumericDatasetModal({
   datasetId,
   datasetName,
   onClose,
   onCleaned,
-}) => {
-  const [loadingState, setLoadingState] = useState<LoadingState>("loading");
+}: CleanNumericDatasetModalProps) {
+  const [loadingState, setLoadingState] = useState<LoadingState>('loading');
   const [error, setError] = useState<string | null>(null);
 
   const [rawRows, setRawRows] = useState<RawNumericRow[]>([]);
@@ -71,17 +71,17 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
   // ---------------------------------------------------------------------------
 
   function normalizeName(name: string | null | undefined): string {
-    if (!name) return "";
+    if (!name) return '';
     let n = name.toUpperCase().trim();
 
-    // Remove common PH ADM3 noise
-    n = n.replace(/\(CAPITAL\)/gi, "");
-    n = n.replace(/\bCITY OF\b/gi, "");
-    n = n.replace(/\bMUNICIPALITY OF\b/gi, "");
-    n = n.replace(/\bMUNICIPALITY\b/gi, "");
-    n = n.replace(/\bCITY\b/gi, "");
-    n = n.replace(/[.,]/g, " ");
-    n = n.replace(/\s+/g, " ").trim();
+    // Remove common noise for PH admin names
+    n = n.replace(/\(CAPITAL\)/gi, '');
+    n = n.replace(/\bCITY OF\b/gi, '');
+    n = n.replace(/\bMUNICIPALITY OF\b/gi, '');
+    n = n.replace(/\bMUNICIPALITY\b/gi, '');
+    n = n.replace(/\bCITY\b/gi, '');
+    n = n.replace(/[.,]/g, ' ');
+    n = n.replace(/\s+/g, ' ').trim();
 
     return n;
   }
@@ -91,7 +91,7 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
     let c = raw.toUpperCase().trim();
 
     // Rule B: drop trailing 000 (e.g. PH012801000 => PH012801)
-    if (c.endsWith("000")) {
+    if (c.endsWith('000')) {
       c = c.slice(0, -3);
     }
 
@@ -105,15 +105,16 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
     if (!rows.length || !boundaries.length) {
       return rows.map((r) => ({
         raw: r,
-        status: "unmatched",
+        status: 'unmatched',
       }));
     }
 
+    // Build lookups for deterministic matching
     const boundariesByName = new Map<string, AdminBoundary[]>();
     const boundariesByPcode = new Map<string, AdminBoundary>();
 
     for (const b of boundaries) {
-      const nameKey = normalizeName(b.admin_name);
+      const nameKey = normalizeName(b.name);
       if (!boundariesByName.has(nameKey)) {
         boundariesByName.set(nameKey, []);
       }
@@ -146,6 +147,7 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
         if (candidates.length === 1) {
           matchedBoundary = candidates[0];
         } else if (candidates.length > 1 && normPcode) {
+          // If multiple candidates by name, pick one that shares the pcode prefix
           const byPrefix = candidates.find((c) =>
             c.admin_pcode.toUpperCase().startsWith(normPcode)
           );
@@ -158,13 +160,13 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
       return {
         raw,
         matchedBoundary,
-        status: matchedBoundary ? "matched" : "unmatched",
+        status: matchedBoundary ? 'matched' : 'unmatched',
       };
     });
   }
 
   // ---------------------------------------------------------------------------
-  // Data loading – RAW rows + PH ADM3 boundaries
+  // Data loading – RAW rows + admin boundaries
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
@@ -172,25 +174,25 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
 
     async function load() {
       try {
-        setLoadingState("loading");
+        setLoadingState('loading');
         setError(null);
 
+        // RAW preview rows for this dataset
         const { data: rawData, error: rawError, count } = await supabase
-          .from("dataset_values_numeric_raw")
+          .from('dataset_values_numeric_raw')
           .select(
-            "id, dataset_id, admin_pcode_raw, admin_name_raw, raw_row",
-            { count: "exact" }
+            'id, dataset_id, admin_pcode_raw, admin_name_raw, value_raw, raw_row',
+            { count: 'exact' }
           )
-          .eq("dataset_id", datasetId)
+          .eq('dataset_id', datasetId)
           .limit(200);
 
         if (rawError) throw rawError;
 
+        // Canonical admin boundaries
         const { data: boundaryData, error: boundaryError } = await supabase
-          .from("admin_boundaries")
-          .select("admin_pcode, admin_name, admin_level, country_code")
-          .eq("country_code", "PH")
-          .eq("admin_level", 3);
+          .from('admin_boundaries')
+          .select('admin_pcode, name, admin_level');
 
         if (boundaryError) throw boundaryError;
 
@@ -199,12 +201,12 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
         setRawRows((rawData || []) as RawNumericRow[]);
         setRawCount(count ?? (rawData ? rawData.length : 0));
         setAdminBoundaries((boundaryData || []) as AdminBoundary[]);
-        setLoadingState("idle");
+        setLoadingState('idle');
       } catch (err: any) {
         if (cancelled) return;
-        console.error("Failed to load cleaning preview", err);
-        setError(err?.message || "Failed to load cleaning preview.");
-        setLoadingState("idle");
+        console.error('Failed to load cleaning preview', err);
+        setError(err?.message || 'Failed to load cleaning preview.');
+        setLoadingState('idle');
       }
     }
 
@@ -225,7 +227,7 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
     let matched = 0;
 
     for (const r of mappedRows) {
-      if (r.status === "matched") matched += 1;
+      if (r.status === 'matched') matched += 1;
     }
 
     const unmatched = total - matched;
@@ -239,27 +241,27 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
 
   async function handleApplyCleaning() {
     try {
-      setLoadingState("applying");
+      setLoadingState('applying');
       setError(null);
 
-      const { error: rpcError } = await supabase.rpc("clean_numeric_dataset", {
+      const { error: rpcError } = await supabase.rpc('clean_numeric_dataset', {
         dataset_id: datasetId,
       });
 
       if (rpcError) throw rpcError;
 
-      setLoadingState("idle");
+      setLoadingState('idle');
 
       if (onCleaned) onCleaned();
       onClose();
     } catch (err: any) {
-      console.error("Failed to apply cleaning", err);
-      setError(err?.message || "Failed to apply cleaning.");
-      setLoadingState("idle");
+      console.error('Failed to apply cleaning', err);
+      setError(err?.message || 'Failed to apply cleaning.');
+      setLoadingState('idle');
     }
   }
 
-  const isBusy = loadingState !== "idle";
+  const isBusy = loadingState !== 'idle';
 
   // ---------------------------------------------------------------------------
   // Render
@@ -272,7 +274,7 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
         <div className="flex items-start justify-between border-b px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold">
-              Clean Numeric Dataset{" "}
+              Clean Numeric Dataset{' '}
               {datasetName ? (
                 <span className="ml-1 text-sm font-normal text-gray-500">
                   ({datasetName})
@@ -280,9 +282,9 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
               ) : null}
             </h2>
             <p className="mt-1 text-xs text-gray-500">
-              Applies deterministic Philippine ADM3 matching (Rule B) to this
-              raw numeric dataset. Matched rows go into the cleaned table;
-              unmatched rows stay in RAW for later fuzzy/manual tools.
+              Applies deterministic matching (Rule B) to this raw numeric
+              dataset. Matched rows go into the cleaned table; unmatched rows
+              stay in RAW for later fuzzy/manual tools.
             </p>
           </div>
           <button
@@ -296,7 +298,7 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
 
         {/* Body */}
         <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
-          {loadingState === "loading" && (
+          {loadingState === 'loading' && (
             <div className="py-10 text-center text-sm text-gray-500">
               Loading raw rows and admin boundaries…
             </div>
@@ -308,7 +310,7 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
             </div>
           )}
 
-          {loadingState !== "loading" && !error && (
+          {loadingState !== 'loading' && !error && (
             <>
               {/* Stats cards */}
               <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -341,11 +343,11 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
               <p className="mb-3 text-xs text-gray-500">
                 Preview uses deterministic Rule B:
                 <br />
-                • normalize Philippine ADM3 names
+                • normalize administrative names
                 <br />
                 • drop trailing <code>000</code> from raw pcodes
                 <br />
-                • match against official ADM3 boundaries by pcode and/or name
+                • match against admin_boundaries by pcode and/or name
               </p>
 
               {/* Preview table */}
@@ -353,10 +355,10 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
                 <table className="min-w-full text-left text-xs">
                   <thead className="bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
                     <tr>
-                      <th className="px-3 py-2">Raw ADM3 name</th>
-                      <th className="px-3 py-2">Raw pcode</th>
-                      <th className="px-3 py-2">Matched pcode</th>
-                      <th className="px-3 py-2">Matched name</th>
+                      <th className="px-3 py-2">Raw Name</th>
+                      <th className="px-3 py-2">Raw Pcode</th>
+                      <th className="px-3 py-2">Matched Pcode</th>
+                      <th className="px-3 py-2">Matched Name</th>
                       <th className="px-3 py-2">Status</th>
                     </tr>
                   </thead>
@@ -379,12 +381,12 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {row.matchedBoundary?.admin_name || (
+                          {row.matchedBoundary?.name || (
                             <span className="text-gray-400">—</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {row.status === "matched" ? (
+                          {row.status === 'matched' ? (
                             <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-medium text-green-800">
                               matched
                             </span>
@@ -443,15 +445,13 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
               disabled={isBusy || mappedRows.length === 0}
               className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loadingState === "applying"
-                ? "Applying cleaning…"
-                : "Apply cleaning"}
+              {loadingState === 'applying'
+                ? 'Applying cleaning…'
+                : 'Apply cleaning'}
             </button>
           </div>
         </div>
       </div>
     </div>
   );
-};
-
-export default CleanNumericDatasetModal;
+}
