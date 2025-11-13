@@ -1,28 +1,107 @@
 'use client';
 
-import { useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useEffect, useState } from 'react';
 import Papa from 'papaparse';
+import { supabase } from '@/lib/supabaseClient';
 
 interface UploadDatasetModalProps {
   onClose: () => void;
   onUploaded: () => void;
 }
 
-export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatasetModalProps) {
+type DatasetType = 'numeric' | 'categorical';
+
+interface MappingState {
+  admin_pcode: string;
+  admin_name: string;
+  value: string;
+}
+
+interface MetaState {
+  name: string;
+  description: string;
+  category: string;
+  admin_level: 'ADM1' | 'ADM2' | 'ADM3' | 'ADM4';
+  type: DatasetType;
+}
+
+// --- Helper functions for auto-detection -----------------------------
+
+function guessAdminPcodeColumn(columns: string[]): string {
+  for (const c of columns) {
+    const lc = c.toLowerCase();
+    if (
+      lc.includes('pcode') ||
+      lc.includes('p_code') ||
+      lc.includes('admin_pcode') ||
+      (lc.includes('adm') && lc.includes('code')) ||
+      lc === 'pcode' ||
+      lc === 'psgc'
+    ) {
+      return c;
+    }
+  }
+  return '';
+}
+
+function guessAdminNameColumn(columns: string[]): string {
+  for (const c of columns) {
+    const lc = c.toLowerCase();
+    if (
+      lc.includes('name') &&
+      !lc.includes('code') &&
+      !lc.includes('pcode') &&
+      !lc.includes('id')
+    ) {
+      return c;
+    }
+  }
+  return '';
+}
+
+function guessValueColumn(columns: string[], avoid: string[]): string {
+  const avoidSet = new Set(avoid.filter(Boolean));
+  const scoreish = ['value', 'val', 'score', 'rate', 'density', 'pop', 'population', 'count', 'total', 'number', 'pct', 'percent', 'ratio'];
+
+  // 1) Prefer “value-like” columns not in avoid
+  for (const c of columns) {
+    if (avoidSet.has(c)) continue;
+    const lc = c.toLowerCase();
+    if (scoreish.some((k) => lc.includes(k))) {
+      return c;
+    }
+  }
+
+  // 2) Otherwise just pick first non-avoided column
+  for (const c of columns) {
+    if (!avoidSet.has(c)) return c;
+  }
+
+  return '';
+}
+
+function headerLooksLikePercentage(header: string): boolean {
+  const lc = header.toLowerCase();
+  return lc.includes('percent') || lc.includes('pct') || lc.includes('%') || lc.includes('rate');
+}
+
+// --- Component -------------------------------------------------------
+
+export default function UploadDatasetModal({
+  onClose,
+  onUploaded,
+}: UploadDatasetModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<any[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const [mapping, setMapping] = useState({
+  const [mapping, setMapping] = useState<MappingState>({
     admin_pcode: '',
     admin_name: '',
     value: '',
   });
 
-  const [meta, setMeta] = useState({
+  const [meta, setMeta] = useState<MetaState>({
     name: '',
     description: '',
     category: '',
@@ -30,6 +109,12 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
     type: 'numeric',
   });
 
+  const [isPercentage, setIsPercentage] = useState<boolean>(false);
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Must match DB check constraint exactly
   const categories = [
     'Core',
     'SSC Framework - P1',
@@ -39,13 +124,29 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
     'Underlying Vulnerability',
   ];
 
-  // ------------------------------
-  // STEP 1 — Read CSV + preview
-  // ------------------------------
-  const handleFile = (e: any) => {
+  // When we get new columns, try to auto-detect sensible defaults
+  useEffect(() => {
+    if (!columns.length) return;
+
+    const admin_pcode = guessAdminPcodeColumn(columns);
+    const admin_name = guessAdminNameColumn(columns);
+    const value = guessValueColumn(columns, [admin_pcode, admin_name]);
+
+    setMapping((prev) => ({
+      admin_pcode: admin_pcode || prev.admin_pcode,
+      admin_name: admin_name || prev.admin_name,
+      value: value || prev.value,
+    }));
+
+    // If the guessed value column looks like a percentage, default the flag
+    if (value && headerLooksLikePercentage(value)) {
+      setIsPercentage(true);
+    }
+  }, [columns]);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-
     setFile(f);
 
     Papa.parse(f, {
@@ -53,101 +154,175 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
       dynamicTyping: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const rows = results.data as any[];
-        if (rows.length === 0) {
+        const rows = (results.data as any[]).filter(Boolean);
+        if (!rows.length) {
           setError('CSV appears empty.');
           return;
         }
-
         setPreview(rows.slice(0, 5));
         setColumns(Object.keys(rows[0]));
         setError(null);
       },
+      error: (err) => {
+        console.error('Papaparse error:', err);
+        setError('Failed to parse CSV. Please check the file format.');
+      },
     });
   };
 
-  // ------------------------------
-  // STEP 2 — Upload to RAW tables
-  // ------------------------------
   const handleUpload = async () => {
+    if (!file) {
+      setError('Please select a file.');
+      return;
+    }
+    if (!meta.name.trim()) {
+      setError('Please enter a dataset name.');
+      return;
+    }
+    if (!meta.category) {
+      setError('Please choose a category.');
+      return;
+    }
+    if (!mapping.admin_pcode && !mapping.admin_name) {
+      setError('Please map at least an Admin PCode or Admin Name column.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
     try {
-      if (!file) return setError('Please select a file.');
-      if (!meta.name) return setError('Please enter a dataset name.');
-
-      setLoading(true);
-      setError(null);
-
-      // 1. Insert dataset record (unclean, raw only)
-      const { data: dataset, error: insertError } = await supabase
+      // 1) Create dataset metadata row
+      const { data: dataset, error: datasetError } = await supabase
         .from('datasets')
         .insert([
           {
-            name: meta.name,
-            description: meta.description,
+            name: meta.name.trim(),
+            description: meta.description.trim() || null,
             category: meta.category,
             type: meta.type,
             admin_level: meta.admin_level,
-            is_cleaned: false,
-            upload_type_raw: meta.type,
-            admin_level_raw: meta.admin_level,
           },
         ])
         .select()
         .single();
 
-      if (insertError) throw insertError;
-
-      // 2. Parse full CSV
-      const text = await file.text();
-      const parsed = Papa.parse(text, { header: true, dynamicTyping: true });
-      const rows = parsed.data as any[];
-
-      if (!rows.length) throw new Error('CSV contains no rows.');
-
-      // 3. Build RAW ingestion rows (always preserve 100% raw row)
-      const rawRows = rows.map((r) => ({
-        id: crypto.randomUUID(),
-        dataset_id: dataset.id,
-        admin_pcode_raw: mapping.admin_pcode ? String(r[mapping.admin_pcode] || '').trim() : null,
-        admin_name_raw: mapping.admin_name ? String(r[mapping.admin_name] || '').trim() : null,
-        shape: meta.type === 'numeric' ? 'numeric' : 'categorical',
-        raw_row: r, // full JSON of original CSV row
-      }));
-
-      const table =
-        meta.type === 'numeric'
-          ? 'dataset_values_numeric_raw'
-          : 'dataset_values_categorical_raw';
-
-      // 4. Chunk insert to Supabase
-      const chunkSize = 500;
-
-      for (let i = 0; i < rawRows.length; i += chunkSize) {
-        const chunk = rawRows.slice(i, i + chunkSize);
-        const { error: chunkError } = await supabase.from(table).insert(chunk);
-        if (chunkError) throw chunkError;
+      if (datasetError) {
+        throw datasetError;
       }
 
-      alert(`✅ Successfully uploaded ${rawRows.length} raw rows.`);
-      onUploaded();
+      // 2) Parse full CSV
+      const csvText = await file.text();
+      const results = Papa.parse(csvText, {
+        header: true,
+        dynamicTyping: false, // keep as strings for raw staging
+        skipEmptyLines: true,
+      });
+
+      const rows = (results.data as any[]).filter(Boolean);
+      if (!rows.length) {
+        throw new Error('CSV file is empty.');
+      }
+
+      // 3) Build raw staging rows
+      if (meta.type === 'numeric') {
+        const values = rows.map((r) => ({
+          dataset_id: dataset.id,
+          admin_pcode_raw: mapping.admin_pcode
+            ? String(r[mapping.admin_pcode] ?? '').trim() || null
+            : null,
+          admin_name_raw: mapping.admin_name
+            ? String(r[mapping.admin_name] ?? '').trim() || null
+            : null,
+          value_raw: mapping.value
+            ? String(r[mapping.value] ?? '').trim() || null
+            : null,
+          is_percentage: isPercentage,
+          raw_row: r,
+        }));
+
+        // Filter out completely empty rows (no pcode/name/value)
+        const cleaned = values.filter(
+          (v) =>
+            (v.admin_pcode_raw && v.admin_pcode_raw !== '') ||
+            (v.admin_name_raw && v.admin_name_raw !== '') ||
+            (v.value_raw && v.value_raw !== '')
+        );
+
+        if (!cleaned.length) {
+          throw new Error('No usable rows found in CSV (after cleaning).');
+        }
+
+        const chunkSize = 500;
+        for (let i = 0; i < cleaned.length; i += chunkSize) {
+          const chunk = cleaned.slice(i, i + chunkSize);
+          const { error: chunkError } = await supabase
+            .from('dataset_values_numeric_raw')
+            .insert(chunk);
+          if (chunkError) throw chunkError;
+        }
+
+        alert(`✅ Uploaded ${cleaned.length} raw numeric rows.`);
+      } else {
+        // categorical
+        const shape = 'unknown';
+
+        const values = rows.map((r) => ({
+          dataset_id: dataset.id,
+          admin_pcode_raw: mapping.admin_pcode
+            ? String(r[mapping.admin_pcode] ?? '').trim() || null
+            : null,
+          admin_name_raw: mapping.admin_name
+            ? String(r[mapping.admin_name] ?? '').trim() || null
+            : null,
+          shape,
+          raw_row: r,
+        }));
+
+        const cleaned = values.filter(
+          (v) =>
+            (v.admin_pcode_raw && v.admin_pcode_raw !== '') ||
+            (v.admin_name_raw && v.admin_name_raw !== '')
+        );
+
+        if (!cleaned.length) {
+          throw new Error(
+            'No usable rows found in CSV (after cleaning). At minimum, Admin code or name must be present.'
+          );
+        }
+
+        const chunkSize = 500;
+        for (let i = 0; i < cleaned.length; i += chunkSize) {
+          const chunk = cleaned.slice(i, i + chunkSize);
+          const { error: chunkError } = await supabase
+            .from('dataset_values_categorical_raw')
+            .insert(chunk);
+          if (chunkError) throw chunkError;
+        }
+
+        alert(`✅ Uploaded ${cleaned.length} raw categorical rows.`);
+      }
+
+      await onUploaded();
       onClose();
     } catch (err: any) {
-      console.error(err);
+      console.error('Upload failed:', err);
       setError(err.message || 'Upload failed.');
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------
-  // UI
-  // ------------------------------
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-3">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center border-b px-4 py-3">
-          <h2 className="text-lg font-semibold text-gray-800">Upload Dataset (RAW mode)</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">
+          <h2 className="text-lg font-semibold text-gray-800">Upload Dataset (raw)</h2>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 text-xl"
+            disabled={loading}
+          >
             ×
           </button>
         </div>
@@ -155,23 +330,31 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
         <div className="p-4 space-y-3 text-sm">
           {error && <p className="text-red-600">{error}</p>}
 
-          {/* FILE */}
           <div>
             <label className="block text-gray-700 font-medium">CSV File</label>
-            <input type="file" accept=".csv" onChange={handleFile} className="border rounded px-2 py-1 w-full mt-1" />
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFile}
+              className="mt-1 border rounded px-2 py-1 w-full"
+              disabled={loading}
+            />
           </div>
 
           {columns.length > 0 && (
             <>
-              {/* METADATA */}
+              {/* Metadata */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-medium">Dataset Name</label>
                   <input
                     type="text"
                     value={meta.name}
-                    onChange={(e) => setMeta({ ...meta, name: e.target.value })}
+                    onChange={(e) =>
+                      setMeta((prev) => ({ ...prev, name: e.target.value }))
+                    }
                     className="border rounded px-2 py-1 w-full"
+                    disabled={loading}
                   />
                 </div>
 
@@ -179,8 +362,11 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                   <label className="block font-medium">Category</label>
                   <select
                     value={meta.category}
-                    onChange={(e) => setMeta({ ...meta, category: e.target.value })}
+                    onChange={(e) =>
+                      setMeta((prev) => ({ ...prev, category: e.target.value }))
+                    }
                     className="border rounded px-2 py-1 w-full"
+                    disabled={loading}
                   >
                     <option value="">Select category</option>
                     {categories.map((c) => (
@@ -195,8 +381,14 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                   <label className="block font-medium">Type</label>
                   <select
                     value={meta.type}
-                    onChange={(e) => setMeta({ ...meta, type: e.target.value })}
+                    onChange={(e) =>
+                      setMeta((prev) => ({
+                        ...prev,
+                        type: e.target.value as DatasetType,
+                      }))
+                    }
                     className="border rounded px-2 py-1 w-full"
+                    disabled={loading}
                   >
                     <option value="numeric">Numeric</option>
                     <option value="categorical">Categorical</option>
@@ -207,8 +399,14 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                   <label className="block font-medium">Admin Level</label>
                   <select
                     value={meta.admin_level}
-                    onChange={(e) => setMeta({ ...meta, admin_level: e.target.value })}
+                    onChange={(e) =>
+                      setMeta((prev) => ({
+                        ...prev,
+                        admin_level: e.target.value as MetaState['admin_level'],
+                      }))
+                    }
                     className="border rounded px-2 py-1 w-full"
+                    disabled={loading}
                   >
                     <option value="ADM1">ADM1</option>
                     <option value="ADM2">ADM2</option>
@@ -218,61 +416,55 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                 </div>
               </div>
 
-              {/* DESCRIPTION */}
               <div>
                 <label className="block font-medium">Description</label>
                 <textarea
-                  rows={2}
                   value={meta.description}
-                  onChange={(e) => setMeta({ ...meta, description: e.target.value })}
+                  onChange={(e) =>
+                    setMeta((prev) => ({ ...prev, description: e.target.value }))
+                  }
                   className="border rounded px-2 py-1 w-full"
+                  rows={2}
+                  disabled={loading}
                 />
               </div>
 
-              {/* COLUMN MAPPING */}
+              {/* Numeric-only options */}
+              {meta.type === 'numeric' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    id="is_percentage"
+                    type="checkbox"
+                    checked={isPercentage}
+                    onChange={(e) => setIsPercentage(e.target.checked)}
+                    disabled={loading}
+                  />
+                  <label htmlFor="is_percentage" className="text-gray-700">
+                    Values are percentages (rates, % or 0–1 scale)
+                  </label>
+                </div>
+              )}
+
+              {/* Column mapping */}
               <div className="border-t pt-3">
-                <h3 className="font-semibold text-gray-800 mb-1">Column Mapping</h3>
+                <h3 className="font-semibold text-gray-800 mb-1">
+                  Column Mapping (auto-detected, you can override)
+                </h3>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block">Admin PCode Column</label>
-                    <select
-                      value={mapping.admin_pcode}
-                      onChange={(e) => setMapping({ ...mapping, admin_pcode: e.target.value })}
-                      className="border rounded px-2 py-1 w-full"
-                    >
-                      <option value="">Select</option>
-                      {columns.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block">Admin Name Column (optional)</label>
-                    <select
-                      value={mapping.admin_name}
-                      onChange={(e) => setMapping({ ...mapping, admin_name: e.target.value })}
-                      className="border rounded px-2 py-1 w-full"
-                    >
-                      <option value="">Select</option>
-                      {columns.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block">
-                      Value Column <span className="text-gray-500">(optional for staging)</span>
+                    <label className="block text-gray-700">
+                      Admin PCode Column (optional but recommended)
                     </label>
                     <select
-                      value={mapping.value}
-                      onChange={(e) => setMapping({ ...mapping, value: e.target.value })}
+                      value={mapping.admin_pcode}
+                      onChange={(e) =>
+                        setMapping((prev) => ({
+                          ...prev,
+                          admin_pcode: e.target.value,
+                        }))
+                      }
                       className="border rounded px-2 py-1 w-full"
+                      disabled={loading}
                     >
                       <option value="">Select</option>
                       {columns.map((c) => (
@@ -282,28 +474,111 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block text-gray-700">
+                      Admin Name Column (optional)
+                    </label>
+                    <select
+                      value={mapping.admin_name}
+                      onChange={(e) =>
+                        setMapping((prev) => ({
+                          ...prev,
+                          admin_name: e.target.value,
+                        }))
+                      }
+                      className="border rounded px-2 py-1 w-full"
+                      disabled={loading}
+                    >
+                      <option value="">Select</option>
+                      {columns.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {meta.type === 'numeric' && (
+                    <div>
+                      <label className="block text-gray-700">
+                        Value Column (numeric)
+                      </label>
+                      <select
+                        value={mapping.value}
+                        onChange={(e) =>
+                          setMapping((prev) => ({
+                            ...prev,
+                            value: e.target.value,
+                          }))
+                        }
+                        className="border rounded px-2 py-1 w-full"
+                        disabled={loading}
+                      >
+                        <option value="">Select</option>
+                        {columns.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {meta.type === 'categorical' && (
+                    <div>
+                      <label className="block text-gray-700">
+                        Primary Category / Value Column
+                      </label>
+                      <select
+                        value={mapping.value}
+                        onChange={(e) =>
+                          setMapping((prev) => ({
+                            ...prev,
+                            value: e.target.value,
+                          }))
+                        }
+                        className="border rounded px-2 py-1 w-full"
+                        disabled={loading}
+                      >
+                        <option value="">Select (optional for raw staging)</option>
+                        {columns.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        For now this is only stored inside the raw_row JSON; detailed
+                        categorical shaping will happen in the cleaning step.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* PREVIEW */}
+              {/* Preview */}
               <div className="border-t pt-3">
-                <h3 className="font-semibold text-gray-800 mb-1">Preview (first 5 rows)</h3>
-
+                <h3 className="font-semibold text-gray-800 mb-1">
+                  Preview (first 5 rows)
+                </h3>
                 <div className="overflow-x-auto border rounded">
                   <table className="w-full text-xs border-collapse">
-                    <thead className="bg-gray-100">
+                    <thead className="bg-gray-100 text-gray-700">
                       <tr>
                         {columns.map((c) => (
-                          <th key={c} className="px-2 py-1 border-b text-left">{c}</th>
+                          <th key={c} className="px-2 py-1 border-b text-left">
+                            {c}
+                          </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {preview.map((row, i) => (
-                        <tr key={i}>
+                        <tr key={i} className="border-t">
                           {columns.map((c) => (
                             <td key={c} className="px-2 py-1 border-b">
-                              {String(row[c])}
+                              {String(row[c] ?? '')}
                             </td>
                           ))}
                         </tr>
@@ -317,15 +592,19 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
         </div>
 
         <div className="border-t px-4 py-3 flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm bg-gray-200 rounded hover:bg-gray-300">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-sm rounded bg-gray-200 hover:bg-gray-300"
+            disabled={loading}
+          >
             Cancel
           </button>
           <button
             onClick={handleUpload}
-            disabled={loading || !file}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            disabled={!file || loading}
+            className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
           >
-            {loading ? 'Uploading…' : 'Upload Dataset'}
+            {loading ? 'Uploading…' : 'Upload to Raw Staging'}
           </button>
         </div>
       </div>
