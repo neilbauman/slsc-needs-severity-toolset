@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { supabaseBrowser as supabase } from '@/lib/supabase/supabaseBrowser';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function RawDatasetsPage() {
   const [rows, setRows] = useState<any[]>([]);
