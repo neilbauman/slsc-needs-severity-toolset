@@ -25,7 +25,7 @@ export default function CleanNumericDatasetModal({
     const load = async () => {
       setLoading(true);
 
-      // ---- 1. Load counts from new function ----
+      // ---- 1. Load counts (accurate, all rows) ----
       const { data: countsData, error: countsError } = await supabase
         .rpc("preview_numeric_cleaning_v2_counts", {
           in_dataset: datasetId,
@@ -44,7 +44,7 @@ export default function CleanNumericDatasetModal({
 
       setCounts(mappedCounts);
 
-      // ---- 2. Load preview limited to 1000 rows ----
+      // ---- 2. Load preview rows (limited to first 1000) ----
       const { data: previewData, error: previewError } = await supabase
         .rpc("preview_numeric_cleaning_v2", {
           in_dataset: datasetId,
@@ -87,7 +87,7 @@ export default function CleanNumericDatasetModal({
     return (
       <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-8">
         <div className="bg-white rounded-lg p-6 shadow-xl w-[900px]">
-          <p>Loading preview…</p>
+          <p>Loading cleaning preview…</p>
         </div>
       </div>
     );
@@ -97,12 +97,11 @@ export default function CleanNumericDatasetModal({
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-8">
       <div className="bg-white rounded-lg p-6 shadow-xl w-[95%] max-w-[1300px] max-h-[90%] overflow-auto">
 
-        <h1 className="text-2xl font-semibold mb-2">
-          Clean numeric dataset <span className="text-gray-500">({datasetName})</span>
+        <h1 className="text-2xl font-semibold mb-1">
+          Clean Numeric Dataset
         </h1>
-
         <p className="text-gray-600 mb-4">
-          This preview shows how PSA ADM3 codes will be mapped to NAMRIA ADM3 boundaries.
+          Dataset: <span className="font-medium">{datasetName}</span>
         </p>
 
         {errorMsg && (
@@ -121,14 +120,14 @@ export default function CleanNumericDatasetModal({
           </div>
 
           <div className="p-4 border rounded">
-            <div className="text-sm text-gray-500">No ADM2 match</div>
+            <div className="text-sm text-gray-500">No ADM2 Match</div>
             <div className="text-xl font-semibold">
               {counts["no_adm2_match"] ?? 0}
             </div>
           </div>
 
           <div className="p-4 border rounded">
-            <div className="text-sm text-gray-500">No ADM3 name match</div>
+            <div className="text-sm text-gray-500">No ADM3 Name Match</div>
             <div className="text-xl font-semibold">
               {counts["no_adm3_name_match"] ?? 0}
             </div>
@@ -148,12 +147,13 @@ export default function CleanNumericDatasetModal({
                   ))}
               </tr>
             </thead>
+
             <tbody>
               {previewRows.map((row, i) => (
                 <tr key={i} className="border-b">
                   {Object.values(row).map((v, j) => (
                     <td key={j} className="px-3 py-1 whitespace-nowrap">
-                      {v === null ? "—" : v}
+                      {v === null ? "—" : String(v)}
                     </td>
                   ))}
                 </tr>
@@ -162,6 +162,7 @@ export default function CleanNumericDatasetModal({
           </table>
         </div>
 
+        {/* BUTTONS */}
         <div className="flex justify-end gap-3 mt-6">
           <button onClick={onClose} className="px-4 py-2 border rounded">
             Cancel
@@ -172,7 +173,7 @@ export default function CleanNumericDatasetModal({
             onClick={applyCleaning}
             className="px-4 py-2 bg-green-600 text-white rounded disabled:bg-gray-400"
           >
-            {applying ? "Applying…" : "Apply cleaning"}
+            {applying ? "Applying…" : "Apply Cleaning"}
           </button>
         </div>
       </div>
