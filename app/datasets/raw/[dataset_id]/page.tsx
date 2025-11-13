@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser as supabase } from "@/lib/supabase/supabaseBrowser";
+import { supabase } from "@/lib/supabase/supabaseClient";
 
 interface RawRow {
   id: string;
