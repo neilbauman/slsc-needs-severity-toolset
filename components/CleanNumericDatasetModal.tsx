@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 type CleanNumericDatasetModalProps = {
@@ -51,19 +51,13 @@ type LoadingState = "idle" | "loading" | "applying";
  *     • apply same deterministic logic server-side
  *     • insert into dataset_values_numeric
  *     • mark dataset as is_cleaned = true
- *
- * NOTE: This assumes your canonical PH ADM3 layer is exposed through
- * a table called "admin_boundaries" with columns:
- *   admin_pcode, admin_name, admin_level, country_code
- * If your repo uses a different table name (e.g. gis_features), you
- * only need to adjust the single Supabase query that loads boundaries.
  */
-export function CleanNumericDatasetModal({
+const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
   datasetId,
   datasetName,
   onClose,
   onCleaned,
-}: CleanNumericDatasetModalProps) {
+}) => {
   const [loadingState, setLoadingState] = useState<LoadingState>("loading");
   const [error, setError] = useState<string | null>(null);
 
@@ -80,7 +74,7 @@ export function CleanNumericDatasetModal({
     if (!name) return "";
     let n = name.toUpperCase().trim();
 
-    // Remove common noise for PH ADM3 names
+    // Remove common PH ADM3 noise
     n = n.replace(/\(CAPITAL\)/gi, "");
     n = n.replace(/\bCITY OF\b/gi, "");
     n = n.replace(/\bMUNICIPALITY OF\b/gi, "");
@@ -115,7 +109,6 @@ export function CleanNumericDatasetModal({
       }));
     }
 
-    // Build lookups for deterministic matching
     const boundariesByName = new Map<string, AdminBoundary[]>();
     const boundariesByPcode = new Map<string, AdminBoundary>();
 
@@ -153,7 +146,6 @@ export function CleanNumericDatasetModal({
         if (candidates.length === 1) {
           matchedBoundary = candidates[0];
         } else if (candidates.length > 1 && normPcode) {
-          // If multiple candidates by name, pick one that shares the pcode prefix
           const byPrefix = candidates.find((c) =>
             c.admin_pcode.toUpperCase().startsWith(normPcode)
           );
@@ -183,7 +175,6 @@ export function CleanNumericDatasetModal({
         setLoadingState("loading");
         setError(null);
 
-        // RAW preview rows for this dataset
         const { data: rawData, error: rawError, count } = await supabase
           .from("dataset_values_numeric_raw")
           .select(
@@ -191,11 +182,10 @@ export function CleanNumericDatasetModal({
             { count: "exact" }
           )
           .eq("dataset_id", datasetId)
-          .limit(200); // more than enough for a 20-row preview
+          .limit(200);
 
         if (rawError) throw rawError;
 
-        // Canonical PH ADM3 boundaries
         const { data: boundaryData, error: boundaryError } = await supabase
           .from("admin_boundaries")
           .select("admin_pcode, admin_name, admin_level, country_code")
@@ -462,6 +452,6 @@ export function CleanNumericDatasetModal({
       </div>
     </div>
   );
-}
+};
 
 export default CleanNumericDatasetModal;
