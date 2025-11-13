@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-const supabase = createClient();
+import { supabase } from "@/lib/supabaseClient";
 
 type CleanNumericDatasetModalProps = {
   datasetId: string;
