@@ -1,135 +1,135 @@
+// app/datasets/raw/[dataset_id]/page.tsx
 'use client';
 
-import { supabase } from '@/lib/supabaseClient';
 import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link';
 
-interface NumericRawRow {
+type Dataset = {
   id: string;
-  dataset_id: string;
-  admin_pcode_raw: string | null;
-  admin_name_raw: string | null;
-  value_raw: string | null;
-  is_percentage: boolean | null;
-  raw_row: any;
-}
-
-interface CategoricalRawRow {
-  id: string;
-  dataset_id: string;
-  admin_pcode_raw: string | null;
-  admin_name_raw: string | null;
-  shape: string | null;
-  raw_row: any;
-}
+  name: string;
+  type: 'numeric' | 'categorical';
+  admin_level: string;
+};
 
 export default function RawDatasetDetail({ params }: any) {
-  const dataset_id = params.dataset_id;
-  const [numeric, setNumeric] = useState<NumericRawRow[]>([]);
-  const [categorical, setCategorical] = useState<CategoricalRawRow[]>([]);
-  const [mode, setMode] = useState<'numeric' | 'categorical' | null>(null);
+  const datasetId = params.dataset_id;
 
-  const [error, setError] = useState<string | null>(null);
+  const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [rows, setRows] = useState<any[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      try {
-        // Try numeric table
-        const { data: num } = await supabase
-          .from('dataset_values_numeric_raw')
-          .select('*')
-          .eq('dataset_id', dataset_id);
+      setLoading(true);
 
-        if (num && num.length > 0) {
-          setNumeric(num as NumericRawRow[]);
-          setMode('numeric');
-          return;
-        }
+      // 1. Load dataset metadata
+      const { data: ds } = await supabase
+        .from('datasets')
+        .select('id, name, type, admin_level')
+        .eq('id', datasetId)
+        .single();
 
-        // Try categorical
-        const { data: cat } = await supabase
-          .from('dataset_values_categorical_raw')
-          .select('*')
-          .eq('dataset_id', dataset_id);
-
-        if (cat && cat.length > 0) {
-          setCategorical(cat as CategoricalRawRow[]);
-          setMode('categorical');
-          return;
-        }
-
-        setError('No raw data found for this dataset.');
-      } catch (err: any) {
-        console.error(err);
-        setError(err.message);
+      if (!ds) {
+        setLoading(false);
+        return;
       }
+
+      setDataset(ds);
+
+      // 2. Pick correct raw table
+      const table =
+        ds.type === 'numeric'
+          ? 'dataset_values_numeric_raw'
+          : 'dataset_values_categorical_raw';
+
+      // 3. Load raw rows
+      const { data: raw } = await supabase
+        .from(table)
+        .select('*')
+        .eq('dataset_id', datasetId)
+        .limit(200); // prevent huge screens
+
+      if (!raw) {
+        setLoading(false);
+        return;
+      }
+
+      setRows(raw);
+
+      // Determine column headers dynamically:
+      // - raw_row JSON keys
+      // - plus admin_pcode_raw / admin_name_raw / shape / value_raw / is_percentage
+      const allKeys = new Set<string>();
+
+      raw.forEach((r) => {
+        Object.keys(r).forEach((k) => allKeys.add(k));
+        if (r.raw_row) {
+          Object.keys(r.raw_row).forEach((k) => allKeys.add(`raw:${k}`));
+        }
+      });
+
+      setColumns([...allKeys]);
+      setLoading(false);
     };
 
     load();
-  }, [dataset_id]);
+  }, [datasetId]);
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold mb-4">Raw Dataset: {dataset_id}</h1>
+    <div className="p-4 space-y-4">
+      <Link href="/datasets/raw" className="text-blue-600 text-sm hover:underline">
+        ← Back to raw datasets
+      </Link>
 
-      {error && <p className="text-red-600">{error}</p>}
-
-      {mode === 'numeric' && (
+      {loading ? (
+        <p>Loading…</p>
+      ) : !dataset ? (
+        <p className="text-red-600">Dataset not found.</p>
+      ) : (
         <>
-          <h2 className="text-lg font-semibold mb-2">Numeric Raw Data</h2>
-          <table className="border w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 border">Admin PCode (raw)</th>
-                <th className="p-2 border">Admin Name (raw)</th>
-                <th className="p-2 border">Value (raw)</th>
-                <th className="p-2 border">Is Percentage?</th>
-                <th className="p-2 border">Raw Row</th>
-              </tr>
-            </thead>
-            <tbody>
-              {numeric.map((r) => (
-                <tr key={r.id}>
-                  <td className="p-2 border">{r.admin_pcode_raw}</td>
-                  <td className="p-2 border">{r.admin_name_raw}</td>
-                  <td className="p-2 border">{r.value_raw}</td>
-                  <td className="p-2 border">
-                    {r.is_percentage ? 'Yes' : 'No'}
-                  </td>
-                  <td className="p-2 border text-xs">
-                    {JSON.stringify(r.raw_row)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
+          <h1 className="text-xl font-semibold">{dataset.name}</h1>
+          <p className="text-sm text-gray-600">
+            Raw staging table for a <strong>{dataset.type}</strong> dataset at{' '}
+            <strong>{dataset.admin_level}</strong>.
+          </p>
 
-      {mode === 'categorical' && (
-        <>
-          <h2 className="text-lg font-semibold mb-2">Categorical Raw Data</h2>
-          <table className="border w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-2 border">Admin PCode (raw)</th>
-                <th className="p-2 border">Admin Name (raw)</th>
-                <th className="p-2 border">Shape Column</th>
-                <th className="p-2 border">Raw Row</th>
-              </tr>
-            </thead>
-            <tbody>
-              {categorical.map((r) => (
-                <tr key={r.id}>
-                  <td className="p-2 border">{r.admin_pcode_raw}</td>
-                  <td className="p-2 border">{r.admin_name_raw}</td>
-                  <td className="p-2 border">{r.shape}</td>
-                  <td className="p-2 border text-xs">
-                    {JSON.stringify(r.raw_row)}
-                  </td>
+          <div className="overflow-x-auto border rounded bg-white">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-100">
+                <tr>
+                  {columns.map((c) => (
+                    <th key={c} className="px-2 py-1 border-b text-left">
+                      {c}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} className="border-t hover:bg-gray-50">
+                    {columns.map((c) => {
+                      let value = null;
+
+                      if (c.startsWith('raw:')) {
+                        const key = c.replace('raw:', '');
+                        value = r.raw_row?.[key];
+                      } else {
+                        value = r[c];
+                      }
+
+                      return (
+                        <td key={c} className="px-2 py-1 border-b">
+                          {value === null || value === undefined ? '' : String(value)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </div>
