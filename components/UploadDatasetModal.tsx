@@ -13,6 +13,9 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<any[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [mapping, setMapping] = useState({
     admin_pcode: '',
     admin_name: '',
@@ -27,22 +30,24 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
     type: 'numeric',
   });
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const categories = [
     'Core',
     'SSC Framework - P1',
     'SSC Framework - P2',
     'SSC Framework - P3',
-    'Hazards',
+    'Hazard',
     'Underlying Vulnerability',
   ];
 
+  // ------------------------------
+  // STEP 1 — Read CSV + preview
+  // ------------------------------
   const handleFile = (e: any) => {
     const f = e.target.files?.[0];
     if (!f) return;
+
     setFile(f);
+
     Papa.parse(f, {
       header: true,
       dynamicTyping: true,
@@ -53,6 +58,7 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
           setError('CSV appears empty.');
           return;
         }
+
         setPreview(rows.slice(0, 5));
         setColumns(Object.keys(rows[0]));
         setError(null);
@@ -60,17 +66,18 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
     });
   };
 
+  // ------------------------------
+  // STEP 2 — Upload to RAW tables
+  // ------------------------------
   const handleUpload = async () => {
-    if (!file) return setError('Please select a file.');
-    if (!mapping.admin_pcode || !mapping.value)
-      return setError('Please map Admin PCode and Value columns.');
-    if (!meta.name) return setError('Please enter a dataset name.');
-
-    setLoading(true);
-    setError(null);
-
     try {
-      // Insert dataset metadata
+      if (!file) return setError('Please select a file.');
+      if (!meta.name) return setError('Please enter a dataset name.');
+
+      setLoading(true);
+      setError(null);
+
+      // 1. Insert dataset record (unclean, raw only)
       const { data: dataset, error: insertError } = await supabase
         .from('datasets')
         .insert([
@@ -80,6 +87,9 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
             category: meta.category,
             type: meta.type,
             admin_level: meta.admin_level,
+            is_cleaned: false,
+            upload_type_raw: meta.type,
+            admin_level_raw: meta.admin_level,
           },
         ])
         .select()
@@ -87,52 +97,56 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
 
       if (insertError) throw insertError;
 
-      // Parse the entire CSV synchronously
-      const csvText = await file.text();
-      const results = Papa.parse(csvText, { header: true, dynamicTyping: true });
-      const rows = results.data as any[];
+      // 2. Parse full CSV
+      const text = await file.text();
+      const parsed = Papa.parse(text, { header: true, dynamicTyping: true });
+      const rows = parsed.data as any[];
 
-      if (!rows || rows.length === 0) throw new Error('CSV file is empty.');
+      if (!rows.length) throw new Error('CSV contains no rows.');
 
-      // Build dataset values
-      const values = rows
-        .filter((r) => r[mapping.admin_pcode] && r[mapping.value] !== undefined)
-        .map((r) => ({
-          dataset_id: dataset.id,
-          admin_pcode: String(r[mapping.admin_pcode]).trim(),
-          admin_name: mapping.admin_name ? String(r[mapping.admin_name] || '').trim() : null,
-          value: meta.type === 'numeric' ? Number(r[mapping.value]) : String(r[mapping.value]),
-        }));
-
-      if (values.length === 0) throw new Error('No valid rows found in CSV.');
+      // 3. Build RAW ingestion rows (always preserve 100% raw row)
+      const rawRows = rows.map((r) => ({
+        id: crypto.randomUUID(),
+        dataset_id: dataset.id,
+        admin_pcode_raw: mapping.admin_pcode ? String(r[mapping.admin_pcode] || '').trim() : null,
+        admin_name_raw: mapping.admin_name ? String(r[mapping.admin_name] || '').trim() : null,
+        shape: meta.type === 'numeric' ? 'numeric' : 'categorical',
+        raw_row: r, // full JSON of original CSV row
+      }));
 
       const table =
-        meta.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
+        meta.type === 'numeric'
+          ? 'dataset_values_numeric_raw'
+          : 'dataset_values_categorical_raw';
 
-      // Insert in chunks to avoid payload limits
+      // 4. Chunk insert to Supabase
       const chunkSize = 500;
-      for (let i = 0; i < values.length; i += chunkSize) {
-        const chunk = values.slice(i, i + chunkSize);
-        const { error: insertChunkError } = await supabase.from(table).insert(chunk);
-        if (insertChunkError) throw insertChunkError;
+
+      for (let i = 0; i < rawRows.length; i += chunkSize) {
+        const chunk = rawRows.slice(i, i + chunkSize);
+        const { error: chunkError } = await supabase.from(table).insert(chunk);
+        if (chunkError) throw chunkError;
       }
 
-      alert(`✅ Uploaded ${values.length} rows to ${table}`);
-      await onUploaded();
+      alert(`✅ Successfully uploaded ${rawRows.length} raw rows.`);
+      onUploaded();
       onClose();
     } catch (err: any) {
-      console.error('Upload failed:', err);
+      console.error(err);
       setError(err.message || 'Upload failed.');
     } finally {
       setLoading(false);
     }
   };
 
+  // ------------------------------
+  // UI
+  // ------------------------------
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-3">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-3">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center border-b px-4 py-3">
-          <h2 className="text-lg font-semibold text-gray-800">Upload Dataset</h2>
+          <h2 className="text-lg font-semibold text-gray-800">Upload Dataset (RAW mode)</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">
             ×
           </button>
@@ -141,18 +155,15 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
         <div className="p-4 space-y-3 text-sm">
           {error && <p className="text-red-600">{error}</p>}
 
+          {/* FILE */}
           <div>
             <label className="block text-gray-700 font-medium">CSV File</label>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFile}
-              className="mt-1 border rounded px-2 py-1 w-full"
-            />
+            <input type="file" accept=".csv" onChange={handleFile} className="border rounded px-2 py-1 w-full mt-1" />
           </div>
 
           {columns.length > 0 && (
             <>
+              {/* METADATA */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-medium">Dataset Name</label>
@@ -207,26 +218,26 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                 </div>
               </div>
 
+              {/* DESCRIPTION */}
               <div>
                 <label className="block font-medium">Description</label>
                 <textarea
+                  rows={2}
                   value={meta.description}
                   onChange={(e) => setMeta({ ...meta, description: e.target.value })}
                   className="border rounded px-2 py-1 w-full"
-                  rows={2}
                 />
               </div>
 
+              {/* COLUMN MAPPING */}
               <div className="border-t pt-3">
                 <h3 className="font-semibold text-gray-800 mb-1">Column Mapping</h3>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-gray-700">Admin PCode Column</label>
+                    <label className="block">Admin PCode Column</label>
                     <select
                       value={mapping.admin_pcode}
-                      onChange={(e) =>
-                        setMapping({ ...mapping, admin_pcode: e.target.value })
-                      }
+                      onChange={(e) => setMapping({ ...mapping, admin_pcode: e.target.value })}
                       className="border rounded px-2 py-1 w-full"
                     >
                       <option value="">Select</option>
@@ -239,12 +250,10 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                   </div>
 
                   <div>
-                    <label className="block text-gray-700">Admin Name (optional)</label>
+                    <label className="block">Admin Name Column (optional)</label>
                     <select
                       value={mapping.admin_name}
-                      onChange={(e) =>
-                        setMapping({ ...mapping, admin_name: e.target.value })
-                      }
+                      onChange={(e) => setMapping({ ...mapping, admin_name: e.target.value })}
                       className="border rounded px-2 py-1 w-full"
                     >
                       <option value="">Select</option>
@@ -257,7 +266,9 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                   </div>
 
                   <div>
-                    <label className="block text-gray-700">Value Column</label>
+                    <label className="block">
+                      Value Column <span className="text-gray-500">(optional for staging)</span>
+                    </label>
                     <select
                       value={mapping.value}
                       onChange={(e) => setMapping({ ...mapping, value: e.target.value })}
@@ -274,22 +285,22 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
                 </div>
               </div>
 
+              {/* PREVIEW */}
               <div className="border-t pt-3">
                 <h3 className="font-semibold text-gray-800 mb-1">Preview (first 5 rows)</h3>
+
                 <div className="overflow-x-auto border rounded">
                   <table className="w-full text-xs border-collapse">
-                    <thead className="bg-gray-100 text-gray-700">
+                    <thead className="bg-gray-100">
                       <tr>
                         {columns.map((c) => (
-                          <th key={c} className="px-2 py-1 border-b text-left">
-                            {c}
-                          </th>
+                          <th key={c} className="px-2 py-1 border-b text-left">{c}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {preview.map((row, i) => (
-                        <tr key={i} className="border-t">
+                        <tr key={i}>
                           {columns.map((c) => (
                             <td key={c} className="px-2 py-1 border-b">
                               {String(row[c])}
@@ -306,16 +317,12 @@ export default function UploadDatasetModal({ onClose, onUploaded }: UploadDatase
         </div>
 
         <div className="border-t px-4 py-3 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded bg-gray-200 hover:bg-gray-300"
-            disabled={loading}
-          >
+          <button onClick={onClose} className="px-3 py-1.5 text-sm bg-gray-200 rounded hover:bg-gray-300">
             Cancel
           </button>
           <button
             onClick={handleUpload}
-            disabled={!file || loading}
+            disabled={loading || !file}
             className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
           >
             {loading ? 'Uploading…' : 'Upload Dataset'}
