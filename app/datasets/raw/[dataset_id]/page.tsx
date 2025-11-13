@@ -1,85 +1,127 @@
-// app/datasets/raw/[dataset_id]/page.tsx
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
+import { useEffect, useState } from "react";
+import { supabaseBrowser as supabase } from "@/lib/supabase/supabaseBrowser";
 
-export default function RawDatasetDetail() {
-  const params = useParams();
-  const datasetId = params.dataset_id as string;
+interface RawRow {
+  id: string;
+  admin_pcode_raw: string | null;
+  admin_name_raw: string | null;
+  value_raw?: string | null;
+  shape?: string | null;
+  raw_row: any;
+}
 
+export default function RawDatasetDetailPage({ params }: any) {
+  const dataset_id = params.dataset_id;
+
+  const [numericRows, setNumericRows] = useState<RawRow[]>([]);
+  const [categoricalRows, setCategoricalRows] = useState<RawRow[]>([]);
   const [dataset, setDataset] = useState<any>(null);
-  const [rows, setRows] = useState<any[]>([]);
+
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const { data: ds } = await supabase
-        .from('datasets')
-        .select('*')
-        .eq('id', datasetId)
-        .single();
+      setLoading(true);
 
+      // dataset metadata
+      const { data: ds } = await supabase
+        .from("datasets")
+        .select("*")
+        .eq("id", dataset_id)
+        .single();
       setDataset(ds);
 
-      const table =
-        ds.type === 'numeric'
-          ? 'dataset_values_numeric_raw'
-          : 'dataset_values_categorical_raw';
+      // numeric rows
+      const { data: num } = await supabase
+        .from("dataset_values_numeric_raw")
+        .select("*")
+        .eq("dataset_id", dataset_id)
+        .limit(5000);
+      setNumericRows(num || []);
 
-      const { data: rawRows } = await supabase
-        .from(table)
-        .select('*')
-        .eq('dataset_id', datasetId)
-        .limit(200);
+      // categorical rows
+      const { data: cat } = await supabase
+        .from("dataset_values_categorical_raw")
+        .select("*")
+        .eq("dataset_id", dataset_id)
+        .limit(5000);
+      setCategoricalRows(cat || []);
 
-      setRows(rawRows || []);
       setLoading(false);
     }
 
     load();
-  }, [datasetId]);
+  }, [dataset_id]);
 
-  if (loading) return <p className="p-6">Loading…</p>;
-  if (!dataset) return <p className="p-6">Dataset not found.</p>;
+  if (loading) return <p className="p-4">Loading…</p>;
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-xl font-semibold">{dataset.name}</h1>
+    <div className="p-6 space-y-6">
+      <h1 className="text-2xl font-bold">
+        Raw Dataset: {dataset?.name || dataset_id}
+      </h1>
 
-      <p className="text-gray-700 text-sm">
-        <strong>Category:</strong> {dataset.category} <br />
-        <strong>Type:</strong> {dataset.type} <br />
-        <strong>Admin Level:</strong> {dataset.admin_level} <br />
+      <p className="text-gray-600">
+        Admin-level: {dataset?.admin_level} — Type: {dataset?.type}
       </p>
 
-      <h2 className="text-lg font-semibold mt-4">Raw Rows (first 200)</h2>
-
-      <div className="overflow-x-auto border rounded text-sm">
-        <table className="w-full border-collapse">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="p-2 border">admin_pcode_raw</th>
-              <th className="p-2 border">admin_name_raw</th>
-              <th className="p-2 border">shape</th>
-              <th className="p-2 border">raw_row (JSON)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="border p-2">{r.admin_pcode_raw}</td>
-                <td className="border p-2">{r.admin_name_raw}</td>
-                <td className="border p-2">{r.shape}</td>
-                <td className="border p-2 whitespace-pre text-xs">
-                  {JSON.stringify(r.raw_row)}
-                </td>
+      {numericRows.length > 0 && (
+        <>
+          <h2 className="text-xl font-semibold">Numeric Raw Rows</h2>
+          <table className="w-full text-xs border">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="p-2 border">Admin PCode Raw</th>
+                <th className="p-2 border">Admin Name Raw</th>
+                <th className="p-2 border">Value Raw</th>
+                <th className="p-2 border">is %?</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {numericRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="p-2 border">{r.admin_pcode_raw}</td>
+                  <td className="p-2 border">{r.admin_name_raw}</td>
+                  <td className="p-2 border">{r.value_raw}</td>
+                  <td className="p-2 border">
+                    {r.is_percentage ? "Yes" : "No"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {categoricalRows.length > 0 && (
+        <>
+          <h2 className="text-xl font-semibold">Categorical Raw Rows</h2>
+          <table className="w-full text-xs border">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="p-2 border">Admin PCode Raw</th>
+                <th className="p-2 border">Admin Name Raw</th>
+                <th className="p-2 border">Shape</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categoricalRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="p-2 border">{r.admin_pcode_raw}</td>
+                  <td className="p-2 border">{r.admin_name_raw}</td>
+                  <td className="p-2 border">{r.shape}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {numericRows.length === 0 && categoricalRows.length === 0 && (
+        <p>No rows found for this dataset.</p>
+      )}
     </div>
   );
 }
