@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { supabaseBrowser as supabase } from '@/lib/supabase/supabaseBrowser';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function RawDatasetDetail() {
   const params = useParams();
