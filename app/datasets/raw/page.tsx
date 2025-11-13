@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { supabaseBrowser as supabase } from "@/lib/supabase/supabaseBrowser";
+import { supabase } from "@/lib/supabase/supabaseClient";
 
 interface RawDatasetInfo {
   dataset_id: string;
