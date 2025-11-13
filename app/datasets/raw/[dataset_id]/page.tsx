@@ -1,167 +1,181 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import CleanNumericDatasetModal from "@/components/CleanNumericDatasetModal";
-import CleanCategoricalDatasetModal from "@/components/CleanCategoricalDatasetModal";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
+import CleanCategoricalDatasetModal from '@/components/CleanCategoricalDatasetModal';
 
-export default function RawDatasetPage({ params }) {
+export default function RawDatasetDetail({ params }: any) {
   const datasetId = params.dataset_id;
 
-  const [dataset, setDataset] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [dataset, setDataset] = useState<any | null>(null);
+  const [rows, setRows] = useState<any[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
 
-  const [cleanModalOpen, setCleanModalOpen] = useState(false);
-  const [refreshToken, setRefreshToken] = useState(0);
-
-  const datasetName = dataset?.name ?? "Dataset";
-  const datasetType =
-    (dataset?.value_type ?? dataset?.type ?? "numeric").toLowerCase();
-  const isNumeric = datasetType === "numeric";
-
+  // ---- Load dataset metadata ----
   useEffect(() => {
-    let cancelled = false;
+    const loadDataset = async () => {
+      const { data, error } = await supabase
+        .from('datasets')
+        .select('*')
+        .eq('id', datasetId)
+        .single();
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        // Load dataset info
-        const { data: ds, error: dsErr } = await supabase
-          .from("datasets")
-          .select("*")
-          .eq("id", datasetId)
-          .single();
-
-        if (dsErr) throw dsErr;
-        if (cancelled) return;
-        setDataset(ds);
-
-        // Load raw preview
-        const { data: raw, error: rawErr } = await supabase
-          .from("dataset_values_raw")
-          .select("*")
-          .eq("dataset_id", datasetId)
-          .limit(50);
-
-        if (rawErr) throw rawErr;
-        if (cancelled) return;
-
-        setRows(raw ?? []);
-      } catch (err) {
-        if (!cancelled) setError(err.message ?? "Failed to load dataset.");
-      } finally {
-        if (!cancelled) setLoading(false);
+      if (error) {
+        console.error('Dataset load error:', error);
+        return;
       }
-    }
 
-    load();
-    return () => {
-      cancelled = true;
+      setDataset(data);
     };
-  }, [datasetId, refreshToken]);
 
-  function handleCleaned() {
-    setRefreshToken((x) => x + 1);
-  }
+    loadDataset();
+  }, [datasetId]);
 
-  const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  // ---- Load raw values depending on type ----
+  useEffect(() => {
+    if (!dataset) return;
+
+    const loadRawValues = async () => {
+      setLoading(true);
+
+      let table =
+        dataset.type === 'numeric'
+          ? 'dataset_values_numeric_raw'
+          : 'dataset_values_categorical_raw';
+
+      const { data, error } = await supabase
+        .from(table)
+        .select('*')
+        .eq('dataset_id', datasetId)
+        .limit(50);
+
+      if (error) {
+        console.error('Raw load error:', error);
+        setRows([]);
+        setColumns([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        setRows([]);
+        setColumns([]);
+        setLoading(false);
+        return;
+      }
+
+      const first = data[0];
+      const cols = Object.keys(first);
+
+      setRows(data);
+      setColumns(cols);
+      setLoading(false);
+    };
+
+    loadRawValues();
+  }, [dataset]);
+
+  const openClean = () => setModalOpen(true);
+  const closeClean = () => setModalOpen(false);
+
+  const refresh = async () => {
+    setModalOpen(false);
+    // reload preview after cleaning
+    setRows([]);
+    setColumns([]);
+    const { data } = await supabase
+      .from(
+        dataset.type === 'numeric'
+          ? 'dataset_values_numeric_raw'
+          : 'dataset_values_categorical_raw'
+      )
+      .select('*')
+      .eq('dataset_id', datasetId)
+      .limit(50);
+
+    if (data) {
+      setRows(data);
+      setColumns(data[0] ? Object.keys(data[0]) : []);
+    }
+  };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
+    <div className="p-6 max-w-7xl mx-auto">
+      {dataset && (
+        <div className="mb-4">
           <h1 className="text-2xl font-bold">Raw Dataset</h1>
-          <p className="text-sm text-gray-500">
-            {datasetName} ·{" "}
-            <span className="uppercase tracking-wide text-xs">
-              {isNumeric ? "NUMERIC" : "CATEGORICAL"}
-            </span>
+          <p className="text-gray-600 mt-1">
+            {dataset.name} ({dataset.admin_level}) ·{' '}
+            {dataset.type.toUpperCase()}
           </p>
-        </div>
-
-        <button
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          onClick={() => setCleanModalOpen(true)}
-        >
-          Clean Dataset
-        </button>
-      </div>
-
-      {/* ERROR */}
-      {error && (
-        <div className="p-3 bg-red-100 text-red-700 rounded border border-red-300 text-sm">
-          {error}
         </div>
       )}
 
-      {/* RAW PREVIEW */}
-      <div className="border rounded">
-        <div className="border-b px-4 py-2 bg-gray-50 font-medium text-sm">
-          Raw Values (Preview)
+      {/* Clean button */}
+      {dataset && (
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={openClean}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Clean Dataset
+          </button>
         </div>
+      )}
+
+      {/* Preview */}
+      <div className="border rounded bg-white overflow-x-auto">
+        <div className="p-3 border-b font-semibold">Raw Values (Preview)</div>
 
         {loading ? (
-          <div className="py-6 text-center text-gray-500 text-sm">
-            Loading…
-          </div>
+          <p className="p-4 text-gray-500">Loading…</p>
         ) : rows.length === 0 ? (
-          <div className="py-6 text-center text-gray-500 text-sm">
-            No raw rows found.
-          </div>
+          <p className="p-4 text-gray-500">No raw rows found.</p>
         ) : (
-          <div className="max-h-[460px] overflow-auto">
-            <table className="w-full text-xs border-collapse">
-              <thead className="bg-gray-100 sticky top-0">
-                <tr>
-                  {columns.map((col) => (
-                    <th
-                      key={col}
-                      className="border px-3 py-2 text-left font-semibold"
-                    >
-                      {col}
-                    </th>
+          <table className="w-full text-xs border-collapse">
+            <thead className="bg-gray-100 text-gray-700">
+              <tr>
+                {columns.map((c) => (
+                  <th key={c} className="px-2 py-1 border-b text-left">
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} className="border-t">
+                  {columns.map((c) => (
+                    <td key={c} className="px-2 py-1 border-b">
+                      {typeof row[c] === 'object'
+                        ? JSON.stringify(row[c])
+                        : String(row[c] ?? '')}
+                    </td>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, i) => (
-                  <tr key={i} className="border-b">
-                    {columns.map((col) => (
-                      <td key={col} className="px-3 py-1 border whitespace-nowrap">
-                        {row[col] === null || row[col] === undefined
-                          ? "—"
-                          : String(row[col])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
-      {/* CLEANING MODALS */}
-      {isNumeric ? (
+      {/* CLEAN MODALS */}
+      {modalOpen && dataset?.type === 'numeric' && (
         <CleanNumericDatasetModal
           datasetId={datasetId}
-          datasetName={datasetName}
-          open={cleanModalOpen}
-          onOpenChange={setCleanModalOpen}
-          onCleaned={handleCleaned}
+          onClose={closeClean}
+          onCleaned={refresh}
         />
-      ) : (
+      )}
+
+      {modalOpen && dataset?.type === 'categorical' && (
         <CleanCategoricalDatasetModal
           datasetId={datasetId}
-          datasetName={datasetName}
-          open={cleanModalOpen}
-          onOpenChange={setCleanModalOpen}
-          onCleaned={handleCleaned}
+          onClose={closeClean}
+          onCleaned={refresh}
         />
       )}
     </div>
