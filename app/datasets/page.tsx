@@ -1,222 +1,218 @@
+// app/datasets/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import UploadDatasetModal from '@/components/UploadDatasetModal';
-import DeriveDatasetModal from '@/components/DeriveDatasetModal';
-import EditDatasetModal from '@/components/EditDatasetModal';
-import ViewDatasetModal from '@/components/ViewDatasetModal';
+
+type DatasetRow = {
+  id: string;
+  name: string;
+  category: string | null;
+  type: string; // 'numeric' | 'categorical' (from DB)
+  admin_level: string;
+  created_at: string;
+};
+
+type DatasetWithCounts = DatasetRow & {
+  rawCount: number;
+  cleanCount: number;
+};
 
 export default function DatasetsPage() {
-  const [datasets, setDatasets] = useState<any[]>([]);
+  const [datasets, setDatasets] = useState<DatasetWithCounts[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showDeriveModal, setShowDeriveModal] = useState(false);
-  const [viewDataset, setViewDataset] = useState<any | null>(null);
-  const [editDataset, setEditDataset] = useState<any | null>(null);
-  const [deleteDataset, setDeleteDataset] = useState<any | null>(null);
-
-  // Load all datasets
-  const loadDatasets = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('datasets')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) console.error(error);
-    else setDatasets(data || []);
-    setLoading(false);
-  };
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadDatasets();
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+
+      // 1. Load all datasets
+      const { data, error } = await supabase
+        .from('datasets')
+        .select('id, name, category, type, admin_level, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading datasets:', error);
+        setError(error.message);
+        setLoading(false);
+        return;
+      }
+
+      const rows = (data ?? []) as DatasetRow[];
+
+      // 2. For each dataset, fetch raw + cleaned row counts
+      const enriched: DatasetWithCounts[] = await Promise.all(
+        rows.map(async (d) => {
+          const isNumeric = d.type === 'numeric';
+
+          const rawTable = isNumeric
+            ? 'dataset_values_numeric_raw'
+            : 'dataset_values_categorical_raw';
+
+          const finalTable = isNumeric
+            ? 'dataset_values_numeric'
+            : 'dataset_values_categorical';
+
+          // Count raw rows
+          const { count: rawCount, error: rawError } = await supabase
+            .from(rawTable)
+            .select('id', { count: 'exact', head: true })
+            .eq('dataset_id', d.id);
+
+          if (rawError) {
+            console.warn(`Error counting raw rows for ${d.name}:`, rawError);
+          }
+
+          // Count cleaned rows
+          const { count: cleanCount, error: cleanError } = await supabase
+            .from(finalTable)
+            .select('id', { count: 'exact', head: true })
+            .eq('dataset_id', d.id);
+
+          if (cleanError) {
+            console.warn(`Error counting cleaned rows for ${d.name}:`, cleanError);
+          }
+
+          return {
+            ...d,
+            rawCount: rawCount ?? 0,
+            cleanCount: cleanCount ?? 0,
+          };
+        })
+      );
+
+      setDatasets(enriched);
+      setLoading(false);
+    };
+
+    load();
   }, []);
 
-  const handleDelete = async () => {
-    if (!deleteDataset) return;
-    const { error } = await supabase
-      .from('datasets')
-      .delete()
-      .eq('id', deleteDataset.id);
-    if (error) {
-      console.error('Delete error:', error);
-      alert('Error deleting dataset.');
-    } else {
-      setDeleteDataset(null);
-      await loadDatasets();
-    }
+  const getStatus = (d: DatasetWithCounts) => {
+    if (d.cleanCount > 0) return { label: 'Cleaned', className: 'bg-green-100 text-green-700' };
+    if (d.rawCount > 0) return { label: 'Raw only', className: 'bg-yellow-100 text-yellow-700' };
+    return { label: 'Empty', className: 'bg-gray-100 text-gray-600' };
   };
 
-  // Group datasets by category
-  const grouped = datasets.reduce((acc: any, ds: any) => {
-    const cat = ds.category || 'Uncategorized';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(ds);
-    return acc;
-  }, {});
-
-  // Updated category order and corrected singular label
-  const orderedCategories = [
-    'Core',
-    'SSC Framework - P1',
-    'SSC Framework - P2',
-    'SSC Framework - P3',
-    'Hazards',
-    'Underlying Vulnerability', // ← corrected singular
-  ];
-
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-semibold">Datasets</h1>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-blue-700"
-            >
-              Upload Dataset
-            </button>
-            <button
-              onClick={() => setShowDeriveModal(true)}
-              className="bg-green-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-green-700"
-            >
-              Derive Dataset
-            </button>
-          </div>
+    <div className="p-4 md:p-6 space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-xl md:text-2xl font-semibold text-gray-900">Datasets</h1>
+          <p className="text-xs md:text-sm text-gray-600">
+            Each dataset may have <strong>raw</strong> rows in staging tables and/or
+            <strong> cleaned</strong> rows in the main dataset tables.
+          </p>
         </div>
-
-        {loading ? (
-          <p className="text-gray-500 text-sm">Loading datasets...</p>
-        ) : datasets.length === 0 ? (
-          <p className="text-gray-500 text-sm">No datasets available.</p>
-        ) : (
-          orderedCategories.map((cat) => {
-            const items = grouped[cat] || [];
-            if (items.length === 0) return null;
-            return (
-              <div key={cat} className="mb-8">
-                <h2 className="text-lg font-semibold mb-3">{cat}</h2>
-                <div className="overflow-x-auto border rounded-md bg-white shadow-sm">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-100 text-gray-700">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Name</th>
-                        <th className="px-3 py-2 text-left">Type</th>
-                        <th className="px-3 py-2 text-left">Admin Level</th>
-                        <th className="px-3 py-2 text-left">Created</th>
-                        <th className="px-3 py-2 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((ds: any) => (
-                        <tr
-                          key={ds.id}
-                          className="border-t hover:bg-gray-50 transition"
-                        >
-                          <td className="px-3 py-2">{ds.name}</td>
-                          <td className="px-3 py-2 capitalize">{ds.type}</td>
-                          <td className="px-3 py-2">{ds.admin_level}</td>
-                          <td className="px-3 py-2">
-                            {new Date(ds.created_at).toLocaleDateString()}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <button
-                              onClick={() => setViewDataset(ds)}
-                              className="text-blue-600 hover:underline text-sm mr-3"
-                            >
-                              View
-                            </button>
-                            <button
-                              onClick={() => setEditDataset(ds)}
-                              className="text-yellow-600 hover:underline text-sm mr-3"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => setDeleteDataset(ds)}
-                              className="text-red-600 hover:underline text-sm"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })
-        )}
+        <Link
+          href="/datasets/upload"
+          className="inline-flex items-center px-3 py-1.5 rounded bg-blue-600 text-white text-xs md:text-sm hover:bg-blue-700"
+        >
+          + Upload Dataset
+        </Link>
       </div>
 
-      {/* Upload Modal */}
-      {showUploadModal && (
-        <UploadDatasetModal
-          onClose={() => setShowUploadModal(false)}
-          onUploaded={loadDatasets}
-        />
-      )}
-
-      {/* Derive Modal */}
-      {showDeriveModal && (
-        <DeriveDatasetModal
-          datasets={datasets}
-          onClose={() => setShowDeriveModal(false)}
-          onDerived={loadDatasets}
-        />
-      )}
-
-      {/* View Modal */}
-      {viewDataset && (
-        <ViewDatasetModal
-          dataset={viewDataset}
-          onClose={() => setViewDataset(null)}
-        />
-      )}
-
-      {/* Edit Modal */}
-      {editDataset && (
-        <EditDatasetModal
-          dataset={editDataset}
-          onClose={() => setEditDataset(null)}
-          onSave={loadDatasets}
-        />
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {deleteDataset && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-5">
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">
-              Delete Dataset
-            </h3>
-            <p className="text-gray-600 text-sm mb-4">
-              Are you sure you want to delete{' '}
-              <span className="font-medium text-gray-800">
-                {deleteDataset.name}
-              </span>
-              ? This action cannot be undone.
-            </p>
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={() => setDeleteDataset(null)}
-                className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-md"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
+      {error && (
+        <div className="p-3 rounded bg-red-50 text-red-700 text-sm border border-red-100">
+          Error loading datasets: {error}
         </div>
       )}
+
+      {loading ? (
+        <div className="text-sm text-gray-600">Loading datasets…</div>
+      ) : datasets.length === 0 ? (
+        <div className="text-sm text-gray-600">
+          No datasets yet. Use <strong>Upload Dataset</strong> to add one.
+        </div>
+      ) : (
+        <div className="overflow-x-auto border rounded-md bg-white">
+          <table className="min-w-full text-xs md:text-sm border-collapse">
+            <thead className="bg-gray-100 text-gray-700">
+              <tr>
+                <th className="px-2 py-2 border-b text-left">Dataset</th>
+                <th className="px-2 py-2 border-b text-left">Category</th>
+                <th className="px-2 py-2 border-b text-left">Type</th>
+                <th className="px-2 py-2 border-b text-left">Admin level</th>
+                <th className="px-2 py-2 border-b text-right">Raw rows</th>
+                <th className="px-2 py-2 border-b text-right">Cleaned rows</th>
+                <th className="px-2 py-2 border-b text-left">Status</th>
+                <th className="px-2 py-2 border-b text-left">Raw staging</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datasets.map((d) => {
+                const status = getStatus(d);
+                const isNumeric = d.type === 'numeric';
+
+                const rawLink = isNumeric
+                  ? `/datasets/raw/${d.id}?type=numeric`
+                  : `/datasets/raw/${d.id}?type=categorical`;
+
+                return (
+                  <tr key={d.id} className="border-t hover:bg-gray-50">
+                    <td className="px-2 py-2 align-top">
+                      <Link
+                        href={rawLink}
+                        className="font-medium text-blue-700 hover:underline"
+                      >
+                        {d.name}
+                      </Link>
+                      <div className="text-[11px] text-gray-500">
+                        Created {new Date(d.created_at).toLocaleDateString()}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 align-top">
+                      {d.category || <span className="text-gray-400 italic">Uncategorized</span>}
+                    </td>
+                    <td className="px-2 py-2 align-top">
+                      <span className="inline-flex items-center rounded px-2 py-0.5 bg-gray-100 text-gray-700 text-[11px]">
+                        {d.type || 'unknown'}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 align-top">{d.admin_level}</td>
+                    <td className="px-2 py-2 text-right align-top">
+                      {d.rawCount.toLocaleString()}
+                    </td>
+                    <td className="px-2 py-2 text-right align-top">
+                      {d.cleanCount.toLocaleString()}
+                    </td>
+                    <td className="px-2 py-2 align-top">
+                      <span
+                        className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] ${status.className}`}
+                      >
+                        {status.label}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 align-top">
+                      <Link
+                        href={rawLink}
+                        className="text-[11px] text-blue-700 hover:underline"
+                      >
+                        View raw →
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="text-[11px] text-gray-500">
+        <p>
+          <strong>Raw rows</strong> live in <code>dataset_values_numeric_raw</code> or{' '}
+          <code>dataset_values_categorical_raw</code>.
+        </p>
+        <p>
+          <strong>Cleaned rows</strong> live in <code>dataset_values_numeric</code> or{' '}
+          <code>dataset_values_categorical</code> after you run cleaning/promotion.
+        </p>
+      </div>
     </div>
   );
 }
