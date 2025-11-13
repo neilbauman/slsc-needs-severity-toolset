@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser as supabase } from "@/lib/supabase/supabaseBrowser";
 import CleanNumericDatasetModal from "@/components/CleanNumericDatasetModal";
 import CleanCategoricalDatasetModal from "@/components/CleanCategoricalDatasetModal";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function RawDatasetPage({ params }) {
   const datasetId = params.dataset_id;
