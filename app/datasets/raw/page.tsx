@@ -19,26 +19,19 @@ export default function RawDatasetListPage() {
     async function load() {
       setLoading(true);
 
-      // 1) Count numeric raw rows grouped by dataset_id
-      const { data: numeric, error: numErr } = await supabase
+      const { data: numeric } = await supabase
         .from("dataset_values_numeric_raw")
         .select("dataset_id, count(*)", { count: "exact" })
         .group("dataset_id");
 
-      if (numErr) console.error(numErr);
-
-      // 2) Count categorical raw rows grouped by dataset_id
-      const { data: categorical, error: catErr } = await supabase
+      const { data: categorical } = await supabase
         .from("dataset_values_categorical_raw")
         .select("dataset_id, count(*)", { count: "exact" })
         .group("dataset_id");
 
-      if (catErr) console.error(catErr);
-
-      // Merge results
       const map = new Map<string, RawDatasetInfo>();
 
-      numeric?.forEach((r) => {
+      numeric?.forEach((r: any) => {
         map.set(r.dataset_id, {
           dataset_id: r.dataset_id,
           name: null,
@@ -47,7 +40,7 @@ export default function RawDatasetListPage() {
         });
       });
 
-      categorical?.forEach((r) => {
+      categorical?.forEach((r: any) => {
         if (!map.has(r.dataset_id)) {
           map.set(r.dataset_id, {
             dataset_id: r.dataset_id,
@@ -60,21 +53,19 @@ export default function RawDatasetListPage() {
         }
       });
 
-      // 3) Fetch dataset names
       const ids = Array.from(map.keys());
+
       if (ids.length > 0) {
-        const { data: ds, error } = await supabase
+        const { data: ds } = await supabase
           .from("datasets")
           .select("id, name")
           .in("id", ids);
 
-        if (!error && ds) {
-          ds.forEach((d) => {
-            if (map.has(d.id)) {
-              map.get(d.id)!.name = d.name;
-            }
-          });
-        }
+        ds?.forEach((d: any) => {
+          if (map.has(d.id)) {
+            map.get(d.id)!.name = d.name;
+          }
+        });
       }
 
       setRows(Array.from(map.values()));
