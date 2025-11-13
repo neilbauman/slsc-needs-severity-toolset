@@ -1,114 +1,102 @@
+// app/datasets/raw/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
+type DatasetRow = {
+  id: string;
+  name: string;
+  type: string;
+  admin_level: string;
+};
+
 export default function RawDatasetsPage() {
-  const [numericCounts, setNumericCounts] = useState<any[]>([]);
-  const [categoricalCounts, setCategoricalCounts] = useState<any[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<
+    { dataset: DatasetRow; rawCount: number }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      try {
-        // Numeric raw counts
-        const { data: num, error: numErr } = await supabase
-          .from('dataset_values_numeric_raw')
-          .select('dataset_id');
+      setLoading(true);
 
-        if (numErr) throw numErr;
+      // 1. Load datasets
+      const { data: datasets } = await supabase
+        .from('datasets')
+        .select('id, name, type, admin_level')
+        .order('name');
 
-        const numericGrouped = Object.entries(
-          num.reduce((acc: any, row: any) => {
-            acc[row.dataset_id] = (acc[row.dataset_id] || 0) + 1;
-            return acc;
-          }, {})
-        ).map(([dataset_id, count]) => ({ dataset_id, count }));
+      if (!datasets) return setLoading(false);
 
-        // Categorical raw counts
-        const { data: cat, error: catErr } = await supabase
-          .from('dataset_values_categorical_raw')
-          .select('dataset_id');
+      // 2. Count raw rows for each dataset
+      const results = await Promise.all(
+        datasets.map(async (d) => {
+          const table =
+            d.type === 'numeric'
+              ? 'dataset_values_numeric_raw'
+              : 'dataset_values_categorical_raw';
 
-        if (catErr) throw catErr;
+          const { count } = await supabase
+            .from(table)
+            .select('id', { head: true, count: 'exact' })
+            .eq('dataset_id', d.id);
 
-        const categoricalGrouped = Object.entries(
-          cat.reduce((acc: any, row: any) => {
-            acc[row.dataset_id] = (acc[row.dataset_id] || 0) + 1;
-            return acc;
-          }, {})
-        ).map(([dataset_id, count]) => ({ dataset_id, count }));
+          return { dataset: d, rawCount: count ?? 0 };
+        })
+      );
 
-        setNumericCounts(numericGrouped);
-        setCategoricalCounts(categoricalGrouped);
-      } catch (err: any) {
-        console.error(err);
-        setError(err.message);
-      }
+      // Only show datasets that actually have raw rows
+      setRows(results.filter((r) => r.rawCount > 0));
+      setLoading(false);
     };
 
     load();
   }, []);
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold mb-4">Raw Uploaded Datasets</h1>
+    <div className="p-4 space-y-3">
+      <h1 className="text-xl font-semibold">Raw Dataset Staging</h1>
+      <p className="text-sm text-gray-600">
+        These datasets contain raw uncleaned rows.
+      </p>
 
-      {error && <p className="text-red-600">{error}</p>}
-
-      <h2 className="text-lg font-semibold mt-6">Numeric Datasets</h2>
-      <table className="border mt-2 text-sm w-full">
-        <thead className="bg-gray-100">
-          <tr>
-            <th className="p-2 border">Dataset ID</th>
-            <th className="p-2 border">Rows</th>
-            <th className="p-2 border">View</th>
-          </tr>
-        </thead>
-        <tbody>
-          {numericCounts.map((r) => (
-            <tr key={r.dataset_id}>
-              <td className="p-2 border">{r.dataset_id}</td>
-              <td className="p-2 border">{r.count}</td>
-              <td className="p-2 border">
-                <a
-                  className="text-blue-600 underline"
-                  href={`/datasets/raw/${r.dataset_id}`}
-                >
-                  View
-                </a>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h2 className="text-lg font-semibold mt-8">Categorical Datasets</h2>
-      <table className="border mt-2 text-sm w-full">
-        <thead className="bg-gray-100">
-          <tr>
-            <th className="p-2 border">Dataset ID</th>
-            <th className="p-2 border">Rows</th>
-            <th className="p-2 border">View</th>
-          </tr>
-        </thead>
-        <tbody>
-          {categoricalCounts.map((r) => (
-            <tr key={r.dataset_id}>
-              <td className="p-2 border">{r.dataset_id}</td>
-              <td className="p-2 border">{r.count}</td>
-              <td className="p-2 border">
-                <a
-                  className="text-blue-600 underline"
-                  href={`/datasets/raw/${r.dataset_id}`}
-                >
-                  View
-                </a>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {loading ? (
+        <p>Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-gray-500">No raw datasets found.</p>
+      ) : (
+        <div className="overflow-x-auto border rounded bg-white">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="px-2 py-1 text-left">Dataset</th>
+                <th className="px-2 py-1 text-left">Type</th>
+                <th className="px-2 py-1 text-right">Raw rows</th>
+                <th className="px-2 py-1"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ dataset, rawCount }) => (
+                <tr key={dataset.id} className="border-t hover:bg-gray-50">
+                  <td className="px-2 py-1">{dataset.name}</td>
+                  <td className="px-2 py-1">{dataset.type}</td>
+                  <td className="px-2 py-1 text-right">{rawCount}</td>
+                  <td className="px-2 py-1">
+                    <Link
+                      href={`/datasets/raw/${dataset.id}`}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      View →
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
