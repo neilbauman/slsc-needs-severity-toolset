@@ -29,7 +29,7 @@ type CategoricalPreviewRow = {
   match_status: string;
 };
 
-type CountRow = {
+type CatCountRow = {
   match_status: string;
   count_rows: number;
 };
@@ -42,11 +42,11 @@ export default function CleanCategoricalDatasetModal({
   onCleaned,
 }: CleanCategoricalDatasetModalProps) {
   const [previewRows, setPreviewRows] = useState<CategoricalPreviewRow[]>([]);
-  const [counts, setCounts] = useState<CountRow[] | null>(null);
+  const [counts, setCounts] = useState<CatCountRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [wideFormat, setWideFormat] = useState(true); // default for your building typologies
+  const [wideFormat, setWideFormat] = useState(true); // default for building typologies
 
   const close = () => onOpenChange(false);
 
@@ -61,10 +61,11 @@ export default function CleanCategoricalDatasetModal({
     setError(null);
 
     try {
-      // 1) counts for *all* rows
-      const { data: countData, error: countErr } = await supabase.rpc<
-        CountRow[]
-      >("preview_categorical_cleaning_counts", {
+      // 1) counts for all rows
+      const {
+        data: countData,
+        error: countErr,
+      } = await supabase.rpc("preview_categorical_cleaning_counts", {
         in_dataset: datasetId,
         in_wide_format: wideFormat,
       });
@@ -72,13 +73,14 @@ export default function CleanCategoricalDatasetModal({
       if (countErr) {
         setError(countErr.message);
       } else {
-        setCounts(countData ?? []);
+        setCounts((countData as CatCountRow[] | null) ?? []);
       }
 
       // 2) preview up to 1,000 rows
-      const { data: rowsData, error: rowsErr } = await supabase.rpc<
-        CategoricalPreviewRow[]
-      >("preview_categorical_cleaning", {
+      const {
+        data: rowsData,
+        error: rowsErr,
+      } = await supabase.rpc("preview_categorical_cleaning", {
         in_dataset_id: datasetId,
         in_wide_format: wideFormat,
       });
@@ -87,7 +89,8 @@ export default function CleanCategoricalDatasetModal({
         setError((prev) => prev ?? rowsErr.message);
         setPreviewRows([]);
       } else {
-        setPreviewRows((rowsData ?? []).slice(0, 1000));
+        const rows = (rowsData as CategoricalPreviewRow[] | null) ?? [];
+        setPreviewRows(rows.slice(0, 1000));
       }
     } catch (err: any) {
       setError(err?.message ?? "Unexpected error while loading preview.");
@@ -172,7 +175,7 @@ export default function CleanCategoricalDatasetModal({
                     checked={wideFormat}
                     onChange={() => setWideFormat(true)}
                   />
-                  <span>Wide</span>
+                <span>Wide</span>
                 </label>
                 <label className="inline-flex items-center gap-1">
                   <input
