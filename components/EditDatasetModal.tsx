@@ -19,6 +19,7 @@ export default function EditDatasetModal({
   const [type, setType] = useState(dataset.type || 'numeric');
   const [adminLevel, setAdminLevel] = useState(dataset.admin_level || '');
   const [description, setDescription] = useState(dataset.description || '');
+  const [absRelIdx, setAbsRelIdx] = useState(dataset.absolute_relative_index || 'absolute');
   const [saving, setSaving] = useState(false);
 
   const categories = [
@@ -32,6 +33,7 @@ export default function EditDatasetModal({
 
   const adminLevels = ['ADM2', 'ADM3', 'ADM4'];
   const types = ['numeric', 'categorical'];
+  const absRelIdxOptions = ['absolute', 'relative', 'index'];
 
   const handleSave = async () => {
     setSaving(true);
@@ -43,6 +45,7 @@ export default function EditDatasetModal({
         type,
         admin_level: adminLevel,
         description,
+        absolute_relative_index: absRelIdx,
         updated_at: new Date().toISOString(),
       })
       .eq('id', dataset.id);
@@ -75,7 +78,7 @@ export default function EditDatasetModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
               placeholder="Dataset name"
             />
           </div>
@@ -88,7 +91,7 @@ export default function EditDatasetModal({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
             >
               <option value="">Select category</option>
               {categories.map((cat) => (
@@ -107,7 +110,7 @@ export default function EditDatasetModal({
             <select
               value={type}
               onChange={(e) => setType(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
             >
               {types.map((t) => (
                 <option key={t} value={t}>
@@ -125,12 +128,30 @@ export default function EditDatasetModal({
             <select
               value={adminLevel}
               onChange={(e) => setAdminLevel(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
             >
               <option value="">Select admin level</option>
               {adminLevels.map((lvl) => (
                 <option key={lvl} value={lvl}>
                   {lvl}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Abs/Rel/Idx */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Abs / Rel / Idx
+            </label>
+            <select
+              value={absRelIdx}
+              onChange={(e) => setAbsRelIdx(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
+            >
+              {absRelIdxOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
                 </option>
               ))}
             </select>
@@ -145,7 +166,7 @@ export default function EditDatasetModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
               placeholder="Describe the dataset..."
             />
           </div>
@@ -162,7 +183,7 @@ export default function EditDatasetModal({
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md"
+            className="px-4 py-2 text-sm bg-[var(--ssc-blue)] hover:bg-blue-800 text-white rounded-md"
           >
             {saving ? 'Saving...' : 'Save'}
           </button>
