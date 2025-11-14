@@ -27,7 +27,7 @@ type Dataset = {
 
 export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [health, setHealth] = useState<Record<string, number>>({});
+  const [health, setHealth] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -35,7 +35,7 @@ export default function DatasetsPage() {
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
   // ────────────────────────────────────────────────
-  // Load datasets and health metrics
+  // Load datasets + compute health
   // ────────────────────────────────────────────────
   const loadDatasets = async () => {
     setLoading(true);
@@ -61,11 +61,11 @@ export default function DatasetsPage() {
   // Health calculation
   // ────────────────────────────────────────────────
   const fetchHealthForDatasets = async (list: Dataset[]) => {
-    const newHealth: Record<string, number> = {};
+    const newHealth: Record<string, number | null> = {};
 
     for (const ds of list) {
       const pct = await calculateHealth(ds);
-      if (pct !== null) newHealth[ds.id] = pct;
+      newHealth[ds.id] = pct;
     }
 
     setHealth((prev) => ({ ...prev, ...newHealth }));
@@ -73,6 +73,9 @@ export default function DatasetsPage() {
 
   const calculateHealth = async (ds: Dataset): Promise<number | null> => {
     try {
+      // Only try to calculate health for raw datasets
+      if (ds.is_cleaned) return null;
+
       const rpcName =
         ds.type === 'numeric'
           ? 'preview_numeric_cleaning_v2'
@@ -80,11 +83,11 @@ export default function DatasetsPage() {
       const { data, error } = await supabase.rpc(rpcName, {
         dataset_id: ds.id,
       });
-      if (error || !data) return null;
+      if (error || !data || !Array.isArray(data) || data.length === 0) return null;
 
       const total = data.length;
       const matched = data.filter((r: any) => r.match_status === 'matched').length;
-      return total > 0 ? Math.round((matched / total) * 100) : 0;
+      return total > 0 ? Math.round((matched / total) * 100) : null;
     } catch {
       return null;
     }
@@ -99,12 +102,11 @@ export default function DatasetsPage() {
   const recalcSingleHealth = async (ds: Dataset) => {
     setHealth((prev) => ({ ...prev, [ds.id]: undefined }));
     const pct = await calculateHealth(ds);
-    if (pct !== null)
-      setHealth((prev) => ({ ...prev, [ds.id]: pct }));
+    setHealth((prev) => ({ ...prev, [ds.id]: pct }));
   };
 
   // ────────────────────────────────────────────────
-  // Utility Handlers
+  // Handlers
   // ────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
@@ -141,14 +143,21 @@ export default function DatasetsPage() {
       <span className="text-red-700 font-medium">Raw</span>
     );
 
-  const healthBadge = (pct: number | undefined) => {
+  const healthBadge = (pct: number | null | undefined) => {
     if (pct === undefined)
       return (
         <span className="text-gray-400 flex items-center gap-1">
-          <Activity size={12} />
-          –
+          <Activity size={12} /> –
         </span>
       );
+
+    if (pct === null)
+      return (
+        <span className="text-gray-400 flex items-center gap-1">
+          <Activity size={12} /> –
+        </span>
+      );
+
     let color =
       pct >= 90
         ? 'bg-green-100 text-green-800'
@@ -166,7 +175,7 @@ export default function DatasetsPage() {
   };
 
   // ────────────────────────────────────────────────
-  // UI Rendering
+  // UI
   // ────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6">
@@ -199,7 +208,7 @@ export default function DatasetsPage() {
           </button>
           <button
             onClick={() => setUploadOpen(true)}
-            className="flex items-center gap-1 px-3 py-2 bg-[var(--ssc-blue)] text-white rounded hover:bg-blue-800 text-sm font-medium"
+            className="flex items-center gap-1 px-3 py-2 bg-[var(--ssc-blue)] text-white rounded hover:bg-blue-800 text-sm font-medium disabled:opacity-100 disabled:cursor-not-allowed"
           >
             <PlusCircle size={16} /> Upload Dataset
           </button>
