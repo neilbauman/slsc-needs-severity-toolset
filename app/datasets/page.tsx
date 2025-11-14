@@ -34,7 +34,9 @@ export default function DatasetsPage() {
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
+  // ────────────────────────────────────────────────
   // Load datasets
+  // ────────────────────────────────────────────────
   const loadDatasets = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -56,7 +58,7 @@ export default function DatasetsPage() {
   }, []);
 
   // ────────────────────────────────────────────────
-  // Health calculation (meaningful completeness)
+  // Dynamic Health Calculation
   // ────────────────────────────────────────────────
   const fetchHealthForDatasets = async (list: Dataset[]) => {
     const newHealth: Record<string, number | null> = {};
@@ -71,45 +73,40 @@ export default function DatasetsPage() {
 
   const calculateHealth = async (ds: Dataset): Promise<number | null> => {
     try {
-      if (ds.type === 'numeric') {
-        if (ds.is_cleaned) {
-          // Use actual stored numeric data
-          const { count: total } = await supabase
-            .from('dataset_values_numeric')
-            .select('*', { count: 'exact', head: true })
-            .eq('dataset_id', ds.id);
-          const { count: valid } = await supabase
-            .from('dataset_values_numeric')
-            .select('*', { count: 'exact', head: true })
-            .eq('dataset_id', ds.id)
-            .not('value', 'is', null);
-          if (!total || total === 0) return null;
-          return Math.round((valid! / total) * 100);
-        } else {
-          // Use preview RPC
-          const { data, error } = await supabase.rpc('preview_numeric_cleaning_v2', {
-            dataset_id: ds.id,
-          });
-          if (error || !data) return null;
-          const total = data.length;
-          const matched = data.filter((r: any) => r.match_status === 'matched').length;
-          return total > 0 ? Math.round((matched / total) * 100) : null;
-        }
-      } else {
-        // categorical
-        const { count: total } = await supabase
-          .from('dataset_values_categorical')
-          .select('*', { count: 'exact', head: true })
-          .eq('dataset_id', ds.id);
-        const { count: valid } = await supabase
-          .from('dataset_values_categorical')
-          .select('*', { count: 'exact', head: true })
-          .eq('dataset_id', ds.id)
-          .not('value', 'eq', '');
-        if (!total || total === 0) return null;
-        return Math.round((valid! / total) * 100);
-      }
-    } catch {
+      // Step 1: Detect actual table that stores the dataset
+      const { count: numCount } = await supabase
+        .from('dataset_values_numeric')
+        .select('*', { count: 'exact', head: true })
+        .eq('dataset_id', ds.id);
+
+      const { count: catCount } = await supabase
+        .from('dataset_values_categorical')
+        .select('*', { count: 'exact', head: true })
+        .eq('dataset_id', ds.id);
+
+      let table: string | null = null;
+      if ((numCount ?? 0) > 0) table = 'dataset_values_numeric';
+      else if ((catCount ?? 0) > 0) table = 'dataset_values_categorical';
+
+      if (!table) return null;
+
+      // Step 2: Compute completeness percentage
+      const { count: total } = await supabase
+        .from(table)
+        .select('*', { count: 'exact', head: true })
+        .eq('dataset_id', ds.id);
+
+      const { count: valid } = await supabase
+        .from(table)
+        .select('*', { count: 'exact', head: true })
+        .eq('dataset_id', ds.id)
+        .not('value', 'is', null)
+        .not('value', 'eq', '');
+
+      if (!total || total === 0) return null;
+      return Math.round((valid! / total) * 100);
+    } catch (err) {
+      console.error(`Health calc failed for ${ds.name}`, err);
       return null;
     }
   };
@@ -126,7 +123,7 @@ export default function DatasetsPage() {
   };
 
   // ────────────────────────────────────────────────
-  // Utility Handlers
+  // Actions
   // ────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
@@ -135,7 +132,9 @@ export default function DatasetsPage() {
   };
 
   const handleClean = (id: string, type: string) => {
-    window.location.href = `/datasets/raw/${id}${type === 'categorical' ? '?type=categorical' : ''}`;
+    window.location.href = `/datasets/raw/${id}${
+      type === 'categorical' ? '?type=categorical' : ''
+    }`;
   };
 
   // ────────────────────────────────────────────────
@@ -168,15 +167,18 @@ export default function DatasetsPage() {
           <Activity size={12} /> –
         </span>
       );
+
     const color =
       pct >= 90
         ? 'bg-green-100 text-green-800'
         : pct >= 60
         ? 'bg-yellow-100 text-yellow-800'
         : 'bg-red-100 text-red-800';
+
     return (
       <span
         className={`px-2 py-1 rounded text-xs font-medium ${color} flex items-center gap-1`}
+        title="Percentage of non-null, non-empty values in the dataset"
       >
         <Activity size={12} /> {pct}%
       </span>
@@ -330,7 +332,9 @@ export default function DatasetsPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => (window.location.href = `/datasets/raw/${ds.id}`)}
+                      onClick={() =>
+                        (window.location.href = `/datasets/raw/${ds.id}`)
+                      }
                       className="text-gray-600 hover:text-[var(--ssc-blue)]"
                       title="View dataset"
                     >
