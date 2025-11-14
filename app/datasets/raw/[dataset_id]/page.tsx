@@ -1,234 +1,274 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
 import CleanCategoricalDatasetModal from '@/components/CleanCategoricalDatasetModal';
-import UploadDatasetModal from '@/components/UploadDatasetModal';
+
+type DatasetType = 'numeric' | 'categorical';
 
 type Dataset = {
   id: string;
   name: string;
-  type: 'numeric' | 'categorical';
-  admin_level: string;
+  description: string | null;
+  category: string;
+  type: DatasetType;
+  admin_level: 'ADM1' | 'ADM2' | 'ADM3' | 'ADM4';
+  created_at: string;
 };
 
-export default function RawDatasetDetailPage({ params }: any) {
-  const datasetId = params.dataset_id;
+export default function RawDatasetPage() {
+  const params = useParams();
+  const router = useRouter();
+  const datasetId = (params?.dataset_id as string) ?? '';
 
   const [dataset, setDataset] = useState<Dataset | null>(null);
-  const [rawRows, setRawRows] = useState<any[]>([]);
-  const [columns, setColumns] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingMeta, setLoadingMeta] = useState(true);
+  const [metaError, setMetaError] = useState<string | null>(null);
 
-  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [previewRows, setPreviewRows] = useState<any[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
   const [showCleanNumeric, setShowCleanNumeric] = useState(false);
   const [showCleanCategorical, setShowCleanCategorical] = useState(false);
 
-  // ───────────────────────────────────────────────
-  // Load dataset metadata
-  // ───────────────────────────────────────────────
-  const loadDataset = async () => {
-    setLoading(true);
-
-    const { data: ds, error: dsErr } = await supabase
-      .from('datasets')
-      .select('id, name, type, admin_level')
-      .eq('id', datasetId)
-      .single();
-
-    if (dsErr) {
-      console.error(dsErr);
-      setDataset(null);
-      setLoading(false);
-      return;
-    }
-
-    setDataset(ds);
-
-    // Now load raw values based on type
-    if (ds.type === 'numeric') {
-      await loadNumericRaw(ds.id);
-    } else {
-      await loadCategoricalRaw(ds.id);
-    }
-
-    setLoading(false);
-  };
-
-  // ───────────────────────────────────────────────
-  // Load numeric raw values
-  // ───────────────────────────────────────────────
-  const loadNumericRaw = async (id: string) => {
-    const { data, error } = await supabase
-      .from('dataset_values_numeric_raw')
-      .select('*')
-      .eq('dataset_id', id)
-      .limit(50);
-
-    if (error) {
-      console.error('numeric raw load error:', error);
-      setRawRows([]);
-      setColumns([]);
-      return;
-    }
-
-    if (data && data.length > 0) {
-      setRawRows(data);
-      setColumns(Object.keys(data[0]));
-    } else {
-      setRawRows([]);
-      setColumns([]);
-    }
-  };
-
-  // ───────────────────────────────────────────────
-  // Load categorical raw values
-  // ───────────────────────────────────────────────
-  const loadCategoricalRaw = async (id: string) => {
-    const { data, error } = await supabase
-      .from('dataset_values_categorical_raw')
-      .select('*')
-      .eq('dataset_id', id)
-      .limit(50);
-
-    if (error) {
-      console.error('categorical raw load error:', error);
-      setRawRows([]);
-      setColumns([]);
-      return;
-    }
-
-    if (data && data.length > 0) {
-      setRawRows(data);
-      setColumns(Object.keys(data[0]));
-    } else {
-      setRawRows([]);
-      setColumns([]);
-    }
-  };
-
+  // Fetch dataset metadata
   useEffect(() => {
-    loadDataset();
+    if (!datasetId) return;
+
+    const fetchMeta = async () => {
+      setLoadingMeta(true);
+      setMetaError(null);
+      try {
+        const { data, error } = await supabase
+          .from('datasets')
+          .select('*')
+          .eq('id', datasetId)
+          .single();
+
+        if (error) {
+          console.error('Error loading dataset:', error);
+          setMetaError('Failed to load dataset metadata.');
+        } else {
+          setDataset(data as Dataset);
+        }
+      } catch (err: any) {
+        console.error('Unexpected error loading dataset:', err);
+        setMetaError(err.message || 'Unexpected error loading dataset.');
+      } finally {
+        setLoadingMeta(false);
+      }
+    };
+
+    fetchMeta();
   }, [datasetId]);
 
-  // Reload after cleaning
-  const refresh = async () => {
-    await loadDataset();
+  const fetchPreview = useCallback(async () => {
+    if (!datasetId || !dataset) return;
+
+    setPreviewLoading(true);
+    setPreviewError(null);
+
+    try {
+      let fromTable: string;
+
+      if (dataset.type === 'numeric') {
+        fromTable = 'dataset_values_numeric_raw';
+      } else {
+        fromTable = 'dataset_values_categorical_raw';
+      }
+
+      const { data, error } = await supabase
+        .from(fromTable)
+        .select('*')
+        .eq('dataset_id', datasetId)
+        .limit(20);
+
+      if (error) {
+        console.error('Error loading preview:', error);
+        setPreviewError('Failed to load raw preview rows.');
+      } else {
+        setPreviewRows(data || []);
+      }
+    } catch (err: any) {
+      console.error('Unexpected error loading preview:', err);
+      setPreviewError(err.message || 'Unexpected error loading preview.');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [datasetId, dataset]);
+
+  // Load preview once dataset meta is known
+  useEffect(() => {
+    if (dataset) {
+      fetchPreview();
+    }
+  }, [dataset, fetchPreview]);
+
+  const handleCleaned = async () => {
+    // After cleaning, just refresh the preview
+    await fetchPreview();
   };
 
-  if (loading || !dataset) {
+  const handleBack = () => {
+    router.push('/datasets');
+  };
+
+  const renderPreviewTable = () => {
+    if (!previewRows.length) {
+      return (
+        <p className="text-sm text-gray-500">
+          No raw rows found yet. Upload data for this dataset to see a preview.
+        </p>
+      );
+    }
+
+    const columns = Array.from(
+      new Set(previewRows.flatMap((r) => Object.keys(r || {})))
+    );
+
     return (
-      <div className="p-6 text-gray-600">
-        Loading…
+      <div className="overflow-x-auto border rounded-md bg-white">
+        <table className="min-w-full text-xs border-collapse">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              {columns.map((col) => (
+                <th
+                  key={col}
+                  className="px-2 py-1 border-b text-left font-semibold"
+                >
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {previewRows.map((row, i) => (
+              <tr key={i} className="border-t">
+                {columns.map((col) => (
+                  <td key={col} className="px-2 py-1 border-b">
+                    {String(row?.[col] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
-  }
+  };
 
   return (
-    <div className="p-6 space-y-6">
-
-      {/* Header */}
-      <div className="flex justify-between items-center">
+    <div className="px-4 py-4 max-w-6xl mx-auto space-y-4">
+      <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-3xl font-bold">Raw Dataset</h1>
-          <p className="text-gray-700 mt-1">
-            {dataset.name} ({dataset.admin_level.toLowerCase()}) ·{' '}
-            {dataset.type.toUpperCase()}
-          </p>
-        </div>
-
-        <div className="flex gap-2">
           <button
-            onClick={() => setShowUploadModal(true)}
-            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm"
+            onClick={handleBack}
+            className="text-sm text-blue-600 hover:underline mb-1"
           >
-            Upload Dataset
+            ← Back to datasets
           </button>
-
-          {/* CLEAN */}
-          {dataset.type === 'numeric' ? (
-            <button
-              onClick={() => setShowCleanNumeric(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
-            >
-              Clean Dataset
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowCleanCategorical(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
-            >
-              Clean Dataset
-            </button>
-          )}
+          <h1 className="text-xl font-semibold text-gray-900">
+            Raw Dataset Details
+          </h1>
         </div>
       </div>
 
-      {/* Raw Table */}
-      <div className="border rounded p-3">
-        <h2 className="text-lg font-semibold mb-2">Raw Values (Preview)</h2>
+      {loadingMeta && (
+        <p className="text-sm text-gray-500">Loading dataset metadata…</p>
+      )}
+      {metaError && (
+        <p className="text-sm text-red-600">
+          {metaError}
+        </p>
+      )}
 
-        {rawRows.length === 0 ? (
-          <p className="text-gray-500">No raw rows found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm border-collapse">
-              <thead>
-                <tr className="bg-gray-100">
-                  {columns.map((c) => (
-                    <th
-                      key={c}
-                      className="border px-2 py-1 text-left text-gray-700"
-                    >
-                      {c}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rawRows.map((row, i) => (
-                  <tr key={i} className="border-b">
-                    {columns.map((c) => (
-                      <td key={c} className="border px-2 py-1">
-                        {String(row[c] ?? '')}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {dataset && (
+        <>
+          {/* Dataset summary */}
+          <div className="bg-white border rounded-lg p-4 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {dataset.name}
+                </h2>
+                <p className="text-xs text-gray-500">
+                  Dataset ID: <span className="font-mono">{dataset.id}</span>
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2 py-0.5">
+                  Type: {dataset.type}
+                </span>
+                <span className="inline-flex items-center rounded-full bg-green-50 text-green-700 px-2 py-0.5">
+                  Admin: {dataset.admin_level}
+                </span>
+                <span className="inline-flex items-center rounded-full bg-gray-100 text-gray-700 px-2 py-0.5">
+                  Category: {dataset.category}
+                </span>
+              </div>
+            </div>
+            {dataset.description && (
+              <p className="text-sm text-gray-700">{dataset.description}</p>
+            )}
+
+            <div className="pt-3 border-t flex flex-wrap gap-2">
+              {dataset.type === 'numeric' && (
+                <button
+                  onClick={() => setShowCleanNumeric(true)}
+                  className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Clean numeric dataset
+                </button>
+              )}
+              {dataset.type === 'categorical' && (
+                <button
+                  onClick={() => setShowCleanCategorical(true)}
+                  className="px-3 py-1.5 text-sm rounded bg-purple-600 text-white hover:bg-purple-700"
+                >
+                  Clean categorical dataset
+                </button>
+              )}
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* NUMERIC CLEAN MODAL */}
-      {showCleanNumeric && (
+          {/* Raw preview */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-800">
+                Raw staging preview (first 20 rows)
+              </h3>
+              {previewLoading && (
+                <span className="text-xs text-gray-500">Loading…</span>
+              )}
+            </div>
+            {previewError && (
+              <p className="text-sm text-red-600">{previewError}</p>
+            )}
+            {!previewLoading && renderPreviewTable()}
+          </div>
+        </>
+      )}
+
+      {/* Numeric cleaning modal */}
+      {dataset && showCleanNumeric && dataset.type === 'numeric' && (
         <CleanNumericDatasetModal
-          open={showCleanNumeric}
-          onOpenChange={setShowCleanNumeric}
           datasetId={dataset.id}
           datasetName={dataset.name}
-          onCleaned={refresh}
+          onClose={() => setShowCleanNumeric(false)}
+          onCleaned={handleCleaned}
         />
       )}
 
-      {/* CATEGORICAL CLEAN MODAL */}
-      {showCleanCategorical && (
+      {/* Categorical cleaning modal */}
+      {dataset && showCleanCategorical && dataset.type === 'categorical' && (
         <CleanCategoricalDatasetModal
-          open={showCleanCategorical}
-          onOpenChange={setShowCleanCategorical}
           datasetId={dataset.id}
           datasetName={dataset.name}
-          onCleaned={refresh}
-        />
-      )}
-
-      {/* UPLOAD MODAL */}
-      {showUploadModal && (
-        <UploadDatasetModal
-          onClose={() => setShowUploadModal(false)}
-          onUploaded={refresh}
+          onClose={() => setShowCleanCategorical(false)}
+          onCleaned={handleCleaned}
         />
       )}
     </div>
