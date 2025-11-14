@@ -139,17 +139,19 @@ export default function DatasetsPage() {
                     </span>
                   </td>
 
-                  {/* Admin Level Badge */}
+                  {/* Admin Level */}
                   <td className="px-3 py-2">
                     <span className="px-2 py-0.5 bg-gray-100 text-gray-800 rounded text-xs font-medium">
                       {ds.admin_level || 'N/A'}
                     </span>
                   </td>
 
+                  {/* Created */}
                   <td className="px-3 py-2 text-gray-700">
                     {new Date(ds.created_at).toLocaleDateString()}
                   </td>
 
+                  {/* Cleaned */}
                   <td className="px-3 py-2">
                     {ds.is_cleaned ? (
                       <span className="text-green-700 font-medium">Yes</span>
@@ -174,7 +176,7 @@ export default function DatasetsPage() {
                   {/* Actions */}
                   <td className="px-3 py-2 space-x-2">
                     <Link
-                      href={`/datasets/view/${ds.id}`}
+                      href={`/datasets/${ds.id}`}
                       className="text-blue-600 hover:text-blue-800"
                     >
                       View
