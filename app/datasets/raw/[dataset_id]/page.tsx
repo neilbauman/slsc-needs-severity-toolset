@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/supabaseBrowser";
+import { supabase } from "@/lib/supabaseClient";
 
 import CleanNumericDatasetModal from "@/components/CleanNumericDatasetModal";
 import CleanCategoricalDatasetModal from "@/components/CleanCategoricalDatasetModal";
