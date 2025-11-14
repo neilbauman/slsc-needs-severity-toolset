@@ -1,64 +1,57 @@
-'use client';
+'use client'
 
-import Link from 'next/link';
+import Link from 'next/link'
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-900">
-      {/* Header */}
-      <header className="bg-[#163B54] text-white px-6 py-4 shadow">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">
-            Philippines Shelter Severity Toolset <span className="text-yellow-400">(sandbox)</span>
-          </h1>
-          <nav className="text-sm">
-            <Link href="/" className="hover:underline">
-              Home
-            </Link>
-          </nav>
-        </div>
-      </header>
+    <div className="max-w-5xl mx-auto space-y-4">
+      {/* Core Datasets Section */}
+      <section className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+        <h2 className="text-md font-semibold text-gray-800 mb-1">
+          Core Datasets
+        </h2>
+        <p className="text-sm text-gray-600 mb-2">
+          Upload and manage baseline datasets used for SSC calculations.
+        </p>
+        <ul className="text-sm text-gray-700 mb-3 list-disc list-inside">
+          <li>Population</li>
+          <li>Evacuation Centers</li>
+          <li>Building Typology</li>
+        </ul>
+        <Link
+          href="/datasets"
+          className="inline-block bg-yellow-400 hover:bg-yellow-500 text-black text-sm font-medium py-1.5 px-3 rounded transition"
+        >
+          Manage Datasets
+        </Link>
+      </section>
 
-      {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-6 py-10 space-y-6">
-        {/* Core Datasets Panel */}
-        <section className="bg-white rounded-2xl shadow p-6">
-          <h2 className="text-xl font-semibold text-[#163B54] mb-2">Core Datasets</h2>
-          <ul className="list-disc list-inside mb-4 text-sm">
-            <li>Population (ADM1–ADM4)</li>
-            <li>Evacuation Centers</li>
-            <li>Building Typology</li>
-          </ul>
-          <Link
-            href="/datasets"
-            className="inline-block bg-yellow-400 hover:bg-yellow-500 text-[#163B54] font-medium px-4 py-2 rounded"
-          >
-            Manage Datasets
-          </Link>
-        </section>
+      {/* Baseline Instance Section */}
+      <section className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+        <h2 className="text-md font-semibold text-gray-800 mb-1">
+          Baseline Instances
+        </h2>
+        <p className="text-sm text-gray-600 mb-2">
+          Configure instances that combine datasets and generate shelter severity scores.
+        </p>
+        <Link
+          href="/instances"
+          className="inline-block bg-yellow-400 hover:bg-yellow-500 text-black text-sm font-medium py-1.5 px-3 rounded transition"
+        >
+          View Instances
+        </Link>
+      </section>
 
-        {/* Baseline Instance Panel */}
-        <section className="bg-white rounded-2xl shadow p-6">
-          <h2 className="text-xl font-semibold text-[#163B54] mb-2">Baseline Instance</h2>
-          <p className="text-sm mb-4">
-            Composed of selected core datasets used to compute the SSC index.
-          </p>
-          <Link
-            href="/instances"
-            className="inline-block bg-yellow-400 hover:bg-yellow-500 text-[#163B54] font-medium px-4 py-2 rounded"
-          >
-            View Instances
-          </Link>
-        </section>
-
-        {/* Map Viewer Panel */}
-        <section className="bg-white rounded-2xl shadow p-6">
-          <h2 className="text-xl font-semibold text-[#163B54] mb-2">Map Viewer</h2>
-          <p className="text-sm">
-            Will support ADM-level toggles and scored dataset overlays.
-          </p>
-        </section>
-      </main>
+      {/* Map Viewer Section */}
+      <section className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+        <h2 className="text-md font-semibold text-gray-800 mb-1">
+          Map Viewer
+        </h2>
+        <p className="text-sm text-gray-600">
+          Explore cleaned and scored datasets over administrative boundaries.
+          Use map layers to view severity distributions.
+        </p>
+      </section>
     </div>
-  );
+  )
 }
