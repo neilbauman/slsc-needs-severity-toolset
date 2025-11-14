@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase/supabaseBrowser";
+import { supabaseBrowser } from "@/lib/supabaseBrowser";
 
 interface Props {
   datasetId: string;
