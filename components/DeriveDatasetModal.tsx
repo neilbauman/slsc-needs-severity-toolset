@@ -1,7 +1,3 @@
-// ==================================================
-// FILE: components/DeriveDatasetModal.tsx (Full Regen)
-// ==================================================
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -185,7 +181,7 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
           </select>
         </div>
 
-        {/* Weighting Dataset (disabled for relative) */}
+        {/* Weighting Dataset */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Weighting Dataset (optional)
