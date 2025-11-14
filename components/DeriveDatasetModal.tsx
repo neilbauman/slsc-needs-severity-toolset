@@ -169,4 +169,29 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-gray-100
+              className="px-3 py-1.5 rounded text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={loading}
+              className="px-3 py-1.5 rounded text-sm font-medium bg-[var(--ssc-blue)] hover:bg-blue-800 text-white"
+            >
+              {loading ? 'Creating…' : 'Create'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Preview Modal */}
+      {previewOpen && (
+        <DerivedDatasetPreviewModal
+          baseDatasetIds={useScalar ? [datasetA] : [datasetA, datasetB]}
+          formula={formula}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
