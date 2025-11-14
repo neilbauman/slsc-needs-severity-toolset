@@ -1,229 +1,366 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-interface CleanNumericDatasetModalProps {
+type NumericPreviewRow = {
+  dataset_id: string;
+  admin_pcode_raw: string | null;
+  admin_name_raw: string | null;
+  value_raw: number | null;
+  region_code: string | null;
+  province_code: string | null;
+  muni_code: string | null;
+  adm1_pcode_psa_to_namria: string | null;
+  adm2_pcode_psa_to_namria: string | null;
+  adm2_pcode_match: string | null;
+  adm2_name_match: string | null;
+  admin_pcode_clean: string | null;
+  admin_name_clean: string | null;
+  match_status:
+    | 'matched'
+    | 'no_adm2_match'
+    | 'no_adm3_name_match'
+    | string
+    | null;
+};
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   datasetId: string;
   datasetName: string;
-  onClose: () => void;
-  onCleaned: () => void | Promise<void>;
+  onCleaned: () => void;
 }
 
-type PreviewRow = Record<string, any>;
-
 export default function CleanNumericDatasetModal({
+  open,
+  onOpenChange,
   datasetId,
   datasetName,
-  onClose,
   onCleaned,
-}: CleanNumericDatasetModalProps) {
-  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+}: Props) {
+  const [previewRows, setPreviewRows] = useState<NumericPreviewRow[]>([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [loadingClean, setLoadingClean] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showMismatchesOnly, setShowMismatchesOnly] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const [showMismatchedOnly, setShowMismatchedOnly] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanError, setCleanError] = useState<string | null>(null);
+  const [cleanSuccess, setCleanSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchPreview = async () => {
-      setLoadingPreview(true);
-      setError(null);
-      try {
-        const { data, error } = await supabase.rpc(
-          'preview_numeric_cleaning_v2',
-          { dataset_id: datasetId }
-        );
+    if (!open) return;
+    loadPreview();
+  }, [open, datasetId]);
 
-        if (error) {
-          console.error('preview_numeric_cleaning_v2 error:', error);
-          setError('Failed to load cleaning preview.');
-        } else {
-          setPreviewRows((data as PreviewRow[]) || []);
-        }
-      } catch (err: any) {
-        console.error('Unexpected preview error:', err);
-        setError(err.message || 'Unexpected error loading preview.');
-      } finally {
-        setLoadingPreview(false);
-      }
-    };
-
-    if (datasetId) {
-      fetchPreview();
-    }
-  }, [datasetId]);
-
-  const handleRunCleaning = async () => {
-    setLoadingClean(true);
-    setError(null);
+  const loadPreview = async () => {
+    setLoadingPreview(true);
+    setPreviewError(null);
     try {
-      const { error } = await supabase.rpc('clean_numeric_dataset', {
-        dataset_id: datasetId,
+      const { data, error } = await supabase.rpc('preview_numeric_cleaning', {
+        in_dataset: datasetId,
       });
 
       if (error) {
-        console.error('clean_numeric_dataset error:', error);
-        setError('Cleaning failed.');
-      } else {
-        await onCleaned();
-        onClose();
+        console.error('preview_numeric_cleaning error', error);
+        setPreviewError(error.message ?? 'Failed to load preview.');
+        setPreviewRows([]);
+        return;
       }
+
+      setPreviewRows((data || []) as NumericPreviewRow[]);
     } catch (err: any) {
-      console.error('Unexpected cleaning error:', err);
-      setError(err.message || 'Unexpected error during cleaning.');
+      console.error('preview_numeric_cleaning unexpected error', err);
+      setPreviewError(err.message ?? 'Failed to load preview.');
+      setPreviewRows([]);
     } finally {
-      setLoadingClean(false);
+      setLoadingPreview(false);
     }
   };
 
-  const displayedRows = showMismatchesOnly
-    ? previewRows.filter(
-        (r) =>
-          r.match_status &&
-          typeof r.match_status === 'string' &&
-          r.match_status.toLowerCase() !== 'matched'
-      )
-    : previewRows;
+  const handleClose = () => {
+    setPreviewError(null);
+    setCleanError(null);
+    setCleanSuccess(null);
+    setShowMismatchedOnly(false);
+    onOpenChange(false);
+  };
 
-  const columns = previewRows.length
-    ? Array.from(
-        new Set(previewRows.flatMap((r) => Object.keys(r || {})))
-      )
-    : [];
+  const handleClean = async () => {
+    setCleaning(true);
+    setCleanError(null);
+    setCleanSuccess(null);
+    try {
+      const { error } = await supabase.rpc('clean_numeric_dataset', {
+        in_dataset: datasetId,
+      });
+
+      if (error) {
+        console.error('clean_numeric_dataset error', error);
+        setCleanError(error.message ?? 'Cleaning failed.');
+        return;
+      }
+
+      setCleanSuccess('Cleaning completed. Cleaned values written to dataset_values_numeric.');
+      await onCleaned();
+      await loadPreview();
+    } catch (err: any) {
+      console.error('clean_numeric_dataset unexpected error', err);
+      setCleanError(err.message ?? 'Cleaning failed.');
+    } finally {
+      setCleaning(false);
+    }
+  };
+
+  const filteredRows = useMemo(() => {
+    if (!showMismatchedOnly) return previewRows;
+    return previewRows.filter(
+      (r) => r.match_status && r.match_status !== 'matched'
+    );
+  }, [previewRows, showMismatchedOnly]);
+
+  const summary = useMemo(() => {
+    let matched = 0;
+    let noAdm2 = 0;
+    let noAdm3 = 0;
+    for (const r of previewRows) {
+      if (r.match_status === 'matched') matched += 1;
+      else if (r.match_status === 'no_adm2_match') noAdm2 += 1;
+      else if (r.match_status === 'no_adm3_name_match') noAdm3 += 1;
+    }
+    return { matched, noAdm2, noAdm3, total: previewRows.length };
+  }, [previewRows]);
+
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-3">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-lg bg-white shadow-lg">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-800">
               Clean Numeric Dataset
             </h2>
             <p className="text-xs text-gray-500">
-              {datasetName} — raw numeric values → cleaned & normalized, with
-              admin pcode / name matching.
+              Dataset: <span className="font-medium">{datasetName}</span>
             </p>
           </div>
           <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-xl"
-            disabled={loadingClean}
+            onClick={handleClose}
+            className="text-xl text-gray-500 hover:text-gray-700"
+            disabled={cleaning}
           >
             ×
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">
-          {error && <p className="text-red-600">{error}</p>}
-
-          <div className="bg-blue-50 border border-blue-100 rounded-md px-3 py-2 text-xs text-blue-800">
-            <p className="font-semibold mb-1">What this will do</p>
-            <ul className="list-disc pl-4 space-y-1">
-              <li>Parse and normalize numeric values (percentages vs counts).</li>
+        <div className="space-y-4 px-4 py-3 text-sm">
+          <div className="rounded border border-yellow-300 bg-yellow-50 p-3 text-xs text-yellow-900">
+            <p className="font-semibold">What this does</p>
+            <ul className="ml-4 list-disc space-y-1 pt-1">
               <li>
-                Clean and match Admin PCodes / names to official boundaries (ADM1–ADM3).
+                Matches PSA-style admin codes/names to{' '}
+                <code className="rounded bg-yellow-100 px-1 text-[0.7rem]">
+                  admin_boundaries
+                </code>{' '}
+                at ADM3.
               </li>
               <li>
-                Write final values into <code>dataset_values</code> for this dataset.
+                Writes cleaned rows into{' '}
+                <code className="rounded bg-yellow-100 px-1 text-[0.7rem]">
+                  dataset_values_numeric
+                </code>
+                .
               </li>
               <li>
-                Raw staging rows remain in{' '}
-                <code>dataset_values_numeric_raw</code> for auditability.
+                Raw rows in{' '}
+                <code className="rounded bg-yellow-100 px-1 text-[0.7rem]">
+                  dataset_values_numeric_raw
+                </code>{' '}
+                are <span className="font-semibold">never modified</span>.
               </li>
             </ul>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <input
-                id="mismatch-only-numeric"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={showMismatchesOnly}
-                onChange={(e) => setShowMismatchesOnly(e.target.checked)}
-              />
-              <label
-                htmlFor="mismatch-only-numeric"
-                className="text-xs text-gray-700"
-              >
-                Show rows with matching problems only (non-<code>matched</code>{' '}
-                status)
-              </label>
+          {/* Status */}
+          {(previewError || cleanError || cleanSuccess) && (
+            <div className="space-y-2">
+              {previewError && (
+                <p className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">
+                  Preview error: {previewError}
+                </p>
+              )}
+              {cleanError && (
+                <p className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">
+                  Cleaning error: {cleanError}
+                </p>
+              )}
+              {cleanSuccess && (
+                <p className="rounded border border-green-300 bg-green-50 p-2 text-xs text-green-700">
+                  {cleanSuccess}
+                </p>
+              )}
             </div>
-            {loadingPreview && (
-              <span className="text-xs text-gray-500">
-                Loading preview…
-              </span>
-            )}
+          )}
+
+          {/* Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+            <div className="space-y-1 text-xs">
+              <p className="font-semibold text-gray-700">
+                Matching summary (preview)
+              </p>
+              <p className="text-gray-600">
+                Total previewed:{' '}
+                <span className="font-semibold">{summary.total}</span>{' '}
+                <span className="text-[0.65rem] text-gray-500">
+                  (preview may be limited to ~1000 rows for performance)
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <span className="rounded bg-green-50 px-2 py-0.5 text-[0.7rem] text-green-700">
+                  Matched ADM3: {summary.matched}
+                </span>
+                <span className="rounded bg-red-50 px-2 py-0.5 text-[0.7rem] text-red-700">
+                  No ADM2 match: {summary.noAdm2}
+                </span>
+                <span className="rounded bg-orange-50 px-2 py-0.5 text-[0.7rem] text-orange-700">
+                  No ADM3 name match: {summary.noAdm3}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-end gap-2 text-xs">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={showMismatchedOnly}
+                  onChange={(e) => setShowMismatchedOnly(e.target.checked)}
+                />
+                <span>Show mismatches only</span>
+              </label>
+              <button
+                onClick={loadPreview}
+                className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                disabled={loadingPreview}
+              >
+                {loadingPreview ? 'Refreshing preview…' : 'Refresh preview'}
+              </button>
+            </div>
           </div>
 
           {/* Preview table */}
-          {columns.length ? (
-            <div className="overflow-x-auto border rounded-md bg-white">
-              <table className="min-w-full text-xs border-collapse">
-                <thead className="bg-gray-100 text-gray-700">
+          <div className="space-y-2">
+            <p className="text-xs text-gray-600">
+              Preview of cleaned matching (first few hundred / thousand rows).
+            </p>
+            <div className="max-h-80 overflow-auto rounded border">
+              <table className="w-full border-collapse text-xs">
+                <thead className="bg-gray-100 text-[0.7rem] text-gray-700">
                   <tr>
-                    {columns.map((col) => (
-                      <th
-                        key={col}
-                        className="px-2 py-1 border-b text-left font-semibold"
-                      >
-                        {col}
-                      </th>
-                    ))}
+                    <th className="border-b px-2 py-1 text-left">
+                      Admin PCode (raw)
+                    </th>
+                    <th className="border-b px-2 py-1 text-left">
+                      Admin Name (raw)
+                    </th>
+                    <th className="border-b px-2 py-1 text-right">Value (raw)</th>
+                    <th className="border-b px-2 py-1 text-left">
+                      ADM2 PCode (guess)
+                    </th>
+                    <th className="border-b px-2 py-1 text-left">
+                      ADM2 Name (match)
+                    </th>
+                    <th className="border-b px-2 py-1 text-left">
+                      ADM3 PCode (clean)
+                    </th>
+                    <th className="border-b px-2 py-1 text-left">
+                      ADM3 Name (clean)
+                    </th>
+                    <th className="border-b px-2 py-1 text-left">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {displayedRows.length === 0 && (
+                  {filteredRows.length === 0 && !loadingPreview && (
                     <tr>
                       <td
-                        colSpan={columns.length}
-                        className="px-2 py-2 text-center text-gray-500"
+                        colSpan={8}
+                        className="px-3 py-4 text-center text-xs text-gray-500"
                       >
-                        No rows to display with current filter.
+                        No rows to show.
                       </td>
                     </tr>
                   )}
-                  {displayedRows.map((row, i) => (
-                    <tr key={i} className="border-t">
-                      {columns.map((col) => (
-                        <td key={col} className="px-2 py-1 border-b">
-                          {row[col] === null || row[col] === undefined
-                            ? '—'
-                            : String(row[col])}
-                        </td>
-                      ))}
+                  {loadingPreview && (
+                    <tr>
+                      <td
+                        colSpan={8}
+                        className="px-3 py-4 text-center text-xs text-gray-500"
+                      >
+                        Loading preview…
+                      </td>
                     </tr>
-                  ))}
+                  )}
+                  {!loadingPreview &&
+                    filteredRows.map((row, idx) => (
+                      <tr
+                        key={idx}
+                        className={
+                          row.match_status && row.match_status !== 'matched'
+                            ? 'bg-red-50'
+                            : ''
+                        }
+                      >
+                        <td className="border-b px-2 py-1">
+                          {row.admin_pcode_raw || '—'}
+                        </td>
+                        <td className="border-b px-2 py-1">
+                          {row.admin_name_raw || '—'}
+                        </td>
+                        <td className="border-b px-2 py-1 text-right">
+                          {row.value_raw ?? '—'}
+                        </td>
+                        <td className="border-b px-2 py-1">
+                          {row.adm2_pcode_psa_to_namria || '—'}
+                        </td>
+                        <td className="border-b px-2 py-1">
+                          {row.adm2_name_match || '—'}
+                        </td>
+                        <td className="border-b px-2 py-1">
+                          {row.admin_pcode_clean || '—'}
+                        </td>
+                        <td className="border-b px-2 py-1">
+                          {row.admin_name_clean || '—'}
+                        </td>
+                        <td className="border-b px-2 py-1">
+                          {row.match_status || '—'}
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
-          ) : (
-            !loadingPreview && (
-              <p className="text-xs text-gray-500">
-                No preview rows returned from <code>preview_numeric_cleaning_v2</code>.
-              </p>
-            )
-          )}
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="border-t px-4 py-3 flex justify-end gap-2">
+        <div className="flex justify-between border-t px-4 py-3 text-sm">
           <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded bg-gray-200 hover:bg-gray-300"
-            disabled={loadingClean}
+            onClick={handleClose}
+            className="rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-200"
+            disabled={cleaning}
           >
             Cancel
           </button>
           <button
-            onClick={handleRunCleaning}
-            disabled={loadingClean}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            onClick={handleClean}
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            disabled={cleaning}
           >
-            {loadingClean ? 'Running cleaning…' : 'Run cleaning & save'}
+            {cleaning ? 'Running cleaning…' : 'Run cleaning and save'}
           </button>
         </div>
       </div>
