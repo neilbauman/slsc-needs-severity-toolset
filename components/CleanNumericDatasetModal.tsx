@@ -1,292 +1,139 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
-interface NumericModalProps {
+interface Props {
   datasetId: string;
-  datasetName: string;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCleaned: () => Promise<void>;
+  onClose: () => void;
 }
 
-type NumericPreviewRow = {
-  raw_admin_pcode: string | null;
-  raw_admin_name: string | null;
+interface NumericRow {
+  raw_admin_pcode: string;
+  raw_admin_name: string;
   raw_value: number | null;
   adm3_pcode: string | null;
   adm3_name: string | null;
-  match_status: string | null;
-};
+  match_status: string;
+}
 
-type NumericCountRow = {
-  match_status: string | null;
-  count_rows: number | null;
-};
+interface CountRow {
+  match_status: string;
+  count_rows: number;
+  total_rows: number;
+}
 
-export default function CleanNumericDatasetModal({
-  datasetId,
-  datasetName,
-  open,
-  onOpenChange,
-  onCleaned,
-}: NumericModalProps) {
-  const [loading, setLoading] = useState(false);
-  const [applyLoading, setApplyLoading] = useState(false);
-  const [rows, setRows] = useState<NumericPreviewRow[]>([]);
-  const [counts, setCounts] = useState<NumericCountRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
+export default function CleanNumericDatasetModal({ datasetId, open, onClose }: Props) {
+  const [rows, setRows] = useState<NumericRow[]>([]);
+  const [summary, setSummary] = useState<{ matched: number; noAdm2: number; noAdm3: number; total: number }>({
+    matched: 0,
+    noAdm2: 0,
+    noAdm3: 0,
+    total: 0,
+  });
 
   useEffect(() => {
     if (!open) return;
-    setLoading(true);
 
-    async function load() {
-      try {
-        const { data: countsData, error: cErr } = await supabase.rpc(
-          "preview_numeric_cleaning_v2_counts",
-          { in_dataset: datasetId }
-        );
-        if (cErr) throw cErr;
+    const load = async () => {
+      // Load summary
+      const { data: summaryData } = await supabase.rpc<CountRow[]>(
+        "preview_numeric_cleaning_v2_counts",
+        { in_dataset: datasetId }
+      );
 
-        setCounts((countsData || []) as NumericCountRow[]);
+      if (summaryData) {
+        const matched = summaryData.find((r) => r.match_status === "matched")?.count_rows ?? 0;
+        const noAdm2 = summaryData.find((r) => r.match_status === "no_adm2_match")?.count_rows ?? 0;
+        const noAdm3 = summaryData.find((r) => r.match_status === "no_adm3_name_match")?.count_rows ?? 0;
+        const total = summaryData[0]?.total_rows ?? matched + noAdm2 + noAdm3;
 
-        const { data: previewData, error: pErr } = await supabase.rpc(
-          "preview_numeric_cleaning_v2",
-          { in_dataset: datasetId }
-        );
-        if (pErr) throw pErr;
-
-        setRows(((previewData || []) as NumericPreviewRow[]).slice(0, 1000));
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+        setSummary({ matched, noAdm2, noAdm3, total });
       }
-    }
+
+      // Load preview rows
+      const { data: previewData } = await supabase.rpc<NumericRow[]>(
+        "preview_numeric_cleaning_v2",
+        { in_dataset: datasetId }
+      );
+
+      if (previewData) setRows(previewData.slice(0, 100)); // Preview first 100
+    };
 
     load();
   }, [open, datasetId]);
 
-  if (!open) return null;
-
-  const matched =
-    counts.find((r) => r.match_status === "matched")?.count_rows || 0;
-  const noAdm2 =
-    counts.find((r) => r.match_status === "no_adm2_match")?.count_rows || 0;
-  const noAdm3 =
-    counts.find((r) => r.match_status === "no_adm3_name_match")
-      ?.count_rows || 0;
-  const total = counts.reduce(
-    (t, r) => t + Number(r.count_rows || 0),
-    0
-  );
-
-  async function apply() {
-    setApplyLoading(true);
-    try {
-      const { error: rpcErr } = await supabase.rpc("clean_numeric_dataset", {
-        in_dataset: datasetId,
-      });
-      if (rpcErr) throw rpcErr;
-      await onCleaned();
-      onOpenChange(false);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setApplyLoading(false);
-    }
-  }
-
   return (
-    <ModalShell onClose={() => onOpenChange(false)}>
-      <Header title={`Clean Numeric Dataset — ${datasetName}`} />
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <h2 className="text-xl font-semibold mb-4">Clean Numeric Dataset</h2>
 
-      {/* SUMMARY BARS */}
-      <SummaryRow
-        matched={matched}
-        noAdm2={noAdm2}
-        noAdm3={noAdm3}
-        total={total}
-      />
+        {/* SUMMARY */}
+        <div className="grid grid-cols-4 gap-4 mb-4">
+          <SummaryCard label="Matched" value={summary.matched} tone="good" />
+          <SummaryCard label="No ADM2" value={summary.noAdm2} tone="bad" />
+          <SummaryCard label="No ADM3" value={summary.noAdm3} tone="warn" />
+          <SummaryCard label="Total" value={summary.total} tone="neutral" />
+        </div>
 
-      {error && <ErrorBox message={error} />}
-
-      <ScrollableTable>
-        <thead>
-          <tr>
-            <Th>Raw PCode</Th>
-            <Th>Raw Name</Th>
-            <Th>Value</Th>
-            <Th>ADM3 PCode</Th>
-            <Th>ADM3 Name</Th>
-            <Th>Status</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr><Td colSpan={6}>Loading…</Td></tr>
-          ) : rows.length === 0 ? (
-            <tr><Td colSpan={6}>No preview rows</Td></tr>
-          ) : (
-            rows.map((r, i) => (
-              <tr key={i} className={i % 2 ? "bg-gray-50" : ""}>
-                <Td>{r.raw_admin_pcode || "—"}</Td>
-                <Td>{r.raw_admin_name || "—"}</Td>
-                <Td>{r.raw_value ?? "—"}</Td>
-                <Td>{r.adm3_pcode || "—"}</Td>
-                <Td>{r.adm3_name || "—"}</Td>
-                <Td>{r.match_status || "—"}</Td>
+        {/* TABLE */}
+        <div className="flex-1 overflow-auto border rounded">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-100 sticky top-0">
+              <tr>
+                <Th>Raw PCode</Th>
+                <Th>Raw Name</Th>
+                <Th>Value</Th>
+                <Th>ADM3 PCode</Th>
+                <Th>ADM3 Name</Th>
+                <Th>Status</Th>
               </tr>
-            ))
-          )}
-        </tbody>
-      </ScrollableTable>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} className="border-t">
+                  <Td>{r.raw_admin_pcode}</Td>
+                  <Td>{r.raw_admin_name}</Td>
+                  <Td>{r.raw_value ?? "—"}</Td>
+                  <Td>{r.adm3_pcode ?? "—"}</Td>
+                  <Td>{r.adm3_name ?? "—"}</Td>
+                  <Td className="capitalize">{r.match_status}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-      <FooterButtons
-        onCancel={() => onOpenChange(false)}
-        onApply={apply}
-        applyLoading={applyLoading}
-      />
-    </ModalShell>
+        {/* FOOTER */}
+        <div className="sticky bottom-0 bg-white border-t pt-4 flex justify-end gap-2">
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary">Apply Cleaning</button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-/* ---- SHARED SMALL COMPONENTS ---- */
-
-function Header({ title }: { title: string }) {
-  return (
-    <div className="mb-4 flex justify-between items-center">
-      <h2 className="text-lg font-semibold">{title}</h2>
-    </div>
-  );
+function Th({ children }: { children: string }) {
+  return <th className="text-left px-3 py-2 font-semibold">{children}</th>;
+}
+function Td({ children }: any) {
+  return <td className="px-3 py-2">{children}</td>;
 }
 
-function ErrorBox({ message }: { message: string }) {
+function SummaryCard({ label, value, tone }: { label: string; value: number; tone: string }) {
+  const colors: any = {
+    good: "bg-green-50 text-green-700",
+    bad: "bg-red-50 text-red-700",
+    warn: "bg-yellow-50 text-yellow-700",
+    neutral: "bg-gray-50 text-gray-700",
+  };
   return (
-    <div className="mb-3 border border-red-300 bg-red-50 text-red-700 px-3 py-2 rounded">
-      {message}
-    </div>
-  );
-}
-
-function SummaryRow({
-  matched,
-  noAdm2,
-  noAdm3,
-  total,
-}: {
-  matched: number;
-  noAdm2: number;
-  noAdm3: number;
-  total: number;
-}) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
-      <SummaryBox label="Matched" value={matched} color="green" />
-      <SummaryBox label="No ADM2" value={noAdm2} color="red" />
-      <SummaryBox label="No ADM3" value={noAdm3} color="orange" />
-      <SummaryBox label="Total" value={total} color="gray" />
-    </div>
-  );
-}
-
-function SummaryBox({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
-  const bg = {
-    green: "bg-green-50 border-green-200 text-green-700",
-    red: "bg-red-50 border-red-200 text-red-700",
-    orange: "bg-yellow-50 border-yellow-200 text-yellow-800",
-    gray: "bg-gray-50 border-gray-200 text-gray-800",
-  }[color];
-
-  return (
-    <div className={`border rounded-md p-3 text-center ${bg}`}>
-      <div className="text-xs font-medium mb-1">{label}</div>
+    <div className={`p-3 rounded border ${colors[tone]} text-center`}>
+      <div className="text-sm">{label}</div>
       <div className="text-xl font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function ScrollableTable({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="border border-gray-200 rounded-lg overflow-y-auto max-h-[55vh] mb-5">
-      <table className="min-w-full text-sm">{children}</table>
-    </div>
-  );
-}
-
-function FooterButtons({
-  onCancel,
-  onApply,
-  applyLoading,
-}: {
-  onCancel: () => void;
-  onApply: () => void;
-  applyLoading: boolean;
-}) {
-  return (
-    <div className="flex justify-end gap-2">
-      <button className="btn btn-secondary" onClick={onCancel}>
-        Cancel
-      </button>
-      <button
-        className="btn btn-primary"
-        disabled={applyLoading}
-        onClick={onApply}
-      >
-        {applyLoading ? "Applying…" : "Apply Cleaning"}
-      </button>
-    </div>
-  );
-}
-
-function Th({ children }: any) {
-  return (
-    <th className="px-4 py-2 text-left text-xs font-semibold border-b bg-gray-50">
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, colSpan }: any) {
-  return (
-    <td
-      colSpan={colSpan}
-      className="px-4 py-2 text-gray-700 border-b whitespace-nowrap"
-    >
-      {children}
-    </td>
-  );
-}
-
-function ModalShell({
-  children,
-  onClose,
-}: {
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white w-[min(100vw-2rem,900px)] max-h-[90vh] rounded-xl shadow-xl p-6 flex flex-col border border-gray-300 overflow-hidden">
-        <button
-          className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
-          onClick={onClose}
-        >
-          ×
-        </button>
-        {children}
-      </div>
     </div>
   );
 }
