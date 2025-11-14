@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabase } from "@/lib/supabaseClient";
 
 interface Props {
   datasetId: string;
@@ -18,8 +18,6 @@ export default function CleanCategoricalDatasetModal({
   onOpenChange,
   onCleaned,
 }: Props) {
-  const supabase = supabaseBrowser();
-
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<
     { match_status: string; count_rows: number }[]
@@ -33,7 +31,7 @@ export default function CleanCategoricalDatasetModal({
     setLoading(true);
     setError(null);
 
-    // summary
+    // Summary (ALL rows)
     const { data: summaryData, error: sumErr } = await supabase.rpc(
       "preview_categorical_cleaning_counts",
       { in_dataset: datasetId }
@@ -46,7 +44,7 @@ export default function CleanCategoricalDatasetModal({
     }
     setSummary(summaryData || []);
 
-    // preview rows
+    // Preview (wide format; UI limits to 1000 rows)
     const { data: rows, error: prevErr } = await supabase.rpc(
       "preview_categorical_cleaning",
       { in_dataset: datasetId, in_wide_format: true }
@@ -63,20 +61,27 @@ export default function CleanCategoricalDatasetModal({
   };
 
   useEffect(() => {
-    if (open) load();
+    if (open) {
+      load();
+    }
   }, [open]);
 
   const applyCleaning = async () => {
     setLoading(true);
+    setError(null);
+
     const { error: cleanErr } = await supabase.rpc(
       "clean_categorical_dataset",
-      { in_dataset: datasetId }
+      { p_dataset_id: datasetId }
     );
+
     setLoading(false);
+
     if (cleanErr) {
       setError(cleanErr.message);
       return;
     }
+
     await onCleaned();
     close();
   };
@@ -105,7 +110,7 @@ export default function CleanCategoricalDatasetModal({
           </button>
         </div>
 
-        {/* Summary Panel */}
+        {/* Summary panel (all rows) */}
         <div className="card p-4">
           <h3 className="font-medium mb-2">Match quality summary</h3>
 
@@ -122,19 +127,16 @@ export default function CleanCategoricalDatasetModal({
                 {matched}
               </div>
             </div>
-
             <div className="p-3 bg-red-50 rounded border border-red-200">
               <div className="text-sm text-gray-600">No ADM2 match</div>
               <div className="text-xl font-semibold text-red-700">{noAdm2}</div>
             </div>
-
             <div className="p-3 bg-yellow-50 rounded border border-yellow-200">
               <div className="text-sm text-gray-600">No ADM3 name match</div>
               <div className="text-xl font-semibold text-yellow-700">
                 {noAdm3}
               </div>
             </div>
-
             <div className="p-3 bg-gray-50 rounded border border-gray-200">
               <div className="text-sm text-gray-600">Total rows</div>
               <div className="text-xl font-semibold text-gray-800">{total}</div>
@@ -142,7 +144,7 @@ export default function CleanCategoricalDatasetModal({
           </div>
         </div>
 
-        {/* Preview */}
+        {/* Preview (first 1000 rows only) */}
         <div>
           <h3 className="font-medium mb-2">
             Preview of reshaped categorical values
@@ -161,7 +163,6 @@ export default function CleanCategoricalDatasetModal({
                   <th className="p-2 text-left">Status</th>
                 </tr>
               </thead>
-
               <tbody>
                 {preview.slice(0, 1000).map((row, i) => (
                   <tr key={i} className="border-t">
@@ -188,11 +189,11 @@ export default function CleanCategoricalDatasetModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-3">
-          <button className="btn btn-secondary" onClick={close}>
+          <button className="btn btn-secondary" onClick={close} disabled={loading}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={applyCleaning}>
-            Apply Cleaning
+          <button className="btn btn-primary" onClick={applyCleaning} disabled={loading}>
+            {loading ? "Applying…" : "Apply Cleaning"}
           </button>
         </div>
       </div>
