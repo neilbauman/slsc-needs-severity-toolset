@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
+import { PlusCircleIcon } from 'lucide-react';
 
 type Dataset = {
   id: string;
@@ -12,6 +13,7 @@ type Dataset = {
   admin_level: string;
   created_at: string;
   is_cleaned: boolean;
+  is_derived?: boolean;
 };
 
 export default function DatasetsPage() {
@@ -21,16 +23,12 @@ export default function DatasetsPage() {
 
   const loadDatasets = async () => {
     setLoading(true);
-
     const { data, error } = await supabase
       .from('datasets')
-      .select('id, name, type, admin_level, created_at, is_cleaned')
+      .select('id, name, type, admin_level, created_at, is_cleaned, is_derived')
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setDatasets(data as Dataset[]);
-    }
-
+    if (!error && data) setDatasets(data as Dataset[]);
     setLoading(false);
   };
 
@@ -39,20 +37,26 @@ export default function DatasetsPage() {
   }, []);
 
   return (
-    <div className="p-6 space-y-6">
-
+    <div className="max-w-6xl mx-auto p-4 space-y-4">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-xl font-semibold text-gray-800">
-          Datasets
+        <h1 className="text-lg font-semibold text-gray-800">
+          Manage Datasets
         </h1>
-
-        <button
-          onClick={() => setUploadOpen(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          Upload Dataset
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setUploadOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1"
+          >
+            <PlusCircleIcon className="w-4 h-4" /> Upload Dataset
+          </button>
+          <Link
+            href="/datasets/derive"
+            className="bg-yellow-400 hover:bg-yellow-500 text-black text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1"
+          >
+            <PlusCircleIcon className="w-4 h-4" /> Create Derived Dataset
+          </Link>
+        </div>
       </div>
 
       {/* Upload Modal */}
@@ -66,32 +70,32 @@ export default function DatasetsPage() {
         />
       )}
 
-      {/* Table */}
-      <div className="overflow-x-auto border rounded">
+      {/* Dataset Table */}
+      <div className="overflow-x-auto border rounded-lg shadow-sm">
         <table className="min-w-full text-sm border-collapse">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-3 py-2 border-b text-left">Name</th>
               <th className="px-3 py-2 border-b text-left">Type</th>
               <th className="px-3 py-2 border-b text-left">Admin Level</th>
-              <th className="px-3 py-2 border-b text-left">Uploaded</th>
+              <th className="px-3 py-2 border-b text-left">Created</th>
               <th className="px-3 py-2 border-b text-left">Cleaned?</th>
-              <th className="px-3 py-2 border-b text-left">Action</th>
+              <th className="px-3 py-2 border-b text-left">Origin</th>
+              <th className="px-3 py-2 border-b text-left">Actions</th>
             </tr>
           </thead>
-
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className="px-3 py-4 text-center">
-                  Loading…
+                <td colSpan={7} className="px-3 py-4 text-center text-gray-500">
+                  Loading datasets…
                 </td>
               </tr>
             )}
 
             {!loading && datasets.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-4 text-center text-gray-500">
+                <td colSpan={7} className="px-3 py-4 text-center text-gray-500">
                   No datasets uploaded yet.
                 </td>
               </tr>
@@ -100,12 +104,34 @@ export default function DatasetsPage() {
             {!loading &&
               datasets.map((ds) => (
                 <tr key={ds.id} className="border-t hover:bg-gray-50">
-                  <td className="px-3 py-2">{ds.name}</td>
-                  <td className="px-3 py-2 capitalize">{ds.type}</td>
-                  <td className="px-3 py-2">{ds.admin_level}</td>
+                  <td className="px-3 py-2 font-medium text-gray-800">
+                    {ds.name}
+                  </td>
+
+                  {/* Type Badge */}
                   <td className="px-3 py-2">
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        ds.type === 'numeric'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-green-100 text-green-800'
+                      }`}
+                    >
+                      {ds.type}
+                    </span>
+                  </td>
+
+                  {/* Admin Level Badge */}
+                  <td className="px-3 py-2">
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-800 rounded text-xs font-medium">
+                      {ds.admin_level || 'N/A'}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-2 text-gray-700">
                     {new Date(ds.created_at).toLocaleDateString()}
                   </td>
+
                   <td className="px-3 py-2">
                     {ds.is_cleaned ? (
                       <span className="text-green-700 font-medium">Yes</span>
@@ -113,12 +139,37 @@ export default function DatasetsPage() {
                       <span className="text-red-700 font-medium">No</span>
                     )}
                   </td>
+
                   <td className="px-3 py-2">
+                    {ds.is_derived ? (
+                      <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs font-medium">
+                        Derived
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs font-medium">
+                        Raw
+                      </span>
+                    )}
+                  </td>
+
+                  <td className="px-3 py-2 space-x-2">
                     <Link
-                      href={`/datasets/raw/${ds.id}`}
+                      href={`/datasets/view/${ds.id}`}
                       className="text-blue-600 hover:text-blue-800"
                     >
-                      View Raw →
+                      View
+                    </Link>
+                    <Link
+                      href={`/datasets/edit/${ds.id}`}
+                      className="text-gray-600 hover:text-gray-800"
+                    >
+                      Edit
+                    </Link>
+                    <Link
+                      href={`/datasets/delete/${ds.id}`}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      Delete
                     </Link>
                   </td>
                 </tr>
