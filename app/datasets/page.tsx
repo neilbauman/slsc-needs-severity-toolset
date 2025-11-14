@@ -9,6 +9,7 @@ import {
   Pencil,
   Wand2,
   Activity,
+  RefreshCcw,
 } from 'lucide-react';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
 import DeriveDatasetModal from '@/components/DeriveDatasetModal';
@@ -28,11 +29,14 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [health, setHealth] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
-  // Load datasets
+  /* ────────────────────────────────────────────────
+     Load & Health Calculation
+  ──────────────────────────────────────────────── */
   const loadDatasets = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -46,7 +50,6 @@ export default function DatasetsPage() {
       setDatasets(data as Dataset[]);
       fetchHealthForDatasets(data);
     }
-
     setLoading(false);
   };
 
@@ -54,34 +57,52 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
-  // Fetch health asynchronously
   const fetchHealthForDatasets = async (list: Dataset[]) => {
     const newHealth: Record<string, number> = {};
 
     for (const ds of list) {
-      try {
-        let rpcName =
-          ds.type === 'numeric'
-            ? 'preview_numeric_cleaning_v2'
-            : 'preview_categorical_cleaning';
-        const { data, error } = await supabase.rpc(rpcName, {
-          dataset_id: ds.id,
-        });
-        if (error || !data) continue;
-
-        // Try to compute matched %
-        const total = data.length;
-        const matched = data.filter((row: any) => row.match_status === 'matched').length;
-        const pct = total > 0 ? Math.round((matched / total) * 100) : 0;
-        newHealth[ds.id] = pct;
-      } catch (err) {
-        console.warn(`Health check failed for dataset ${ds.id}`);
-      }
+      const pct = await calculateHealth(ds);
+      if (pct !== null) newHealth[ds.id] = pct;
     }
 
-    setHealth(newHealth);
+    setHealth((prev) => ({ ...prev, ...newHealth }));
   };
 
+  const calculateHealth = async (ds: Dataset): Promise<number | null> => {
+    try {
+      const rpcName =
+        ds.type === 'numeric'
+          ? 'preview_numeric_cleaning_v2'
+          : 'preview_categorical_cleaning';
+      const { data, error } = await supabase.rpc(rpcName, {
+        dataset_id: ds.id,
+      });
+      if (error || !data) return null;
+
+      const total = data.length;
+      const matched = data.filter((r: any) => r.match_status === 'matched').length;
+      return total > 0 ? Math.round((matched / total) * 100) : 0;
+    } catch {
+      return null;
+    }
+  };
+
+  const recalcAllHealth = async () => {
+    setRefreshing(true);
+    await fetchHealthForDatasets(datasets);
+    setRefreshing(false);
+  };
+
+  const recalcSingleHealth = async (ds: Dataset) => {
+    setHealth((prev) => ({ ...prev, [ds.id]: undefined }));
+    const pct = await calculateHealth(ds);
+    if (pct !== null)
+      setHealth((prev) => ({ ...prev, [ds.id]: pct }));
+  };
+
+  /* ────────────────────────────────────────────────
+     Utility helpers
+  ──────────────────────────────────────────────── */
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
     const { error } = await supabase.from('datasets').delete().eq('id', id);
@@ -118,7 +139,13 @@ export default function DatasetsPage() {
     );
 
   const healthBadge = (pct: number | undefined) => {
-    if (pct === undefined) return <span className="text-gray-400">–</span>;
+    if (pct === undefined)
+      return (
+        <span className="text-gray-400 flex items-center gap-1">
+          <Activity size={12} />
+          –
+        </span>
+      );
     let color =
       pct >= 90
         ? 'bg-green-100 text-green-800'
@@ -135,6 +162,9 @@ export default function DatasetsPage() {
     );
   };
 
+  /* ────────────────────────────────────────────────
+     UI
+  ──────────────────────────────────────────────── */
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -147,6 +177,17 @@ export default function DatasetsPage() {
         </div>
 
         <div className="flex gap-2">
+          <button
+            onClick={recalcAllHealth}
+            disabled={refreshing}
+            className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 text-sm font-medium"
+          >
+            <RefreshCcw
+              size={16}
+              className={refreshing ? 'animate-spin text-[var(--ssc-blue)]' : ''}
+            />
+            {refreshing ? 'Recalculating…' : 'Recalculate Health'}
+          </button>
           <button
             onClick={() => setDeriveOpen(true)}
             className="flex items-center gap-1 px-3 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 text-sm font-medium"
@@ -242,7 +283,16 @@ export default function DatasetsPage() {
                     {new Date(ds.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-3 py-2">{cleanedStatus(ds.is_cleaned)}</td>
-                  <td className="px-3 py-2">{healthBadge(health[ds.id])}</td>
+                  <td className="px-3 py-2 flex items-center gap-2">
+                    {healthBadge(health[ds.id])}
+                    <button
+                      onClick={() => recalcSingleHealth(ds)}
+                      title="Recalculate health"
+                      className="text-gray-500 hover:text-[var(--ssc-blue)]"
+                    >
+                      <RefreshCcw size={14} />
+                    </button>
+                  </td>
                   <td className="px-3 py-2 flex gap-2 items-center">
                     <button
                       onClick={() => setEditDataset(ds)}
