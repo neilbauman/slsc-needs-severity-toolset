@@ -34,9 +34,9 @@ export default function DatasetsPage() {
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
-  /* ────────────────────────────────────────────────
-     Load & Health Calculation
-  ──────────────────────────────────────────────── */
+  // ────────────────────────────────────────────────
+  // Load datasets and health metrics
+  // ────────────────────────────────────────────────
   const loadDatasets = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -57,6 +57,9 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
+  // ────────────────────────────────────────────────
+  // Health calculation
+  // ────────────────────────────────────────────────
   const fetchHealthForDatasets = async (list: Dataset[]) => {
     const newHealth: Record<string, number> = {};
 
@@ -100,9 +103,9 @@ export default function DatasetsPage() {
       setHealth((prev) => ({ ...prev, [ds.id]: pct }));
   };
 
-  /* ────────────────────────────────────────────────
-     Utility helpers
-  ──────────────────────────────────────────────── */
+  // ────────────────────────────────────────────────
+  // Utility Handlers
+  // ────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
     const { error } = await supabase.from('datasets').delete().eq('id', id);
@@ -162,9 +165,9 @@ export default function DatasetsPage() {
     );
   };
 
-  /* ────────────────────────────────────────────────
-     UI
-  ──────────────────────────────────────────────── */
+  // ────────────────────────────────────────────────
+  // UI Rendering
+  // ────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -213,14 +216,12 @@ export default function DatasetsPage() {
           }}
         />
       )}
-
       {deriveOpen && (
         <DeriveDatasetModal
           onClose={() => setDeriveOpen(false)}
           onCreated={loadDatasets}
         />
       )}
-
       {editDataset && (
         <EditDatasetModal
           dataset={editDataset}
@@ -283,17 +284,19 @@ export default function DatasetsPage() {
                     {new Date(ds.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-3 py-2">{cleanedStatus(ds.is_cleaned)}</td>
-                  <td className="px-3 py-2 flex items-center gap-2">
-                    {healthBadge(health[ds.id])}
-                    <button
-                      onClick={() => recalcSingleHealth(ds)}
-                      title="Recalculate health"
-                      className="text-gray-500 hover:text-[var(--ssc-blue)]"
-                    >
-                      <RefreshCcw size={14} />
-                    </button>
+                  <td className="px-3 py-2">
+                    <div className="inline-flex items-center gap-2">
+                      {healthBadge(health[ds.id])}
+                      <button
+                        onClick={() => recalcSingleHealth(ds)}
+                        title="Recalculate health"
+                        className="text-gray-500 hover:text-[var(--ssc-blue)]"
+                      >
+                        <RefreshCcw size={14} />
+                      </button>
+                    </div>
                   </td>
-                  <td className="px-3 py-2 flex gap-2 items-center">
+                  <td className="px-3 py-2 flex gap-3 items-center">
                     <button
                       onClick={() => setEditDataset(ds)}
                       className="text-gray-600 hover:text-[var(--ssc-blue)]"
@@ -311,9 +314,7 @@ export default function DatasetsPage() {
                       </button>
                     )}
                     <button
-                      onClick={() =>
-                        (window.location.href = `/datasets/raw/${ds.id}`)
-                      }
+                      onClick={() => (window.location.href = `/datasets/raw/${ds.id}`)}
                       className="text-gray-600 hover:text-[var(--ssc-blue)]"
                       title="View dataset"
                     >
