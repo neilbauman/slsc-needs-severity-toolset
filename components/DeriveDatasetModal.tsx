@@ -26,6 +26,7 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
   const [levels, setLevels] = useState<string[]>([]);
   const [weightingId, setWeightingId] = useState('');
   const [levelNote, setLevelNote] = useState<string | null>(null);
+  const [alignmentMethod, setAlignmentMethod] = useState<'aggregate' | 'disaggregate' | 'keep'>('keep');
 
   // Load datasets + admin levels
   useEffect(() => {
@@ -54,7 +55,8 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
     const aLevel = datasets.find((d) => d.id === datasetA)?.admin_level;
     const bLevel = datasets.find((d) => d.id === datasetB)?.admin_level;
     if (!aLevel || !bLevel || useScalar) setLevelNote(null);
-    else if (aLevel !== bLevel) setLevelNote(`Levels differ (${aLevel} vs ${bLevel})`);
+    else if (aLevel !== bLevel)
+      setLevelNote(`Levels differ (${aLevel} vs ${bLevel})`);
     else setLevelNote(null);
   }, [datasetA, datasetB, useScalar, datasets]);
 
@@ -71,11 +73,16 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
       base_dataset_ids: baseIds,
       formula,
       new_name: newName,
+      target_level: targetLevel,
+      alignment_method: alignmentMethod,
+      weight_dataset_id: weightingId || null,
     });
 
     setLoading(false);
-    if (error) alert('Failed to create derived dataset.');
-    else {
+    if (error) {
+      console.error(error);
+      alert('Failed to create derived dataset.');
+    } else {
       onCreated();
       onClose();
     }
@@ -83,8 +90,10 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-4 shadow-lg max-w-lg w-full space-y-4">
-        <h2 className="text-lg font-semibold">Create Derived Dataset</h2>
+      <div className="bg-white rounded-lg p-5 shadow-lg max-w-lg w-full space-y-4">
+        <h2 className="text-lg font-semibold text-gray-800">
+          Create Derived Dataset
+        </h2>
 
         {/* Builder */}
         <div className="flex flex-wrap items-center gap-2">
@@ -181,6 +190,24 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
           </select>
         </div>
 
+        {/* Alignment Method */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Alignment Method
+          </label>
+          <select
+            value={alignmentMethod}
+            onChange={(e) =>
+              setAlignmentMethod(e.target.value as 'aggregate' | 'disaggregate' | 'keep')
+            }
+            className="border rounded p-2 text-sm w-full"
+          >
+            <option value="keep">Keep Source Level</option>
+            <option value="aggregate">Aggregate to Higher Level</option>
+            <option value="disaggregate">Disaggregate to Lower Level</option>
+          </select>
+        </div>
+
         {/* Weighting Dataset */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -190,13 +217,10 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
             value={weightingId}
             onChange={(e) => setWeightingId(e.target.value)}
             className="border rounded p-2 text-sm w-full"
-            disabled={
-              datasets.find((d) => d.id === datasetA)?.value_type === 'relative'
-            }
           >
             <option value="">None</option>
             {datasets
-              .filter((d) => d.type === 'numeric' && d.value_type === 'absolute')
+              .filter((d) => d.type === 'numeric')
               .map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name} ({d.admin_level})
@@ -208,7 +232,7 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
         {/* Level warning */}
         {levelNote && (
           <div className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 p-2 rounded mt-1">
-            ⚠ {levelNote}. Data will be aligned to {targetLevel} before derivation.
+            ⚠ {levelNote}. Data will be aligned to {targetLevel} using the selected method.
           </div>
         )}
 
@@ -267,6 +291,7 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
           formula={formula}
           targetLevel={targetLevel}
           weight_dataset_id={weightingId || null}
+          alignment_method={alignmentMethod}
           onClose={() => setPreviewOpen(false)}
         />
       )}
