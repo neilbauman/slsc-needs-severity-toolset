@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { PlusCircle, Eye, Trash2, Pencil, Wand2 } from 'lucide-react';
+import {
+  PlusCircle,
+  Eye,
+  Trash2,
+  Pencil,
+  Wand2,
+  Activity,
+} from 'lucide-react';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
 import DeriveDatasetModal from '@/components/DeriveDatasetModal';
 import EditDatasetModal from '@/components/EditDatasetModal';
@@ -19,14 +26,15 @@ type Dataset = {
 
 export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [health, setHealth] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
+  // Load datasets
   const loadDatasets = async () => {
     setLoading(true);
-
     const { data, error } = await supabase
       .from('datasets')
       .select(
@@ -36,6 +44,7 @@ export default function DatasetsPage() {
 
     if (!error && data) {
       setDatasets(data as Dataset[]);
+      fetchHealthForDatasets(data);
     }
 
     setLoading(false);
@@ -44,6 +53,34 @@ export default function DatasetsPage() {
   useEffect(() => {
     loadDatasets();
   }, []);
+
+  // Fetch health asynchronously
+  const fetchHealthForDatasets = async (list: Dataset[]) => {
+    const newHealth: Record<string, number> = {};
+
+    for (const ds of list) {
+      try {
+        let rpcName =
+          ds.type === 'numeric'
+            ? 'preview_numeric_cleaning_v2'
+            : 'preview_categorical_cleaning';
+        const { data, error } = await supabase.rpc(rpcName, {
+          dataset_id: ds.id,
+        });
+        if (error || !data) continue;
+
+        // Try to compute matched %
+        const total = data.length;
+        const matched = data.filter((row: any) => row.match_status === 'matched').length;
+        const pct = total > 0 ? Math.round((matched / total) * 100) : 0;
+        newHealth[ds.id] = pct;
+      } catch (err) {
+        console.warn(`Health check failed for dataset ${ds.id}`);
+      }
+    }
+
+    setHealth(newHealth);
+  };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
@@ -80,6 +117,24 @@ export default function DatasetsPage() {
       <span className="text-red-700 font-medium">Raw</span>
     );
 
+  const healthBadge = (pct: number | undefined) => {
+    if (pct === undefined) return <span className="text-gray-400">–</span>;
+    let color =
+      pct >= 90
+        ? 'bg-green-100 text-green-800'
+        : pct >= 60
+        ? 'bg-yellow-100 text-yellow-800'
+        : 'bg-red-100 text-red-800';
+    return (
+      <span
+        className={`px-2 py-1 rounded text-xs font-medium ${color} flex items-center gap-1`}
+      >
+        <Activity size={12} />
+        {pct}%
+      </span>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -107,7 +162,7 @@ export default function DatasetsPage() {
         </div>
       </div>
 
-      {/* Upload Modal */}
+      {/* Modals */}
       {uploadOpen && (
         <UploadDatasetModal
           onClose={() => setUploadOpen(false)}
@@ -118,7 +173,6 @@ export default function DatasetsPage() {
         />
       )}
 
-      {/* Derived Modal */}
       {deriveOpen && (
         <DeriveDatasetModal
           onClose={() => setDeriveOpen(false)}
@@ -126,7 +180,6 @@ export default function DatasetsPage() {
         />
       )}
 
-      {/* Edit Modal */}
       {editDataset && (
         <EditDatasetModal
           dataset={editDataset}
@@ -146,6 +199,7 @@ export default function DatasetsPage() {
               <th className="px-3 py-2 border-b text-left">Abs/Rel/Idx</th>
               <th className="px-3 py-2 border-b text-left">Uploaded</th>
               <th className="px-3 py-2 border-b text-left">Status</th>
+              <th className="px-3 py-2 border-b text-left">Health</th>
               <th className="px-3 py-2 border-b text-left">Actions</th>
             </tr>
           </thead>
@@ -153,7 +207,7 @@ export default function DatasetsPage() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} className="px-3 py-4 text-center text-gray-500">
+                <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
                   Loading…
                 </td>
               </tr>
@@ -161,7 +215,7 @@ export default function DatasetsPage() {
 
             {!loading && datasets.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-4 text-center text-gray-500">
+                <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
                   No datasets found.
                 </td>
               </tr>
@@ -188,6 +242,7 @@ export default function DatasetsPage() {
                     {new Date(ds.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-3 py-2">{cleanedStatus(ds.is_cleaned)}</td>
+                  <td className="px-3 py-2">{healthBadge(health[ds.id])}</td>
                   <td className="px-3 py-2 flex gap-2 items-center">
                     <button
                       onClick={() => setEditDataset(ds)}
@@ -206,7 +261,9 @@ export default function DatasetsPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => (window.location.href = `/datasets/raw/${ds.id}`)}
+                      onClick={() =>
+                        (window.location.href = `/datasets/raw/${ds.id}`)
+                      }
                       className="text-gray-600 hover:text-[var(--ssc-blue)]"
                       title="View dataset"
                     >
