@@ -21,87 +21,31 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
   const [newName, setNewName] = useState('');
   const [loading, setLoading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [levelNote, setLevelNote] = useState<string | null>(null);
+  const [targetLevel, setTargetLevel] = useState('ADM3');
+  const [levels, setLevels] = useState<string[]>([]);
 
-  // Load datasets
+  // Load datasets + available levels
   useEffect(() => {
     const load = async () => {
-      const { data, error } = await supabase
+      const { data: ds } = await supabase
         .from('datasets')
         .select('id, name, type, admin_level')
         .order('created_at', { ascending: false });
-      if (!error && data) setDatasets(data);
+
+      const { data: lv } = await supabase
+        .from('admin_boundaries')
+        .select('admin_level')
+        .not('admin_level', 'is', null);
+
+      if (ds) setDatasets(ds);
+      if (lv) {
+        const uniqueLevels = Array.from(new Set(lv.map((l: any) => l.admin_level))).sort();
+        setLevels(uniqueLevels);
+      }
     };
     load();
   }, []);
 
-  // Determine if admin levels differ
-  useEffect(() => {
-    if (!datasetA || !datasetB || useScalar) {
-      setLevelNote(null);
-      return;
-    }
-
-    const aLevel = datasets.find((d) => d.id === datasetA)?.admin_level;
-    const bLevel = datasets.find((d) => d.id === datasetB)?.admin_level;
-
-    if (!aLevel || !bLevel) {
-      setLevelNote(null);
-      return;
-    }
-
-    if (aLevel === bLevel) {
-      setLevelNote(null);
-    } else {
-      setLevelNote(`Levels differ (${aLevel} vs ${bLevel})`);
-    }
-  }, [datasetA, datasetB, useScalar, datasets]);
-
-  // Harmonize datasets before derivation
-  const harmonizeLevels = async (idA: string, idB: string) => {
-    const aLevel = datasets.find((d) => d.id === idA)?.admin_level;
-    const bLevel = datasets.find((d) => d.id === idB)?.admin_level;
-    if (!aLevel || !bLevel || aLevel === bLevel) return [idA, idB];
-
-    // ADM levels differ → align to the coarser one
-    const targetLevel = aLevel < bLevel ? aLevel : bLevel;
-    let newA = idA;
-    let newB = idB;
-
-    if (aLevel > bLevel) {
-      // A is finer, aggregate A → target
-      const { data } = await supabase.rpc('aggregate_to_level', {
-        dataset_id: idA,
-        target_level: targetLevel,
-      });
-      if (data) console.log(`Aggregated ${idA} to ${targetLevel}`);
-    } else {
-      // A is coarser, disaggregate A → target
-      const { data } = await supabase.rpc('disaggregate_to_level', {
-        dataset_id: idA,
-        target_level: targetLevel,
-      });
-      if (data) console.log(`Disaggregated ${idA} to ${targetLevel}`);
-    }
-
-    if (bLevel > aLevel) {
-      const { data } = await supabase.rpc('aggregate_to_level', {
-        dataset_id: idB,
-        target_level: targetLevel,
-      });
-      if (data) console.log(`Aggregated ${idB} to ${targetLevel}`);
-    } else {
-      const { data } = await supabase.rpc('disaggregate_to_level', {
-        dataset_id: idB,
-        target_level: targetLevel,
-      });
-      if (data) console.log(`Disaggregated ${idB} to ${targetLevel}`);
-    }
-
-    return [newA, newB];
-  };
-
-  // Formula builder
   const formula = useScalar
     ? `${datasetA} ${operator} ${scalar}`
     : `${datasetA} ${operator} ${datasetB}`;
@@ -111,14 +55,42 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
     setLoading(true);
 
     const baseIds = useScalar ? [datasetA] : [datasetA, datasetB];
-    const [alignedA, alignedB] = useScalar
-      ? [datasetA, null]
-      : await harmonizeLevels(datasetA, datasetB);
 
-    const finalBaseIds = useScalar ? [alignedA] : [alignedA, alignedB];
+    // Perform any needed level conversions before creation
+    const aLevel = datasets.find((d) => d.id === datasetA)?.admin_level;
+    const bLevel = datasets.find((d) => d.id === datasetB)?.admin_level;
+
+    // If either dataset isn’t at target level → adjust via RPC
+    if (aLevel && aLevel !== targetLevel) {
+      if (aLevel < targetLevel) {
+        await supabase.rpc('disaggregate_to_level', {
+          dataset_id: datasetA,
+          target_level: targetLevel,
+        });
+      } else {
+        await supabase.rpc('aggregate_to_level', {
+          dataset_id: datasetA,
+          target_level: targetLevel,
+        });
+      }
+    }
+
+    if (!useScalar && bLevel && bLevel !== targetLevel) {
+      if (bLevel < targetLevel) {
+        await supabase.rpc('disaggregate_to_level', {
+          dataset_id: datasetB,
+          target_level: targetLevel,
+        });
+      } else {
+        await supabase.rpc('aggregate_to_level', {
+          dataset_id: datasetB,
+          target_level: targetLevel,
+        });
+      }
+    }
 
     const { error } = await supabase.rpc('create_derived_dataset', {
-      base_dataset_ids: finalBaseIds,
+      base_dataset_ids: baseIds,
       formula,
       new_name: newName,
     });
@@ -139,9 +111,8 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
       <div className="bg-white rounded-lg p-4 shadow-lg max-w-lg w-full space-y-4">
         <h2 className="text-lg font-semibold">Create Derived Dataset</h2>
 
-        {/* Derivation Builder */}
+        {/* Builder row */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Dataset A */}
           <select
             value={datasetA}
             onChange={(e) => setDatasetA(e.target.value)}
@@ -155,7 +126,6 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
             ))}
           </select>
 
-          {/* Operator */}
           <select
             value={operator}
             onChange={(e) => setOperator(e.target.value)}
@@ -167,7 +137,6 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
             <option value="/">÷</option>
           </select>
 
-          {/* Dataset B or Scalar */}
           {useScalar ? (
             <input
               type="number"
@@ -195,13 +164,11 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
             </select>
           )}
 
-          {/* Toggle Scalar Mode */}
           <button
             onClick={() => {
               setUseScalar(!useScalar);
               setDatasetB('');
               setScalar('');
-              setLevelNote(null);
             }}
             className="text-xs text-[var(--ssc-blue)] hover:underline"
           >
@@ -209,19 +176,33 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
           </button>
         </div>
 
-        {/* Formula Preview */}
-        <div className="text-sm text-gray-600 italic mt-1">
+        {/* Target Level */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Target Administrative Level
+          </label>
+          <select
+            value={targetLevel}
+            onChange={(e) => setTargetLevel(e.target.value)}
+            className="border rounded p-2 text-sm w-full"
+          >
+            {levels.map((lvl) => (
+              <option key={lvl} value={lvl}>
+                {lvl}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-600 mt-1">
+            All input datasets will be harmonized to {targetLevel} before derivation.
+          </p>
+        </div>
+
+        {/* Formula preview */}
+        <div className="text-sm text-gray-600 italic">
           {datasetA && (datasetB || useScalar)
             ? `Formula: ${formula}`
             : 'Select inputs to see formula'}
         </div>
-
-        {/* Level warning */}
-        {levelNote && (
-          <div className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 p-2 rounded mt-2">
-            ⚠ {levelNote}. System will auto-align levels during derivation.
-          </div>
-        )}
 
         {/* New Dataset Name */}
         <div>
@@ -265,11 +246,11 @@ export default function DeriveDatasetModal({ onClose, onCreated }: any) {
         </div>
       </div>
 
-      {/* Preview Modal */}
       {previewOpen && (
         <DerivedDatasetPreviewModal
           baseDatasetIds={useScalar ? [datasetA] : [datasetA, datasetB]}
           formula={formula}
+          targetLevel={targetLevel}
           onClose={() => setPreviewOpen(false)}
         />
       )}
