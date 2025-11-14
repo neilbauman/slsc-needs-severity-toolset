@@ -14,8 +14,19 @@ export default function CleanDatasetModal({ dataset, onClose, onCleaned }: any) 
     setLoading(true);
     setMessage(null);
     try {
-      const result = await getNumericCleaningPreview(dataset.id);
-      setPreview(result);
+      let result;
+      if (dataset.type === 'numeric') {
+        result = await supabase.rpc('preview_numeric_cleaning_v2', {
+          _dataset_id: dataset.id,
+        });
+      } else {
+        result = await supabase.rpc('preview_categorical_cleaning', {
+          _dataset_id: dataset.id,
+        });
+      }
+
+      if (result.error) throw result.error;
+      setPreview(result.data);
     } catch (e) {
       setMessage('⚠️ Preview failed. Check console.');
       console.error(e);
@@ -27,15 +38,20 @@ export default function CleanDatasetModal({ dataset, onClose, onCleaned }: any) 
   const runClean = async () => {
     setCleaning(true);
     setMessage(null);
-    const { error } = await supabase.rpc('clean_numeric_dataset', {
-      _dataset_id: dataset.id,
-    });
-    if (error) {
-      console.error(error);
-      setMessage('❌ Cleaning failed.');
-    } else {
+    try {
+      const rpcName =
+        dataset.type === 'numeric'
+          ? 'clean_numeric_dataset'
+          : 'clean_categorical_dataset';
+      const { error } = await supabase.rpc(rpcName, {
+        _dataset_id: dataset.id,
+      });
+      if (error) throw error;
       setMessage('✅ Dataset cleaned successfully.');
       onCleaned?.();
+    } catch (e) {
+      console.error(e);
+      setMessage('❌ Cleaning failed.');
     }
     setCleaning(false);
   };
