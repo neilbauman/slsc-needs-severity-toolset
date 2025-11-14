@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabaseBrowser";
+import { supabase } from "@/lib/supabaseClient";
 
 interface Props {
   datasetId: string;
@@ -18,7 +18,6 @@ export default function CleanNumericDatasetModal({
   onOpenChange,
   onCleaned,
 }: Props) {
-  const supabase = supabaseBrowser();
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<
     { match_status: string; count_rows: number }[]
@@ -26,17 +25,17 @@ export default function CleanNumericDatasetModal({
   const [preview, setPreview] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // close modal helper
   const close = () => onOpenChange(false);
 
-  // Load match summary and preview
   const load = async () => {
     setLoading(true);
     setError(null);
 
-    // Load summary
-    const { data: summaryData, error: summaryErr } = await supabase
-      .rpc("preview_numeric_cleaning_v2_counts", { in_dataset: datasetId });
+    // Summary (ALL rows via RPC)
+    const { data: summaryData, error: summaryErr } = await supabase.rpc(
+      "preview_numeric_cleaning_v2_counts",
+      { in_dataset: datasetId }
+    );
 
     if (summaryErr) {
       setError(summaryErr.message);
@@ -45,9 +44,11 @@ export default function CleanNumericDatasetModal({
     }
     setSummary(summaryData || []);
 
-    // Load preview rows (limited inside SQL to 1000)
-    const { data: previewData, error: previewErr } = await supabase
-      .rpc("preview_numeric_cleaning_v2", { in_dataset: datasetId });
+    // Preview rows (RPC returns all; we will render first 1000 only)
+    const { data: previewData, error: previewErr } = await supabase.rpc(
+      "preview_numeric_cleaning_v2",
+      { in_dataset: datasetId }
+    );
 
     if (previewErr) {
       setError(previewErr.message);
@@ -60,15 +61,19 @@ export default function CleanNumericDatasetModal({
   };
 
   useEffect(() => {
-    if (open) load();
+    if (open) {
+      load();
+    }
   }, [open]);
 
-  // Apply cleaning
   const applyCleaning = async () => {
     setLoading(true);
-    const { error: cleanErr } = await supabase.rpc("clean_numeric_dataset_v2", {
-      in_dataset_id: datasetId,
-    });
+    setError(null);
+
+    const { error: cleanErr } = await supabase.rpc(
+      "clean_numeric_dataset_v2",
+      { in_dataset_id: datasetId }
+    );
 
     setLoading(false);
 
@@ -105,7 +110,7 @@ export default function CleanNumericDatasetModal({
           </button>
         </div>
 
-        {/* Summary Panel */}
+        {/* Summary panel (all rows, not limited to 1000) */}
         <div className="card p-4">
           <h3 className="font-medium mb-2">Match quality summary</h3>
 
@@ -139,10 +144,9 @@ export default function CleanNumericDatasetModal({
           </div>
         </div>
 
-        {/* Preview Rows */}
+        {/* Preview (limited to 1000 rows in UI) */}
         <div>
           <h3 className="font-medium mb-2">Preview of cleaned rows</h3>
-
           <div className="overflow-x-auto border rounded">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-100 text-gray-700">
@@ -180,11 +184,11 @@ export default function CleanNumericDatasetModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-3">
-          <button className="btn btn-secondary" onClick={close}>
+          <button className="btn btn-secondary" onClick={close} disabled={loading}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={applyCleaning}>
-            Apply Cleaning
+          <button className="btn btn-primary" onClick={applyCleaning} disabled={loading}>
+            {loading ? "Applying…" : "Apply Cleaning"}
           </button>
         </div>
       </div>
