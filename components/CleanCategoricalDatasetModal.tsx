@@ -1,276 +1,318 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-interface Props {
+interface CleanCategoricalDatasetModalProps {
   datasetId: string;
   datasetName: string;
-  onClose: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   onCleaned: () => void;
 }
+
+type CategoricalPreviewRow = {
+  match_status?: string | null;
+  category?: string | null;
+  value_raw?: number | null;
+  [key: string]: any;
+};
 
 export default function CleanCategoricalDatasetModal({
   datasetId,
   datasetName,
-  onClose,
+  open,
+  onOpenChange,
   onCleaned,
-}: Props) {
-  const [preview, setPreview] = useState<any[]>([]);
-  const [wideFormat, setWideFormat] = useState(true);
-  const [detectedWide, setDetectedWide] = useState(true);
-  const [loading, setLoading] = useState(true);
+}: CleanCategoricalDatasetModalProps) {
+  const [isWide, setIsWide] = useState(true);
+  const [previewRows, setPreviewRows] = useState<CategoricalPreviewRow[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showMismatches, setShowMismatches] = useState(false);
 
-  const detectWide = (rawRows: any[]) => {
-    if (rawRows.length === 0) return true;
-    const sample = rawRows[0].raw_row || {};
-    const keys = Object.keys(sample);
-    return keys.length > 6; // crude but effective
+  // When modal opens or wide/long toggle changes, reload preview
+  useEffect(() => {
+    if (!open) {
+      setPreviewRows([]);
+      setError(null);
+      setLoadingPreview(false);
+      setApplying(false);
+      // keep isWide as last selection
+      return;
+    }
+
+    const load = async () => {
+      setLoadingPreview(true);
+      setError(null);
+
+      const { data, error } = await supabase.rpc(
+        'preview_categorical_cleaning',
+        {
+          in_dataset_id: datasetId,
+          in_wide_format: isWide,
+        }
+      );
+
+      if (error) {
+        console.error('preview_categorical_cleaning error:', error);
+        setError(error.message);
+        setPreviewRows([]);
+      } else {
+        setPreviewRows((data as CategoricalPreviewRow[]) || []);
+      }
+
+      setLoadingPreview(false);
+    };
+
+    load();
+  }, [open, datasetId, isWide]);
+
+  const close = () => {
+    if (!applying) {
+      onOpenChange(false);
+    }
   };
 
-  const loadPreview = async () => {
-    setLoading(true);
+  const matchSummary = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of previewRows) {
+      const key = (row.match_status || 'unknown') as string;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  }, [previewRows]);
+
+  const allColumns = useMemo(() => {
+    const cols = new Set<string>();
+    previewRows.forEach((r) => {
+      Object.keys(r).forEach((k) => cols.add(k));
+    });
+    return Array.from(cols);
+  }, [previewRows]);
+
+  const handleApply = async () => {
+    setApplying(true);
     setError(null);
 
-    const { data: rawRows } = await supabase
-      .from('dataset_values_categorical_raw')
-      .select('raw_row')
-      .eq('dataset_id', datasetId)
-      .limit(5);
+    const { error } = await supabase.rpc('clean_categorical_dataset', {
+      p_dataset_id: datasetId,
+    });
 
-    const autoWide = detectWide(rawRows || []);
-    setDetectedWide(autoWide);
-    setWideFormat(autoWide);
-
-    const { data, error: rpcErr } = await supabase.rpc(
-      'preview_categorical_cleaning',
-      {
-        in_dataset_id: datasetId,
-        in_wide_format: autoWide,
-      }
-    );
-
-    if (rpcErr) {
-      setError(rpcErr.message);
-      setPreview([]);
-      setLoading(false);
+    if (error) {
+      console.error('clean_categorical_dataset error:', error);
+      setError(error.message);
+      setApplying(false);
       return;
     }
 
-    setPreview(data || []);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    loadPreview();
-  }, [datasetId]);
-
-  const refreshPreview = async () => {
-    setLoading(true);
-    const { data, error: rpcErr } = await supabase.rpc(
-      'preview_categorical_cleaning',
-      {
-        in_dataset_id: datasetId,
-        in_wide_format: wideFormat,
-      }
-    );
-    if (rpcErr) {
-      setError(rpcErr.message);
-    } else {
-      setPreview(data || []);
-    }
-    setLoading(false);
-  };
-
-  const runCleaning = async () => {
-    const { error: rpcErr } = await supabase.rpc(
-      'clean_categorical_dataset',
-      { p_dataset_id: datasetId }
-    );
-    if (rpcErr) {
-      alert('Cleaning failed:\n' + rpcErr.message);
-      return;
-    }
-    onClose();
     await onCleaned();
+    setApplying(false);
+    onOpenChange(false);
   };
 
-  const filteredRows = showMismatches
-    ? preview.filter((r) => r.match_status !== 'matched')
-    : preview;
-
-  const matched = preview.filter((r) => r.match_status === 'matched').length;
-  const noAdm2 = preview.filter((r) => r.match_status === 'no_adm2_match').length;
-  const noAdm3 = preview.filter(
-    (r) => r.match_status === 'no_adm3_name_match'
-  ).length;
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-7xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-3">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex justify-between items-center border-b px-5 py-3">
-          <h2 className="text-xl font-semibold text-gray-800">
-            Clean Categorical Dataset — {datasetName}
-          </h2>
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <div>
+            <h2 className="text-base md:text-lg font-semibold text-gray-900">
+              Clean Categorical Dataset
+            </h2>
+            <p className="text-xs text-gray-600">
+              Dataset: <span className="font-medium">{datasetName}</span>
+            </p>
+          </div>
           <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-xl"
+            onClick={close}
+            className="text-gray-500 hover:text-gray-700 text-xl leading-none"
+            disabled={applying}
           >
             ×
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-5 text-sm space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-xs md:text-sm">
           {error && (
-            <div className="bg-red-50 border border-red-300 text-red-700 px-3 py-2 rounded">
-              Preview error: {error}
+            <div className="border border-red-300 bg-red-50 text-red-800 px-3 py-2 rounded">
+              <p className="font-semibold">Error</p>
+              <p className="mt-1 break-all">{error}</p>
             </div>
           )}
 
-          <div className="bg-purple-50 border border-purple-200 text-purple-800 px-4 py-2 rounded">
-            <ul className="list-disc ml-6">
-              <li>Reshapes raw categorical rows into normalized long format.</li>
-              <li>Uses PSA→NAMRIA pcode logic identical to numeric cleaning.</li>
+          {/* Explanation */}
+          <div className="border rounded px-3 py-2 bg-gray-50 text-gray-700 space-y-1">
+            <p className="font-semibold mb-1">What this step does</p>
+            <ul className="list-disc list-inside space-y-1">
               <li>
-                Writes cleaned rows into{' '}
-                <code>dataset_values_categorical</code>.
+                Reshapes your raw dataset into a{' '}
+                <span className="font-medium">long format</span> using{' '}
+                <code className="px-1 bg-gray-100 rounded text-[0.65rem]">
+                  preview_categorical_cleaning
+                </code>
+                .
               </li>
               <li>
-                Raw rows in <code>dataset_values_categorical_raw</code> are never
-                modified.
+                Applies the same PSA → NAMRIA pcode logic used for numeric cleaning to
+                find ADM2 and ADM3 boundary matches.
+              </li>
+              <li>
+                When you click{' '}
+                <span className="font-medium">Apply cleaning</span>, it writes matched
+                rows into{' '}
+                <code className="px-1 bg-gray-100 rounded text-[0.65rem]">
+                  dataset_values_categorical
+                </code>{' '}
+                via{' '}
+                <code className="px-1 bg-gray-100 rounded text-[0.65rem]">
+                  clean_categorical_dataset
+                </code>
+                , keeping your{' '}
+                <code className="px-1 bg-gray-100 rounded text-[0.65rem]">
+                  dataset_values_categorical_raw
+                </code>{' '}
+                intact.
               </li>
             </ul>
           </div>
 
-          {/* Wide/Narrow selection */}
-          <div>
-            <div className="font-semibold text-gray-700">
-              Data layout (wide vs long)
+          {/* Format toggle */}
+          <div className="border rounded px-3 py-2 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="font-semibold text-gray-800">
+                Input shape / format
+              </p>
+              <div className="inline-flex rounded border overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsWide(true)}
+                  className={
+                    'px-3 py-1 border-r ' +
+                    (isWide
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-50')
+                  }
+                  disabled={loadingPreview || applying}
+                >
+                  Wide (categories in columns)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsWide(false)}
+                  className={
+                    'px-3 py-1 ' +
+                    (!isWide
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-50')
+                  }
+                  disabled={loadingPreview || applying}
+                >
+                  Long / normalized (category + value columns)
+                </button>
+              </div>
             </div>
-            <div className="text-gray-600 mb-1">
-              Detected:{' '}
-              <span className="font-semibold">
-                {detectedWide ? 'Wide' : 'Long'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  checked={wideFormat === detectedWide}
-                  onChange={() => {
-                    setWideFormat(detectedWide);
-                    refreshPreview();
-                  }}
-                />
-                Auto (recommended)
-              </label>
-
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  checked={wideFormat === true}
-                  onChange={() => {
-                    setWideFormat(true);
-                    refreshPreview();
-                  }}
-                />
-                Force wide
-              </label>
-
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  checked={wideFormat === false}
-                  onChange={() => {
-                    setWideFormat(false);
-                    refreshPreview();
-                  }}
-                />
-                Force long
-              </label>
-            </div>
+            <p className="text-gray-600 text-xs">
+              Wide = building typology style datasets where each category is a separate
+              column and values are counts. Long = rows like{' '}
+              <code className="px-1 bg-gray-100 rounded text-[0.65rem]">
+                category, value
+              </code>{' '}
+              per admin unit.
+            </p>
           </div>
 
           {/* Summary */}
-          <div className="flex gap-4 mt-3">
-            <div className="bg-green-50 border-green-200 border rounded p-3 w-48 text-center">
-              <div className="font-semibold text-gray-700">Matched ADM3</div>
-              <div className="text-2xl">{matched}</div>
-            </div>
-            <div className="bg-red-50 border-red-200 border rounded p-3 w-48 text-center">
-              <div className="font-semibold text-gray-700">No ADM2 match</div>
-              <div className="text-2xl">{noAdm2}</div>
-            </div>
-            <div className="bg-orange-50 border-orange-200 border rounded p-3 w-48 text-center">
-              <div className="font-semibold text-gray-700">No ADM3 name match</div>
-              <div className="text-2xl">{noAdm3}</div>
-            </div>
+          <div className="border rounded px-3 py-2">
+            <p className="font-semibold text-gray-800 mb-2">Match summary</p>
+            {loadingPreview ? (
+              <p className="text-gray-600 text-xs">Loading preview…</p>
+            ) : previewRows.length === 0 ? (
+              <p className="text-gray-600 text-xs">
+                No preview rows returned. Check that raw categorical rows exist for this
+                dataset and that the shape setting (wide/long) is correct.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {Object.keys(matchSummary).map((key) => (
+                  <div
+                    key={key}
+                    className="border rounded px-2 py-1 text-xs bg-gray-50 flex items-center gap-2"
+                  >
+                    <span className="font-medium">{key}</span>
+                    <span className="text-gray-500">
+                      · {matchSummary[key]} rows
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Mismatch toggle */}
-          <label className="flex items-center gap-2 mt-3">
-            <input
-              type="checkbox"
-              checked={showMismatches}
-              onChange={(e) => setShowMismatches(e.target.checked)}
-            />
-            Show mismatches only
-          </label>
-
-          {/* Preview Table */}
-          {loading && <p>Loading preview…</p>}
-
-          {!loading && filteredRows.length > 0 && (
-            <div className="overflow-x-auto border rounded mt-3">
-              <table className="w-full text-xs border-collapse">
-                <thead className="bg-gray-100 text-gray-700">
-                  <tr>
-                    {Object.keys(filteredRows[0]).map((c) => (
-                      <th key={c} className="px-2 py-1 border-b text-left">
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRows.map((r, i) => (
-                    <tr key={i} className="border-t">
-                      {Object.keys(r).map((c) => (
-                        <td key={c} className="px-2 py-1 border-b whitespace-nowrap">
-                          {String(r[c] ?? '')}
-                        </td>
+          {/* Table preview */}
+          {previewRows.length > 0 && (
+            <div>
+              <p className="font-semibold text-gray-800 mb-1">
+                Preview rows ({previewRows.length})
+              </p>
+              <div className="border rounded overflow-auto max-h-[45vh]">
+                <table className="min-w-full border-collapse text-[0.7rem]">
+                  <thead className="bg-gray-100 sticky top-0 z-10">
+                    <tr>
+                      {allColumns.map((col) => (
+                        <th
+                          key={col}
+                          className="px-2 py-1 border-b text-left font-semibold text-gray-700 whitespace-nowrap"
+                        >
+                          {col}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((row, i) => (
+                      <tr
+                        key={i}
+                        className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                      >
+                        {allColumns.map((col) => (
+                          <td
+                            key={col}
+                            className="px-2 py-1 border-b whitespace-nowrap text-gray-800"
+                          >
+                            {row[col] === null || row[col] === undefined
+                              ? '—'
+                              : String(row[col])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          )}
-
-          {!loading && filteredRows.length === 0 && (
-            <p className="text-gray-500 italic">No rows to show.</p>
           )}
         </div>
 
         {/* Footer */}
-        <div className="border-t px-5 py-3 flex justify-end gap-2">
+        <div className="border-t px-4 py-3 flex justify-between items-center text-xs md:text-sm">
           <button
-            className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300"
-            onClick={onClose}
+            onClick={close}
+            className="px-3 py-1.5 rounded bg-gray-200 hover:bg-gray-300 text-gray-800"
+            disabled={applying}
           >
             Cancel
           </button>
+
           <button
-            className="px-4 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700"
-            onClick={runCleaning}
+            onClick={handleApply}
+            disabled={applying || loadingPreview || previewRows.length === 0}
+            className="px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
           >
-            Run cleaning & save
+            {applying ? 'Applying cleaning…' : 'Apply cleaning and save'}
           </button>
         </div>
       </div>
