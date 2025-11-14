@@ -1,176 +1,423 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import CleanNumericDatasetModal from "@/components/CleanNumericDatasetModal";
-import CleanCategoricalDatasetModal from "@/components/CleanCategoricalDatasetModal";
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
+import CleanCategoricalDatasetModal from '@/components/CleanCategoricalDatasetModal';
 
-export default function RawDatasetPage({ params }: { params: { dataset_id: string } }) {
+interface RawDatasetPageProps {
+  params: { dataset_id: string };
+}
+
+interface DatasetRow {
+  id: string;
+  name: string;
+  description: string | null;
+  type: 'numeric' | 'categorical';
+  admin_level: 'ADM1' | 'ADM2' | 'ADM3' | 'ADM4';
+  category: string | null;
+}
+
+interface NumericSummary {
+  total: number;
+  matched: number;
+  noAdm2: number;
+  noAdm3: number;
+}
+
+interface CategoricalSummary {
+  total: number;
+  matched: number;
+  noAdm2: number;
+  noAdm3: number;
+}
+
+export default function RawDatasetPage({ params }: RawDatasetPageProps) {
   const datasetId = params.dataset_id;
 
-  const [dataset, setDataset] = useState<any>(null);
-  const [rawRows, setRawRows] = useState<any[]>([]);
+  const [dataset, setDataset] = useState<DatasetRow | null>(null);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [rawRows, setRawRows] = useState<any[]>([]);
+  const [rawColumns, setRawColumns] = useState<string[]>([]);
+
+  const [numericSummary, setNumericSummary] = useState<NumericSummary | null>(
+    null
+  );
+  const [categoricalSummary, setCategoricalSummary] =
+    useState<CategoricalSummary | null>(null);
+
   const [showNumericModal, setShowNumericModal] = useState(false);
   const [showCategoricalModal, setShowCategoricalModal] = useState(false);
 
-  async function load() {
-    setLoading(true);
-
-    // Load metadata
-    const { data: ds, error: dsErr } = await supabase
-      .from("datasets")
-      .select("*")
-      .eq("id", datasetId)
-      .single();
-
-    if (dsErr) {
-      console.error(dsErr);
-      setLoading(false);
-      return;
-    }
-    setDataset(ds);
-
-    // Load raw rows based on type
-    if (ds.type === "numeric") {
-      const { data: rows } = await supabase
-        .from("dataset_values_numeric_raw")
-        .select("*")
-        .eq("dataset_id", datasetId)
-        .limit(200);
-
-      setRawRows(rows || []);
-    } else {
-      const { data: rows } = await supabase
-        .from("dataset_values_categorical_raw")
-        .select("*")
-        .eq("dataset_id", datasetId)
-        .limit(200);
-
-      setRawRows(rows || []);
-    }
-
-    setLoading(false);
-  }
-
   useEffect(() => {
-    load();
+    void loadAll();
   }, [datasetId]);
 
-  if (loading || !dataset) {
-    return (
-      <div className="p-6 text-gray-600">
-        Loading raw dataset…
-      </div>
-    );
+  async function loadAll() {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      // 1) Dataset metadata
+      const { data: ds, error: dsError } = await supabase
+        .from('datasets')
+        .select('*')
+        .eq('id', datasetId)
+        .single();
+
+      if (dsError) {
+        console.error('load dataset error', dsError);
+        setErrorMsg(dsError.message || 'Failed to load dataset metadata.');
+        setDataset(null);
+        setRawRows([]);
+        setRawColumns([]);
+        setNumericSummary(null);
+        setCategoricalSummary(null);
+        return;
+      }
+
+      const datasetRow = ds as DatasetRow;
+      setDataset(datasetRow);
+
+      // 2) Raw rows (small preview)
+      const rawTable =
+        datasetRow.type === 'numeric'
+          ? 'dataset_values_numeric_raw'
+          : 'dataset_values_categorical_raw';
+
+      const { data: raw, error: rawError } = await supabase
+        .from(rawTable)
+        .select('*')
+        .eq('dataset_id', datasetId)
+        .limit(200);
+
+      if (rawError) {
+        console.error('load raw error', rawError);
+        setErrorMsg(rawError.message || 'Failed to load raw rows.');
+        setRawRows([]);
+        setRawColumns([]);
+      } else {
+        const rows = (raw || []) as any[];
+        setRawRows(rows);
+
+        if (rows.length > 0) {
+          const first = rows[0] as any;
+          const baseCols = new Set<string>();
+
+          // Always show these if present
+          if ('admin_pcode_raw' in first) baseCols.add('admin_pcode_raw');
+          if ('admin_name_raw' in first) baseCols.add('admin_name_raw');
+          if ('value_raw' in first) baseCols.add('value_raw');
+          if ('category' in first) baseCols.add('category');
+
+          // Expand raw_row JSON keys (original CSV headings)
+          if ('raw_row' in first && first.raw_row) {
+            Object.keys(first.raw_row).forEach((k) => baseCols.add(k));
+          }
+
+          setRawColumns(Array.from(baseCols));
+        } else {
+          setRawColumns([]);
+        }
+      }
+
+      // 3) Summary previews (lightweight analytics)
+      if (datasetRow.type === 'numeric') {
+        await loadNumericSummary(datasetId);
+        setCategoricalSummary(null);
+      } else {
+        await loadCategoricalSummary(datasetId);
+        setNumericSummary(null);
+      }
+    } catch (err: any) {
+      console.error('loadAll exception', err);
+      setErrorMsg(err.message || 'Failed to load dataset.');
+      setDataset(null);
+      setRawRows([]);
+      setRawColumns([]);
+      setNumericSummary(null);
+      setCategoricalSummary(null);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  async function loadNumericSummary(id: string) {
+    try {
+      const { data, error } = await supabase.rpc('preview_numeric_cleaning_v2', {
+        in_dataset: id,
+      });
+      if (error) {
+        console.error('preview_numeric_cleaning_v2 summary error', error);
+        setNumericSummary(null);
+        return;
+      }
+      const rows = (data || []) as { match_status: string | null }[];
+      const total = rows.length;
+      const matched = rows.filter((r) => r.match_status === 'matched').length;
+      const noAdm2 = rows.filter(
+        (r) => r.match_status === 'no_adm2_match'
+      ).length;
+      const noAdm3 = rows.filter(
+        (r) => r.match_status === 'no_adm3_name_match'
+      ).length;
+      setNumericSummary({ total, matched, noAdm2, noAdm3 });
+    } catch (err) {
+      console.error('loadNumericSummary exception', err);
+      setNumericSummary(null);
+    }
+  }
+
+  async function loadCategoricalSummary(id: string) {
+    try {
+      const { data, error } = await supabase.rpc('preview_categorical_cleaning', {
+        in_dataset_id: id,
+        in_wide_format: true,
+      });
+      if (error) {
+        console.error('preview_categorical_cleaning summary error', error);
+        setCategoricalSummary(null);
+        return;
+      }
+      const rows = (data || []) as { match_status: string | null }[];
+      const total = rows.length;
+      const matched = rows.filter((r) => r.match_status === 'matched').length;
+      const noAdm2 = rows.filter(
+        (r) => r.match_status === 'no_adm2_match'
+      ).length;
+      const noAdm3 = rows.filter(
+        (r) => r.match_status === 'no_adm3_name_match'
+      ).length;
+      setCategoricalSummary({ total, matched, noAdm2, noAdm3 });
+    } catch (err) {
+      console.error('loadCategoricalSummary exception', err);
+      setCategoricalSummary(null);
+    }
+  }
+
+  const isNumeric = dataset?.type === 'numeric';
+  const isCategorical = dataset?.type === 'categorical';
+
+  const rawPreviewRows = useMemo(() => rawRows.slice(0, 50), [rawRows]);
+
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">
-        Raw Dataset: {dataset.name}
-      </h1>
-
-      <div>
-        <p><strong>Type:</strong> {dataset.type}</p>
-        <p><strong>Admin level:</strong> {dataset.admin_level}</p>
-        {dataset.description && <p><strong>Description:</strong> {dataset.description}</p>}
+    <div className="p-4 space-y-4">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-800">
+            Raw Dataset: {dataset?.name ?? datasetId}
+          </h1>
+          {dataset && (
+            <p className="text-xs text-gray-500">
+              {dataset.category ? `${dataset.category} · ` : ''}
+              {dataset.admin_level} · {dataset.type}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {isNumeric && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowNumericModal(true)}
+              disabled={!dataset}
+            >
+              Clean numeric dataset
+            </button>
+          )}
+          {isCategorical && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowCategoricalModal(true)}
+              disabled={!dataset}
+            >
+              Clean categorical dataset
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="card p-4">
-        <h2 className="font-semibold mb-2">How this works</h2>
-        <ul className="list-disc pl-5 space-y-1 text-sm">
-          <li>
-            Numeric cleaning uses <code>preview_numeric_cleaning_v2</code> to preview
-            matching, then <code>clean_numeric_dataset</code> to write into
-            <code> dataset_values_numeric</code>.
-          </li>
-          <li>
-            Categorical cleaning reshapes wide/long using <code>preview_categorical_cleaning</code> and writes matches into
-            <code> dataset_values_categorical</code>.
-          </li>
-          <li>
-            Raw rows remain in staging tables (
-            <code>dataset_values_numeric_raw</code> /
-            <code>dataset_values_categorical_raw</code>) and are never modified.
-          </li>
-        </ul>
-      </div>
+      {/* Summary panel */}
+      <div className="card p-3 text-sm">
+        <h2 className="font-semibold text-gray-800 mb-2 text-sm">
+          Cleaning summary preview
+        </h2>
 
-      <div className="flex justify-end">
-        {dataset.type === "numeric" ? (
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowNumericModal(true)}
-          >
-            Clean numeric dataset
-          </button>
-        ) : (
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowCategoricalModal(true)}
-          >
-            Clean categorical dataset
-          </button>
+        {loading && <p className="text-xs text-gray-500">Loading…</p>}
+
+        {!loading && !dataset && (
+          <p className="text-xs text-red-600">
+            {errorMsg || 'Dataset could not be loaded.'}
+          </p>
+        )}
+
+        {!loading && dataset && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {isNumeric && numericSummary && (
+              <div className="border rounded-lg p-2">
+                <h3 className="font-semibold text-gray-800 text-xs mb-1">
+                  Numeric match quality
+                </h3>
+                <div className="grid grid-cols-4 gap-2 text-[11px]">
+                  <div>
+                    <div className="text-gray-500">Total</div>
+                    <div className="font-semibold">
+                      {numericSummary.total.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Matched</div>
+                    <div className="font-semibold text-green-700">
+                      {numericSummary.matched.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">No ADM2</div>
+                    <div className="font-semibold text-red-700">
+                      {numericSummary.noAdm2.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">No ADM3 name</div>
+                    <div className="font-semibold text-orange-700">
+                      {numericSummary.noAdm3.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isCategorical && categoricalSummary && (
+              <div className="border rounded-lg p-2">
+                <h3 className="font-semibold text-gray-800 text-xs mb-1">
+                  Categorical match quality
+                </h3>
+                <div className="grid grid-cols-4 gap-2 text-[11px]">
+                  <div>
+                    <div className="text-gray-500">Total</div>
+                    <div className="font-semibold">
+                      {categoricalSummary.total.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Matched</div>
+                    <div className="font-semibold text-green-700">
+                      {categoricalSummary.matched.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">No ADM2</div>
+                    <div className="font-semibold text-red-700">
+                      {categoricalSummary.noAdm2.toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">No ADM3 name</div>
+                    <div className="font-semibold text-orange-700">
+                      {categoricalSummary.noAdm3.toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {((isNumeric && !numericSummary) ||
+              (isCategorical && !categoricalSummary)) && (
+              <p className="text-xs text-gray-500 col-span-full">
+                No summary data available. Try opening the cleaning modal to see
+                details; if that fails, there may be an RPC error.
+              </p>
+            )}
+          </div>
         )}
       </div>
 
-      <div>
-        <h2 className="font-semibold mb-2">Raw values (preview)</h2>
-
-        <div className="overflow-x-auto border rounded bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-100 text-gray-700">
+      {/* Raw preview */}
+      <div className="card p-3 text-sm">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold text-gray-800 text-sm">
+            Raw uploaded rows
+          </h2>
+          <p className="text-[11px] text-gray-500">
+            Showing first {rawPreviewRows.length.toLocaleString()} rows
+          </p>
+        </div>
+        <div className="overflow-x-auto max-h-[400px] border rounded">
+          <table className="w-full text-xs border-collapse">
+            <thead className="bg-gray-100">
               <tr>
-                {rawRows.length > 0 &&
-                  Object.keys(rawRows[0]).map((col) => (
-                    col !== "raw_row" && (
-                      <th key={col} className="px-3 py-2 border-b text-left">
-                        {col}
-                      </th>
-                    )
-                  ))}
+                {rawColumns.map((c) => (
+                  <th key={c} className="px-2 py-1 border-b text-left">
+                    {c}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rawRows.length === 0 && (
-                <tr>
-                  <td className="p-3 text-gray-500">No raw rows found.</td>
-                </tr>
-              )}
-
-              {rawRows.map((row, i) => (
-                <tr key={i} className="border-b">
-                  {Object.keys(row).map((col) =>
-                    col !== "raw_row" ? (
-                      <td key={col} className="px-3 py-2">
-                        {String(row[col] ?? "")}
+              {rawPreviewRows.map((row, idx) => (
+                <tr key={idx} className="border-t">
+                  {rawColumns.map((col) => {
+                    if (col === 'admin_pcode_raw' || col === 'admin_name_raw' || col === 'value_raw' || col === 'category') {
+                      return (
+                        <td key={col} className="px-2 py-1 border-b">
+                          {row[col] != null ? String(row[col]) : ''}
+                        </td>
+                      );
+                    }
+                    // Assume from raw_row JSON
+                    const rawRow = row.raw_row || {};
+                    return (
+                      <td key={col} className="px-2 py-1 border-b">
+                        {rawRow[col] != null ? String(rawRow[col]) : ''}
                       </td>
-                    ) : null
-                  )}
+                    );
+                  })}
                 </tr>
               ))}
+              {rawPreviewRows.length === 0 && !loading && (
+                <tr>
+                  <td
+                    colSpan={Math.max(rawColumns.length, 1)}
+                    className="px-2 py-2 text-center text-gray-500"
+                  >
+                    No raw rows found for this dataset.
+                  </td>
+                </tr>
+              )}
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={Math.max(rawColumns.length, 1)}
+                    className="px-2 py-2 text-center text-gray-500"
+                  >
+                    Loading…
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {showNumericModal && dataset.type === "numeric" && (
-        <CleanNumericDatasetModal
-          datasetId={datasetId}
-          datasetName={dataset.name}
-          onClose={() => setShowNumericModal(false)}
-          onCleaned={load}
-        />
-      )}
-
-      {showCategoricalModal && dataset.type === "categorical" && (
-        <CleanCategoricalDatasetModal
-          datasetId={datasetId}
-          datasetName={dataset.name}
-          onClose={() => setShowCategoricalModal(false)}
-          onCleaned={load}
-        />
+      {/* Modals */}
+      {dataset && (
+        <>
+          <CleanNumericDatasetModal
+            datasetId={datasetId}
+            datasetName={dataset.name}
+            open={showNumericModal}
+            onOpenChange={setShowNumericModal}
+            onCleaned={loadAll}
+          />
+          <CleanCategoricalDatasetModal
+            datasetId={datasetId}
+            datasetName={dataset.name}
+            open={showCategoricalModal}
+            onOpenChange={setShowCategoricalModal}
+            onCleaned={loadAll}
+          />
+        </>
       )}
     </div>
   );
