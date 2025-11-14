@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
+import DeriveDatasetModal from '@/components/DeriveDatasetModal';
 import { PlusCircleIcon } from 'lucide-react';
 
 type Dataset = {
@@ -20,6 +21,7 @@ export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [deriveOpen, setDeriveOpen] = useState(false);
 
   const loadDatasets = async () => {
     setLoading(true);
@@ -43,19 +45,23 @@ export default function DatasetsPage() {
         <h1 className="text-lg font-semibold text-gray-800">
           Manage Datasets
         </h1>
+
         <div className="flex gap-2">
+          {/* Upload button */}
           <button
             onClick={() => setUploadOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1"
+            className="bg-[var(--ssc-blue)] hover:bg-blue-800 text-white text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1"
           >
             <PlusCircleIcon className="w-4 h-4" /> Upload Dataset
           </button>
-          <Link
-            href="/datasets/derive"
-            className="bg-yellow-400 hover:bg-yellow-500 text-black text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1"
+
+          {/* Derived dataset button */}
+          <button
+            onClick={() => setDeriveOpen(true)}
+            className="bg-[var(--ssc-yellow)] hover:bg-yellow-500 text-black text-sm font-medium px-3 py-1.5 rounded flex items-center gap-1"
           >
             <PlusCircleIcon className="w-4 h-4" /> Create Derived Dataset
-          </Link>
+          </button>
         </div>
       </div>
 
@@ -65,6 +71,17 @@ export default function DatasetsPage() {
           onClose={() => setUploadOpen(false)}
           onUploaded={() => {
             setUploadOpen(false);
+            loadDatasets();
+          }}
+        />
+      )}
+
+      {/* Derived Dataset Modal */}
+      {deriveOpen && (
+        <DeriveDatasetModal
+          onClose={() => setDeriveOpen(false)}
+          onCreated={() => {
+            setDeriveOpen(false);
             loadDatasets();
           }}
         />
@@ -84,6 +101,7 @@ export default function DatasetsPage() {
               <th className="px-3 py-2 border-b text-left">Actions</th>
             </tr>
           </thead>
+
           <tbody>
             {loading && (
               <tr>
@@ -140,6 +158,7 @@ export default function DatasetsPage() {
                     )}
                   </td>
 
+                  {/* Derived vs Raw */}
                   <td className="px-3 py-2">
                     {ds.is_derived ? (
                       <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs font-medium">
@@ -152,6 +171,7 @@ export default function DatasetsPage() {
                     )}
                   </td>
 
+                  {/* Actions */}
                   <td className="px-3 py-2 space-x-2">
                     <Link
                       href={`/datasets/view/${ds.id}`}
