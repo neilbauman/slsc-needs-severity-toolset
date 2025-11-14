@@ -1,249 +1,220 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-interface Props {
+interface CleanCategoricalDatasetModalProps {
   datasetId: string;
   datasetName: string;
   onClose: () => void;
-  onCleaned: () => void;
+  onCleaned: () => void | Promise<void>;
 }
 
-type MatchStatus = 'matched' | 'no_adm2_match' | 'no_adm3_name_match' | string | null;
-
-interface PreviewRow {
-  dataset_id: string;
-  admin_pcode_raw: string | null;
-  admin_name_raw: string | null;
-  category: string | null;
-  value_raw: number | null;
-  region_code: string | null;
-  province_code: string | null;
-  muni_code: string | null;
-  adm1_pcode_psa_to_namria: string | null;
-  adm2_pcode_psa_to_namria: string | null;
-  adm2_pcode_match: string | null;
-  adm2_name_match: string | null;
-  admin_pcode_clean: string | null;
-  admin_name_clean: string | null;
-  match_status: MatchStatus;
-}
+type PreviewRow = Record<string, any>;
 
 export default function CleanCategoricalDatasetModal({
   datasetId,
   datasetName,
   onClose,
   onCleaned,
-}: Props) {
-  const [rows, setRows] = useState<PreviewRow[]>([]);
+}: CleanCategoricalDatasetModalProps) {
+  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [applying, setApplying] = useState(false);
+  const [loadingClean, setLoadingClean] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showMismatchesOnly, setShowMismatchesOnly] = useState(false);
 
-  const [wideFormat, setWideFormat] = useState<boolean>(true); // default for typology sheet
-  const [showMismatchedOnly, setShowMismatchedOnly] = useState<boolean>(false);
-
-  // Fetch preview when dataset or wide/tall toggle changes
   useEffect(() => {
-    async function fetchPreview() {
+    const fetchPreview = async () => {
       setLoadingPreview(true);
       setError(null);
+      try {
+        const { data, error } = await supabase.rpc(
+          'preview_categorical_cleaning',
+          { dataset_id: datasetId }
+        );
 
-      const { data, error } = await supabase.rpc('preview_categorical_cleaning', {
+        if (error) {
+          console.error('preview_categorical_cleaning error:', error);
+          setError('Failed to load categorical cleaning preview.');
+        } else {
+          setPreviewRows((data as PreviewRow[]) || []);
+        }
+      } catch (err: any) {
+        console.error('Unexpected categorical preview error:', err);
+        setError(err.message || 'Unexpected error loading preview.');
+      } finally {
+        setLoadingPreview(false);
+      }
+    };
+
+    if (datasetId) {
+      fetchPreview();
+    }
+  }, [datasetId]);
+
+  const handleRunCleaning = async () => {
+    setLoadingClean(true);
+    setError(null);
+    try {
+      const { error } = await supabase.rpc('clean_categorical_dataset', {
         dataset_id: datasetId,
-        wide_format: wideFormat,
       });
 
       if (error) {
-        console.error('preview_categorical_cleaning error', error);
-        setError(error.message || 'Failed to load preview.');
-        setRows([]);
+        console.error('clean_categorical_dataset error:', error);
+        setError('Categorical cleaning failed.');
       } else {
-        setRows((data ?? []) as PreviewRow[]);
+        await onCleaned();
+        onClose();
       }
-
-      setLoadingPreview(false);
+    } catch (err: any) {
+      console.error('Unexpected categorical cleaning error:', err);
+      setError(err.message || 'Unexpected error during categorical cleaning.');
+    } finally {
+      setLoadingClean(false);
     }
+  };
 
-    fetchPreview();
-  }, [datasetId, wideFormat]);
+  const displayedRows = showMismatchesOnly
+    ? previewRows.filter(
+        (r) =>
+          r.match_status &&
+          typeof r.match_status === 'string' &&
+          r.match_status.toLowerCase() !== 'matched'
+      )
+    : previewRows;
 
-  const { matchedCount, unmatchedCount, visibleRows } = useMemo(() => {
-    const matched = rows.filter((r) => r.match_status === 'matched').length;
-    const unmatched = rows.length - matched;
-    const visible = showMismatchedOnly
-      ? rows.filter((r) => r.match_status !== 'matched')
-      : rows;
-    return {
-      matchedCount: matched,
-      unmatchedCount: unmatched,
-      visibleRows: visible,
-    };
-  }, [rows, showMismatchedOnly]);
-
-  async function handleApply() {
-    setApplying(true);
-    setError(null);
-
-    const { error } = await supabase.rpc('clean_categorical_dataset', {
-      dataset_id: datasetId,
-      wide_format: wideFormat,
-    });
-
-    if (error) {
-      console.error('clean_categorical_dataset error', error);
-      setError(error.message || 'Failed to apply cleaning.');
-      setApplying(false);
-      return;
-    }
-
-    await onCleaned();
-    setApplying(false);
-    onClose();
-  }
+  const columns = previewRows.length
+    ? Array.from(
+        new Set(previewRows.flatMap((r) => Object.keys(r || {})))
+      )
+    : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-3">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-3">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Clean Categorical Dataset — {datasetName}
-          </h2>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Clean Categorical Dataset
+            </h2>
+            <p className="text-xs text-gray-500">
+              {datasetName} — reshape (wide → long if needed), clean admin PCodes
+              / names, and write normalized categories.
+            </p>
+          </div>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-xl leading-none"
-            disabled={applying}
+            className="text-gray-500 hover:text-gray-700 text-xl"
+            disabled={loadingClean}
           >
             ×
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 text-sm space-y-4">
-          {/* Toggles */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <input
-                id="wide_format"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={wideFormat}
-                onChange={(e) => setWideFormat(e.target.checked)}
-                disabled={loadingPreview || applying}
-              />
-              <label htmlFor="wide_format" className="text-gray-800">
-                Wide-format data (column headings are categories)
-              </label>
-            </div>
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">
+          {error && <p className="text-red-600">{error}</p>}
 
-            <div className="flex items-center gap-2">
-              <input
-                id="show_mismatched_only"
-                type="checkbox"
-                className="h-4 w-4"
-                checked={showMismatchedOnly}
-                onChange={(e) => setShowMismatchedOnly(e.target.checked)}
-                disabled={loadingPreview || applying}
-              />
-              <label htmlFor="show_mismatched_only" className="text-gray-800">
-                Show mismatched rows only
-              </label>
-            </div>
+          <div className="bg-purple-50 border border-purple-100 rounded-md px-3 py-2 text-xs text-purple-800">
+            <p className="font-semibold mb-1">What this will do</p>
+            <ul className="list-disc pl-4 space-y-1">
+              <li>
+                Reshape raw categorical input (detecting wide vs normalized where
+                possible).
+              </li>
+              <li>
+                Clean and match Admin PCodes / names using the same logic as numeric
+                cleaning.
+              </li>
+              <li>
+                Normalize to long format and write into{' '}
+                <code>dataset_values_categorical</code>:
+                <code>dataset_id</code>, <code>admin_pcode</code>,{' '}
+                <code>category</code>, <code>value</code>.
+              </li>
+              <li>
+                Raw rows remain in <code>dataset_values_categorical_raw</code> for
+                audit / debugging.
+              </li>
+            </ul>
           </div>
 
-          {/* Counts */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-green-700">
-                Matched
-              </div>
-              <div className="text-2xl font-semibold text-green-800">
-                {matchedCount}
-              </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <input
+                id="mismatch-only-categorical"
+                type="checkbox"
+                className="h-4 w-4"
+                checked={showMismatchesOnly}
+                onChange={(e) => setShowMismatchesOnly(e.target.checked)}
+              />
+              <label
+                htmlFor="mismatch-only-categorical"
+                className="text-xs text-gray-700"
+              >
+                Show rows with matching problems only (non-<code>matched</code>{' '}
+                status)
+              </label>
             </div>
-
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-red-700">
-                Unmatched
-              </div>
-              <div className="text-2xl font-semibold text-red-800">
-                {unmatchedCount}
-              </div>
-            </div>
+            {loadingPreview && (
+              <span className="text-xs text-gray-500">
+                Loading preview…
+              </span>
+            )}
           </div>
-
-          {error && (
-            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {error}
-            </div>
-          )}
 
           {/* Preview table */}
-          <div className="border rounded-lg overflow-hidden">
-            <div className="bg-gray-50 border-b px-3 py-2 text-xs text-gray-700">
-              Preview (first {visibleRows.length} rows in current filter)
-            </div>
-            <div className="max-h-[45vh] overflow-auto">
-              {loadingPreview ? (
-                <div className="px-3 py-4 text-gray-500 text-sm">
-                  Loading preview…
-                </div>
-              ) : visibleRows.length === 0 ? (
-                <div className="px-3 py-4 text-gray-500 text-sm">
-                  No rows.
-                </div>
-              ) : (
-                <table className="w-full text-xs border-collapse">
-                  <thead className="bg-gray-100 text-gray-700">
-                    <tr>
-                      <th className="px-2 py-1 border-b text-left">PSA PCode (raw)</th>
-                      <th className="px-2 py-1 border-b text-left">Admin name (raw)</th>
-                      <th className="px-2 py-1 border-b text-left">Category</th>
-                      <th className="px-2 py-1 border-b text-right">Value</th>
-                      <th className="px-2 py-1 border-b text-left">ADM2 match</th>
-                      <th className="px-2 py-1 border-b text-left">ADM3 clean pcode</th>
-                      <th className="px-2 py-1 border-b text-left">ADM3 clean name</th>
-                      <th className="px-2 py-1 border-b text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleRows.map((row, i) => (
-                      <tr key={i} className="border-t">
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.admin_pcode_raw ?? '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.admin_name_raw ?? '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.category ?? '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b text-right">
-                          {row.value_raw ?? '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.adm2_name_match
-                            ? `${row.adm2_name_match} (${row.adm2_pcode_match})`
-                            : '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.admin_pcode_clean ?? '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.admin_name_clean ?? '—'}
-                        </td>
-                        <td className="px-2 py-1 border-b whitespace-nowrap">
-                          {row.match_status ?? '—'}
-                        </td>
-                      </tr>
+          {columns.length ? (
+            <div className="overflow-x-auto border rounded-md bg-white">
+              <table className="min-w-full text-xs border-collapse">
+                <thead className="bg-gray-100 text-gray-700">
+                  <tr>
+                    {columns.map((col) => (
+                      <th
+                        key={col}
+                        className="px-2 py-1 border-b text-left font-semibold"
+                      >
+                        {col}
+                      </th>
                     ))}
-                  </tbody>
-                </table>
-              )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedRows.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={columns.length}
+                        className="px-2 py-2 text-center text-gray-500"
+                      >
+                        No rows to display with current filter.
+                      </td>
+                    </tr>
+                  )}
+                  {displayedRows.map((row, i) => (
+                    <tr key={i} className="border-t">
+                      {columns.map((col) => (
+                        <td key={col} className="px-2 py-1 border-b">
+                          {row[col] === null || row[col] === undefined
+                            ? '—'
+                            : String(row[col])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+          ) : (
+            !loadingPreview && (
+              <p className="text-xs text-gray-500">
+                No preview rows returned from{' '}
+                <code>preview_categorical_cleaning</code>.
+              </p>
+            )
+          )}
         </div>
 
         {/* Footer */}
@@ -251,16 +222,16 @@ export default function CleanCategoricalDatasetModal({
           <button
             onClick={onClose}
             className="px-3 py-1.5 text-sm rounded bg-gray-200 hover:bg-gray-300"
-            disabled={applying}
+            disabled={loadingClean}
           >
             Cancel
           </button>
           <button
-            onClick={handleApply}
-            disabled={applying || rows.length === 0}
-            className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            onClick={handleRunCleaning}
+            disabled={loadingClean}
+            className="px-3 py-1.5 text-sm rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60"
           >
-            {applying ? 'Applying…' : 'Apply Cleaning'}
+            {loadingClean ? 'Running cleaning…' : 'Run cleaning & save'}
           </button>
         </div>
       </div>
