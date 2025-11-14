@@ -1,139 +1,357 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 interface Props {
   datasetId: string;
+  datasetName: string;
   open: boolean;
-  onClose: () => void;
+  onOpenChange: (open: boolean) => void;
+  onCleaned: () => Promise<void>;
 }
 
-interface NumericRow {
-  raw_admin_pcode: string;
-  raw_admin_name: string;
-  raw_value: number | null;
-  adm3_pcode: string | null;
-  adm3_name: string | null;
-  match_status: string;
+interface NumericCountRow {
+  match_status: string | null;
+  count_rows: number | null;
 }
 
-interface CountRow {
-  match_status: string;
-  count_rows: number;
-  total_rows: number;
+interface NumericPreviewRow {
+  admin_pcode_raw: string | null;
+  admin_name_raw: string | null;
+  value_raw: number | null;
+  region_code: string | null;
+  province_code: string | null;
+  muni_code: string | null;
+  adm2_pcode_psa: string | null;
+  adm2_name_match: string | null;
+  admin_pcode_clean: string | null;
+  admin_name_clean: string | null;
+  match_status: string | null;
 }
 
-export default function CleanNumericDatasetModal({ datasetId, open, onClose }: Props) {
-  const [rows, setRows] = useState<NumericRow[]>([]);
-  const [summary, setSummary] = useState<{ matched: number; noAdm2: number; noAdm3: number; total: number }>({
-    matched: 0,
-    noAdm2: 0,
-    noAdm3: 0,
-    total: 0,
-  });
+export default function CleanNumericDatasetModal({
+  datasetId,
+  datasetName,
+  open,
+  onOpenChange,
+  onCleaned,
+}: Props) {
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [counts, setCounts] = useState<NumericCountRow[]>([]);
+  const [rows, setRows] = useState<NumericPreviewRow[]>([]);
+
+  const close = () => onOpenChange(false);
 
   useEffect(() => {
     if (!open) return;
-
-    const load = async () => {
-      // Load summary
-      const { data: summaryData } = await supabase.rpc<CountRow[]>(
-        "preview_numeric_cleaning_v2_counts",
-        { in_dataset: datasetId }
-      );
-
-      if (summaryData) {
-        const matched = summaryData.find((r) => r.match_status === "matched")?.count_rows ?? 0;
-        const noAdm2 = summaryData.find((r) => r.match_status === "no_adm2_match")?.count_rows ?? 0;
-        const noAdm3 = summaryData.find((r) => r.match_status === "no_adm3_name_match")?.count_rows ?? 0;
-        const total = summaryData[0]?.total_rows ?? matched + noAdm2 + noAdm3;
-
-        setSummary({ matched, noAdm2, noAdm3, total });
-      }
-
-      // Load preview rows
-      const { data: previewData } = await supabase.rpc<NumericRow[]>(
-        "preview_numeric_cleaning_v2",
-        { in_dataset: datasetId }
-      );
-
-      if (previewData) setRows(previewData.slice(0, 100)); // Preview first 100
-    };
-
-    load();
+    void loadPreview();
   }, [open, datasetId]);
 
+  async function loadPreview() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // 1) Counts for ALL rows (no 1000-row limit)
+      const { data: countData, error: countErr } =
+        await supabase.rpc("preview_numeric_cleaning_v2_counts", {
+          in_dataset: datasetId,
+        });
+
+      if (countErr) {
+        throw countErr;
+      }
+      setCounts((countData || []) as NumericCountRow[]);
+
+      // 2) Detailed rows (we’ll only *render* up to 1000)
+      const { data: previewData, error: previewErr } =
+        await supabase.rpc("preview_numeric_cleaning_v2", {
+          in_dataset: datasetId,
+        });
+
+      if (previewErr) {
+        throw previewErr;
+      }
+      setRows((previewData || []) as NumericPreviewRow[]);
+    } catch (e: any) {
+      console.error("loadPreview numeric error", e);
+      setError(e?.message ?? "Failed to load preview");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleApply(e: React.FormEvent) {
+    e.preventDefault();
+    setApplying(true);
+    setError(null);
+
+    try {
+      // Use the existing cleaning RPC wired to preview_numeric_cleaning_v2
+      const { error: rpcError } = await supabase.rpc(
+        "apply_numeric_cleaning_psa_to_namria",
+        {
+          in_dataset: datasetId,
+        }
+      );
+
+      if (rpcError) {
+        throw rpcError;
+      }
+
+      await onCleaned();
+      close();
+    } catch (e: any) {
+      console.error("apply numeric cleaning error", e);
+      setError(e?.message ?? "Failed to apply cleaning");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  if (!open) return null;
+
+  const totalRows = counts.reduce(
+    (sum, c) => sum + (c.count_rows ?? 0),
+    0
+  );
+  const matched =
+    counts.find((c) => c.match_status === "matched")?.count_rows ?? 0;
+  const noAdm2 =
+    counts.find((c) => c.match_status === "no_adm2_match")?.count_rows ?? 0;
+  const noAdm3 =
+    counts.find((c) => c.match_status === "no_adm3_name_match")?.count_rows ??
+    0;
+
+  const limitedRows = rows.slice(0, 1000);
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <h2 className="text-xl font-semibold mb-4">Clean Numeric Dataset</h2>
-
-        {/* SUMMARY */}
-        <div className="grid grid-cols-4 gap-4 mb-4">
-          <SummaryCard label="Matched" value={summary.matched} tone="good" />
-          <SummaryCard label="No ADM2" value={summary.noAdm2} tone="bad" />
-          <SummaryCard label="No ADM3" value={summary.noAdm3} tone="warn" />
-          <SummaryCard label="Total" value={summary.total} tone="neutral" />
+    <>
+      <div className="modal-backdrop" onClick={close} />
+      <div className="modal flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="border-b px-4 py-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">
+              Clean numeric dataset
+            </h2>
+            <p className="text-sm text-gray-600">
+              {datasetName} ({datasetId})
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            className="text-gray-500 hover:text-gray-700 text-xl leading-none"
+          >
+            ×
+          </button>
         </div>
 
-        {/* TABLE */}
-        <div className="flex-1 overflow-auto border rounded">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-100 sticky top-0">
-              <tr>
-                <Th>Raw PCode</Th>
-                <Th>Raw Name</Th>
-                <Th>Value</Th>
-                <Th>ADM3 PCode</Th>
-                <Th>ADM3 Name</Th>
-                <Th>Status</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} className="border-t">
-                  <Td>{r.raw_admin_pcode}</Td>
-                  <Td>{r.raw_admin_name}</Td>
-                  <Td>{r.raw_value ?? "—"}</Td>
-                  <Td>{r.adm3_pcode ?? "—"}</Td>
-                  <Td>{r.adm3_name ?? "—"}</Td>
-                  <Td className="capitalize">{r.match_status}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Body (scrollable) */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+          {/* Summary panel */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <SummaryBox
+              label="Total rows"
+              value={totalRows}
+              tone="neutral"
+            />
+            <SummaryBox
+              label="Matched ADM3"
+              value={matched}
+              tone="good"
+            />
+            <SummaryBox
+              label="No ADM2 match"
+              value={noAdm2}
+              tone="bad"
+            />
+            <SummaryBox
+              label="No ADM3 name match"
+              value={noAdm3}
+              tone="warn"
+            />
+          </div>
+
+          {loading && (
+            <div className="text-sm text-gray-600">
+              Loading preview…
+            </div>
+          )}
+
+          {error && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          {/* Preview table */}
+          {!loading && !error && limitedRows.length > 0 && (
+            <div className="card p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold text-sm">
+                  Sample of cleaned mapping (showing up to 1000 rows)
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Using PSA ADM3 pcode → NAMRIA ADM2/ADM3 match.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <Th>Raw ADM3 PSA pcode</Th>
+                      <Th>Raw name</Th>
+                      <Th className="text-right">Raw value</Th>
+                      <Th>Region</Th>
+                      <Th>Province</Th>
+                      <Th>Municipality</Th>
+                      <Th>NAMRIA ADM2 pcode</Th>
+                      <Th>NAMRIA ADM2 name</Th>
+                      <Th>NAMRIA ADM3 pcode</Th>
+                      <Th>NAMRIA ADM3 name</Th>
+                      <Th>Match status</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {limitedRows.map((row, idx) => (
+                      <tr
+                        key={`${row.admin_pcode_raw ?? "row"}-${idx}`}
+                        className={
+                          idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                        }
+                      >
+                        <Td>{row.admin_pcode_raw ?? "—"}</Td>
+                        <Td>{row.admin_name_raw ?? "—"}</Td>
+                        <Td className="text-right">
+                          {row.value_raw ?? "—"}
+                        </Td>
+                        <Td>{row.region_code ?? "—"}</Td>
+                        <Td>{row.province_code ?? "—"}</Td>
+                        <Td>{row.muni_code ?? "—"}</Td>
+                        <Td>{row.adm2_pcode_psa ?? "—"}</Td>
+                        <Td>{row.adm2_name_match ?? "—"}</Td>
+                        <Td>{row.admin_pcode_clean ?? "—"}</Td>
+                        <Td>{row.admin_name_clean ?? "—"}</Td>
+                        <Td className="capitalize">
+                          {row.match_status ?? "—"}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length > 1000 && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Showing first 1000 rows of {rows.length} total.
+                </p>
+              )}
+            </div>
+          )}
+
+          {!loading && !error && limitedRows.length === 0 && (
+            <div className="text-sm text-gray-600">
+              No preview rows found for this dataset.
+            </div>
+          )}
         </div>
 
-        {/* FOOTER */}
-        <div className="sticky bottom-0 bg-white border-t pt-4 flex justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary">Apply Cleaning</button>
+        {/* Footer (fixed to bottom of modal) */}
+        <div className="border-t px-4 py-3 bg-white flex items-center justify-between">
+          <p className="text-xs text-gray-600">
+            This will overwrite existing cleaned numeric values for this
+            dataset.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={close}
+              disabled={applying}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleApply}
+              disabled={applying || loading}
+            >
+              {applying ? "Applying…" : "Apply & save cleaned dataset"}
+            </button>
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </>
   );
 }
 
-function Th({ children }: { children: string }) {
-  return <th className="text-left px-3 py-2 font-semibold">{children}</th>;
-}
-function Td({ children }: any) {
-  return <td className="px-3 py-2">{children}</td>;
+// Simple internal helpers (no external deps)
+
+function SummaryBox({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "good" | "bad" | "warn" | "neutral";
+}) {
+  let bg = "bg-white";
+  let border = "border-gray-200";
+  if (tone === "good") {
+    bg = "bg-green-50";
+    border = "border-green-200";
+  } else if (tone === "bad") {
+    bg = "bg-red-50";
+    border = "border-red-200";
+  } else if (tone === "warn") {
+    bg = "bg-yellow-50";
+    border = "border-yellow-200";
+  }
+
+  return (
+    <div className={`card px-3 py-2 border ${bg} ${border}`}>
+      <div className="text-xs text-gray-600">{label}</div>
+      <div className="text-lg font-semibold">{value}</div>
+    </div>
+  );
 }
 
-function SummaryCard({ label, value, tone }: { label: string; value: number; tone: string }) {
-  const colors: any = {
-    good: "bg-green-50 text-green-700",
-    bad: "bg-red-50 text-red-700",
-    warn: "bg-yellow-50 text-yellow-700",
-    neutral: "bg-gray-50 text-gray-700",
-  };
+function Th({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className={`p-3 rounded border ${colors[tone]} text-center`}>
-      <div className="text-sm">{label}</div>
-      <div className="text-xl font-semibold">{value}</div>
-    </div>
+    <th
+      className={
+        "px-2 py-1 text-left text-[11px] font-semibold text-gray-700 " +
+        className
+      }
+    >
+      {children}
+    </th>
+  );
+}
+
+function Td({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <td className={"px-2 py-1 align-top text-[11px] " + className}>
+      {children}
+    </td>
   );
 }
