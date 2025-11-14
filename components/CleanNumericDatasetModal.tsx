@@ -66,22 +66,24 @@ export default function CleanNumericDatasetModal({
 
     try {
       // 1) counts (full dataset)
-      const { data: countData, error: countErr } = await supabase.rpc<
-        CountRow[]
-      >("preview_numeric_cleaning_v2_counts", {
+      const {
+        data: countData,
+        error: countErr,
+      } = await supabase.rpc("preview_numeric_cleaning_v2_counts", {
         in_dataset: datasetId,
       });
 
       if (countErr) {
         setError(countErr.message);
       } else {
-        setCounts(countData ?? []);
+        setCounts((countData as CountRow[] | null) ?? []);
       }
 
       // 2) preview up to 1,000 rows on the client side
-      const { data: rowsData, error: rowsErr } = await supabase.rpc<
-        NumericPreviewRow[]
-      >("preview_numeric_cleaning_v2", {
+      const {
+        data: rowsData,
+        error: rowsErr,
+      } = await supabase.rpc("preview_numeric_cleaning_v2", {
         in_dataset: datasetId,
       });
 
@@ -89,7 +91,8 @@ export default function CleanNumericDatasetModal({
         setError((prev) => prev ?? rowsErr.message);
         setPreviewRows([]);
       } else {
-        setPreviewRows((rowsData ?? []).slice(0, 1000));
+        const rows = (rowsData as NumericPreviewRow[] | null) ?? [];
+        setPreviewRows(rows.slice(0, 1000));
       }
     } catch (err: any) {
       setError(err?.message ?? "Unexpected error while loading preview.");
