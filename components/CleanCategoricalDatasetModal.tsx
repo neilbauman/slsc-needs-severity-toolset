@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Loader2, X } from 'lucide-react';
 
 interface CleanCategoricalDatasetModalProps {
   datasetId: string;
@@ -19,119 +18,112 @@ export default function CleanCategoricalDatasetModal({
   onOpenChange,
   onCleaned,
 }: CleanCategoricalDatasetModalProps) {
-  const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      loadPreview();
-    }
-  }, [open]);
-
-  const loadPreview = async () => {
-    setLoading(true);
-    setError(null);
-
-    const { data, error } = await supabase
-      .rpc('preview_categorical_cleaning_v2', { dataset_id: datasetId });
-
-    if (error) {
-      console.error('Preview error:', error);
-      setError(error.message);
-    } else {
-      setPreview(data || []);
-    }
-
-    setLoading(false);
-  };
-
-  const handleSave = async () => {
-    setLoading(true);
-    setError(null);
-
-    const { error } = await supabase.rpc('apply_categorical_cleaning_v2', {
-      dataset_id: datasetId,
-    });
-
-    if (error) {
-      console.error('Apply error:', error);
-      setError(error.message);
-      setLoading(false);
-      return;
-    }
-
-    await onCleaned();
-    onOpenChange(false);
-  };
 
   if (!open) return null;
 
+  useEffect(() => {
+    if (open) fetchPreview();
+  }, [open]);
+
+  const fetchPreview = async () => {
+    setLoading(true);
+    setError(null);
+    const { data, error } = await supabase.rpc('preview_categorical_cleaning_v2', {
+      dataset_id: datasetId,
+    });
+    setLoading(false);
+    if (error) setError(error.message);
+    else setPreview(data || []);
+  };
+
+  const handleClean = async () => {
+    if (!confirm('Confirm cleaning this dataset?')) return;
+
+    setCleaning(true);
+    const { error } = await supabase.rpc('clean_categorical_dataset', {
+      dataset_id: datasetId,
+    });
+    setCleaning(false);
+
+    if (error) alert('Cleaning failed: ' + error.message);
+    else {
+      alert('Dataset successfully cleaned.');
+      await onCleaned();
+      onOpenChange(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative">
-        <button
-          className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
-          onClick={() => onOpenChange(false)}
-        >
-          <X size={20} />
-        </button>
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold text-gray-800">
+            Clean Categorical Dataset — {datasetName}
+          </h2>
+          <button
+            onClick={() => onOpenChange(false)}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            ✕
+          </button>
+        </div>
 
-        <h2 className="text-lg font-semibold mb-2">
-          Clean categorical dataset
-        </h2>
-        <p className="text-gray-600 text-sm mb-4">{datasetName}</p>
-
-        {loading ? (
-          <div className="flex items-center justify-center h-32 text-gray-600">
-            <Loader2 className="animate-spin mr-2" /> Loading preview…
-          </div>
-        ) : error ? (
-          <div className="text-red-600 bg-red-50 p-3 rounded border border-red-200 text-sm">
+        {error && (
+          <div className="bg-red-100 border border-red-300 text-red-800 px-3 py-2 rounded mb-3 text-sm">
             {error}
           </div>
-        ) : preview.length === 0 ? (
-          <div className="text-gray-500 text-sm text-center">
-            No rows found in preview.
-          </div>
-        ) : (
-          <div className="overflow-x-auto border rounded-md mb-4">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-100">
+        )}
+
+        {loading ? (
+          <p className="text-gray-500 text-sm">Loading preview…</p>
+        ) : preview.length > 0 ? (
+          <>
+            <table className="min-w-full text-sm border rounded">
+              <thead className="bg-gray-100 text-gray-700">
                 <tr>
-                  <th className="px-3 py-2 text-left">Match Status</th>
-                  <th className="px-3 py-2 text-left">Count</th>
-                  <th className="px-3 py-2 text-left">Percentage</th>
+                  {Object.keys(preview[0]).map((col) => (
+                    <th key={col} className="px-3 py-2 text-left">
+                      {col}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {preview.map((r, i) => (
-                  <tr key={i} className="border-t hover:bg-gray-50">
-                    <td className="px-3 py-2">{r.match_status}</td>
-                    <td className="px-3 py-2">{r.count}</td>
-                    <td className="px-3 py-2">{r.percentage?.toFixed(2)}%</td>
+                {preview.map((row, i) => (
+                  <tr key={i} className="border-t">
+                    {Object.values(row).map((val, j) => (
+                      <td key={j} className="px-3 py-1">
+                        {String(val)}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
 
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={() => onOpenChange(false)}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md text-sm font-medium"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="px-4 py-2 bg-[var(--ssc-blue)] hover:bg-blue-800 text-white rounded-md text-sm font-medium disabled:opacity-50"
-          >
-            {loading ? 'Cleaning…' : 'Apply & Save Cleaned Dataset'}
-          </button>
-        </div>
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={() => onOpenChange(false)}
+                className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClean}
+                disabled={cleaning}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+              >
+                {cleaning ? 'Cleaning…' : 'Confirm Clean'}
+              </button>
+            </div>
+          </>
+        ) : (
+          !error && <p className="text-gray-500 text-sm">No preview data.</p>
+        )}
       </div>
     </div>
   );
