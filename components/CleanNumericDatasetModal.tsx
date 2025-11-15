@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Loader2, Eye, CheckCircle2, AlertTriangle, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Loader2, Eye, CheckCircle2, X } from 'lucide-react';
 
 interface CleanNumericDatasetModalProps {
   datasetId: string;
@@ -108,6 +107,7 @@ export default function CleanNumericDatasetModal({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 space-y-4">
+        {/* Header */}
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-semibold text-gray-800">
             Clean numeric dataset
@@ -142,7 +142,9 @@ export default function CleanNumericDatasetModal({
                   r.match_status
                 )}`}
               >
-                <p className="font-semibold capitalize">{r.match_status.replaceAll('_', ' ')}</p>
+                <p className="font-semibold capitalize">
+                  {r.match_status.replaceAll('_', ' ')}
+                </p>
                 <p className="text-2xl font-bold">{r.count.toLocaleString()}</p>
                 <p className="text-sm opacity-70">
                   {r.percentage ? `${r.percentage.toFixed(2)}%` : '—'}
@@ -157,13 +159,12 @@ export default function CleanNumericDatasetModal({
           boundaries. It will overwrite existing cleaned values.
         </p>
 
-        <Button
-          variant="link"
+        <button
           onClick={handleViewSample}
-          className="text-[var(--ssc-blue)] hover:underline"
+          className="text-[var(--ssc-blue)] hover:underline flex items-center text-sm font-medium"
         >
           <Eye size={16} className="mr-1" /> View sample rows
-        </Button>
+        </button>
 
         {showPreview && (
           <div className="border rounded-md p-2 max-h-64 overflow-y-auto text-sm">
@@ -188,29 +189,30 @@ export default function CleanNumericDatasetModal({
           </div>
         )}
 
+        {/* Footer */}
         <div className="flex justify-end gap-3 pt-4">
-          <Button
-            variant="secondary"
+          <button
             onClick={() => onOpenChange(false)}
             disabled={saving}
+            className="px-4 py-2 rounded-md text-sm bg-gray-100 hover:bg-gray-200 text-gray-800"
           >
             Cancel
-          </Button>
-          <Button
+          </button>
+          <button
             onClick={handleApply}
             disabled={saving}
-            className="bg-[var(--ssc-blue)] hover:bg-blue-800 text-white"
+            className="px-4 py-2 rounded-md text-sm bg-[var(--ssc-blue)] hover:bg-blue-800 text-white"
           >
             {saving ? (
               <>
-                <Loader2 className="animate-spin mr-2" size={16} /> Applying…
+                <Loader2 className="animate-spin mr-2 inline" size={16} /> Applying…
               </>
             ) : (
               <>
-                <CheckCircle2 className="mr-2" size={16} /> Apply & Save Cleaned Dataset
+                <CheckCircle2 className="mr-2 inline" size={16} /> Apply & Save Cleaned Dataset
               </>
             )}
-          </Button>
+          </button>
         </div>
       </div>
     </div>
