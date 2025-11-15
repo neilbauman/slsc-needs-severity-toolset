@@ -29,13 +29,13 @@ export default function CleanNumericDatasetModal({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const BATCH_SIZE = 2000;
+
   // ───────────────────────────────
   // Load preview data
   // ───────────────────────────────
   const loadPreview = async () => {
     setLoadingPreview(true);
-    setError(null);
-
     try {
       const { data, error } = await supabase.rpc('preview_numeric_cleaning_v2', {
         dataset_id: datasetId,
@@ -55,24 +55,21 @@ export default function CleanNumericDatasetModal({
   }, [datasetId]);
 
   // ───────────────────────────────
-  // Batch clean operation
+  // Incremental cleaner
   // ───────────────────────────────
-  const BATCH_SIZE = 5000;
-  const MAX_BATCHES = 1000; // safety limit
-
   const runCleaning = async () => {
     setCleaning(true);
     setError(null);
     setSuccess(false);
     setProgress(0);
 
-    try {
-      let offset = 0;
-      let batch = 0;
-      let done = false;
+    let offset = 0;
+    let more = true;
+    let iteration = 0;
 
-      while (!done && batch < MAX_BATCHES) {
-        const { error } = await supabase.rpc('clean_numeric_dataset_v2', {
+    try {
+      while (more) {
+        const { data, error } = await supabase.rpc('clean_numeric_dataset_v2', {
           in_dataset_id: datasetId,
           in_offset: offset,
           in_limit: BATCH_SIZE,
@@ -83,34 +80,28 @@ export default function CleanNumericDatasetModal({
           throw error;
         }
 
+        more = data === true;
         offset += BATCH_SIZE;
-        batch += 1;
-        const pct = Math.min(100, Math.round((batch * 10)));
-        setProgress(pct);
+        iteration += 1;
 
-        // optional: short delay between batches
+        setProgress((iteration * BATCH_SIZE) % 100);
+
         await new Promise((r) => setTimeout(r, 150));
-
-        // in your RPC you should return `done` boolean once finished
-        // for now we'll simulate "stop after a few batches" for large datasets
-        if (pct >= 100) done = true;
       }
 
+      setProgress(100);
       setSuccess(true);
       await onCleaned();
     } catch (err: any) {
       console.error('Cleaning error:', err);
-      setError(
-        err?.message ||
-          'Cleaning failed. See console for details.'
-      );
+      setError(err?.message || 'Cleaning failed.');
     } finally {
       setCleaning(false);
     }
   };
 
   // ───────────────────────────────
-  // Rendering helpers
+  // UI rendering
   // ───────────────────────────────
   const renderPreview = () => {
     if (loadingPreview)
@@ -125,7 +116,7 @@ export default function CleanNumericDatasetModal({
         <div className="p-4 text-red-600 text-sm text-center">{error}</div>
       );
 
-    if (!previewData || previewData.length === 0)
+    if (!previewData?.length)
       return (
         <div className="p-4 text-gray-500 text-sm text-center">
           No data available for preview.
@@ -152,10 +143,6 @@ export default function CleanNumericDatasetModal({
             </div>
           ))}
         </div>
-
-        <p className="text-xs text-gray-500 mt-4 text-center">
-          This will overwrite existing cleaned numeric values for this dataset.
-        </p>
       </div>
     );
   };
@@ -173,24 +160,6 @@ export default function CleanNumericDatasetModal({
     </div>
   );
 
-  const renderResult = () => {
-    if (success)
-      return (
-        <div className="text-center py-4 text-green-700 text-sm">
-          ✅ Cleaning completed successfully!
-        </div>
-      );
-
-    if (error)
-      return (
-        <div className="text-center py-4 text-red-600 text-sm">
-          ⚠️ Cleaning failed. See console for details.
-        </div>
-      );
-
-    return null;
-  };
-
   // ───────────────────────────────
   // Main modal render
   // ───────────────────────────────
@@ -204,7 +173,17 @@ export default function CleanNumericDatasetModal({
 
         {!cleaning && !success && renderPreview()}
         {cleaning && renderCleaningProgress()}
-        {!cleaning && renderResult()}
+        {!cleaning && success && (
+          <div className="text-center py-4 text-green-700 text-sm">
+            ✅ Cleaning completed successfully!
+          </div>
+        )}
+
+        {error && !cleaning && (
+          <div className="text-center py-4 text-red-600 text-sm">
+            ⚠️ {error}
+          </div>
+        )}
 
         <div className="mt-6 flex justify-end space-x-3">
           {!cleaning && !success && (
@@ -215,7 +194,7 @@ export default function CleanNumericDatasetModal({
               >
                 Cancel
               </button>
-              {!error && previewData.length > 0 && (
+              {!error && (
                 <button
                   onClick={runCleaning}
                   className="px-4 py-2 text-sm bg-[var(--ssc-blue)] text-white rounded hover:bg-blue-800"
