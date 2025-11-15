@@ -12,8 +12,8 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
   const [loading, setLoading] = useState(true);
   const [showNumericModal, setShowNumericModal] = useState(false);
   const [showCategoricalModal, setShowCategoricalModal] = useState(false);
+  const [dataSource, setDataSource] = useState<'cleaned' | 'raw' | null>(null);
 
-  // Load dataset info and its values
   useEffect(() => {
     loadDataset();
   }, [datasetId]);
@@ -35,28 +35,52 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
 
     setDataset(datasetData);
 
-    // Load dataset values depending on type
-    const valueTable =
-      datasetData.type === 'numeric'
-        ? 'dataset_values_numeric'
-        : 'dataset_values_categorical';
+    const isNumeric = datasetData.type === 'numeric';
+    const cleanedTable = isNumeric
+      ? 'dataset_values_numeric'
+      : 'dataset_values_categorical';
+    const rawTable = isNumeric
+      ? 'dataset_values_numeric_raw'
+      : 'dataset_values_categorical_raw';
 
-    const { data: valuesData, error: valuesError } = await supabase
-      .from(valueTable)
+    // Try loading from cleaned table first
+    const { data: cleaned, error: cleanedError } = await supabase
+      .from(cleanedTable)
       .select('*')
       .eq('dataset_id', datasetId)
-      .limit(500); // keep it light for browser view
+      .limit(500);
 
-    if (valuesError) console.error(valuesError);
-    else setValues(valuesData || []);
+    if (cleanedError) console.error(cleanedError);
+
+    if (cleaned && cleaned.length > 0) {
+      setValues(cleaned);
+      setDataSource('cleaned');
+    } else {
+      // fallback to raw table
+      const { data: raw, error: rawError } = await supabase
+        .from(rawTable)
+        .select('*')
+        .eq('dataset_id', datasetId)
+        .limit(500);
+
+      if (rawError) console.error(rawError);
+
+      setValues(raw || []);
+      setDataSource('raw');
+    }
 
     setLoading(false);
   };
 
   const isNumeric = dataset?.type === 'numeric';
 
+  const handleCleaned = async () => {
+    await loadDataset();
+  };
+
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-semibold mb-2">
@@ -65,6 +89,11 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
           <p className="text-sm text-gray-600">
             Admin Level: {dataset?.admin_level} | Type: {dataset?.type}
           </p>
+          {dataSource && (
+            <p className="text-xs text-gray-500 mt-1">
+              Showing {dataSource === 'cleaned' ? 'cleaned' : 'raw'} data
+            </p>
+          )}
         </div>
 
         <button
@@ -97,7 +126,7 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
               </thead>
               <tbody>
                 {values.map((row, i) => (
-                  <tr key={i} className="border-t">
+                  <tr key={i} className="border-t hover:bg-gray-50">
                     {Object.values(row).map((val, j) => (
                       <td key={j} className="px-3 py-1">
                         {String(val)}
@@ -118,7 +147,7 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
           datasetName={dataset?.name || ''}
           open={showNumericModal}
           onOpenChange={setShowNumericModal}
-          onCleaned={loadDataset}
+          onCleaned={handleCleaned}
         />
       )}
       {showCategoricalModal && (
@@ -127,7 +156,7 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
           datasetName={dataset?.name || ''}
           open={showCategoricalModal}
           onOpenChange={setShowCategoricalModal}
-          onCleaned={loadDataset}
+          onCleaned={handleCleaned}
         />
       )}
     </div>
