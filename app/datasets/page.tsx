@@ -12,7 +12,7 @@ import {
   RefreshCcw,
 } from 'lucide-react';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
-import DerivedDatasetModal from '@/components/DerivedDatasetModal';
+import DerivedDatasetModal from '@/components/DeriveDatasetModal';
 import EditDatasetModal from '@/components/EditDatasetModal';
 
 type Dataset = {
