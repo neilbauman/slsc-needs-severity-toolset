@@ -31,12 +31,40 @@ export default function DeriveDatasetModal({
   }, [open]);
 
   const loadDatasets = async () => {
-    const { data, error } = await supabase
-      .from('datasets')
-      .select('id, name, admin_level, is_cleaned')
-      .eq('is_cleaned', true)
-      .order('name', { ascending: true });
-    if (!error) setDatasets(data || []);
+    try {
+      setLoading(true);
+
+      // Step 1: Get all cleaned datasets
+      const { data: baseDatasets, error: baseError } = await supabase
+        .from('datasets')
+        .select('id, name, admin_level, is_cleaned, type')
+        .eq('is_cleaned', true);
+
+      if (baseError) throw baseError;
+
+      // Step 2: Get all dataset IDs that have numeric/categorical values
+      const { data: numericValues } = await supabase
+        .from('dataset_values_numeric')
+        .select('dataset_id', { distinct: true });
+
+      const { data: categoricalValues } = await supabase
+        .from('dataset_values_categorical')
+        .select('dataset_id', { distinct: true });
+
+      const validIds = new Set([
+        ...(numericValues?.map((v) => v.dataset_id) || []),
+        ...(categoricalValues?.map((v) => v.dataset_id) || []),
+      ]);
+
+      // Step 3: Filter datasets with real values
+      const filtered = baseDatasets.filter((d) => validIds.has(d.id));
+      setDatasets(filtered);
+    } catch (err: any) {
+      console.error('Error loading datasets:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleClose = () => {
