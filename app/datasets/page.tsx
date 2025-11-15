@@ -34,9 +34,7 @@ export default function DatasetsPage() {
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
-  // ──────────────────────────────
-  // Load datasets
-  // ──────────────────────────────
+  // ───────────── Load datasets
   const loadDatasets = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -59,9 +57,7 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
-  // ──────────────────────────────
-  // Health calculation
-  // ──────────────────────────────
+  // ───────────── Health calculation
   const fetchHealthForDatasets = async (list: Dataset[]) => {
     const newHealth: Record<string, number | null> = {};
     for (const ds of list) {
@@ -75,7 +71,6 @@ export default function DatasetsPage() {
     try {
       let table: string | null = null;
 
-      // Detect which table the dataset exists in
       const { count: numCount } = await supabase
         .from('dataset_values_numeric')
         .select('*', { count: 'exact', head: true })
@@ -89,7 +84,6 @@ export default function DatasetsPage() {
       else if ((catCount ?? 0) > 0) table = 'dataset_values_categorical';
       if (!table) return null;
 
-      // Count total and valid
       const { count: total } = await supabase
         .from(table)
         .select('*', { count: 'exact', head: true })
@@ -121,9 +115,7 @@ export default function DatasetsPage() {
     setRefreshing(false);
   };
 
-  // ──────────────────────────────
-  // Actions
-  // ──────────────────────────────
+  // ───────────── Actions
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
     const { error } = await supabase.from('datasets').delete().eq('id', id);
@@ -136,9 +128,7 @@ export default function DatasetsPage() {
     }`;
   };
 
-  // ──────────────────────────────
-  // UI helpers
-  // ──────────────────────────────
+  // ───────────── Helpers
   const badgeColor = (status: string) => {
     switch (status) {
       case 'absolute':
@@ -183,12 +173,9 @@ export default function DatasetsPage() {
     );
   };
 
-  // ──────────────────────────────
-  // UI Rendering
-  // ──────────────────────────────
+  // ───────────── Render
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-xl font-semibold text-gray-800">Datasets</h1>
@@ -201,4 +188,151 @@ export default function DatasetsPage() {
           <button
             onClick={recalcAllHealth}
             disabled={refreshing}
-            className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 text
+            className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 text-sm font-medium"
+          >
+            <RefreshCcw
+              size={16}
+              className={refreshing ? 'animate-spin text-blue-600' : ''}
+            />
+            {refreshing ? 'Recalculating…' : 'Recalculate Health'}
+          </button>
+
+          <button
+            onClick={() => setDeriveOpen(true)}
+            className="flex items-center gap-1 px-3 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 text-sm font-medium"
+          >
+            <PlusCircle size={16} /> Derived Dataset
+          </button>
+
+          <button
+            onClick={() => setUploadOpen(true)}
+            className="flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
+          >
+            <PlusCircle size={16} /> Upload Dataset
+          </button>
+        </div>
+      </div>
+
+      {uploadOpen && (
+        <UploadDatasetModal
+          onClose={() => setUploadOpen(false)}
+          onUploaded={() => {
+            setUploadOpen(false);
+            loadDatasets();
+          }}
+        />
+      )}
+      {deriveOpen && (
+        <DeriveDatasetModal
+          open={deriveOpen}
+          onOpenChange={setDeriveOpen}
+          onCreated={loadDatasets}
+        />
+      )}
+      {editDataset && (
+        <EditDatasetModal
+          dataset={editDataset}
+          onClose={() => setEditDataset(null)}
+          onSave={loadDatasets}
+        />
+      )}
+
+      <div className="overflow-x-auto border rounded-lg">
+        <table className="min-w-full text-sm border-collapse">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Type</th>
+              <th className="px-3 py-2 text-left">Admin Level</th>
+              <th className="px-3 py-2 text-left">Abs/Rel/Idx</th>
+              <th className="px-3 py-2 text-left">Uploaded</th>
+              <th className="px-3 py-2 text-left">Status</th>
+              <th className="px-3 py-2 text-left">Health</th>
+              <th className="px-3 py-2 text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
+                  Loading…
+                </td>
+              </tr>
+            ) : datasets.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
+                  No datasets found.
+                </td>
+              </tr>
+            ) : (
+              datasets.map((ds) => (
+                <tr key={ds.id} className="border-t hover:bg-gray-50">
+                  <td className="px-3 py-2 font-medium text-gray-800">
+                    {ds.name}
+                  </td>
+                  <td className="px-3 py-2 capitalize">{ds.type}</td>
+                  <td className="px-3 py-2">{ds.admin_level}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${badgeColor(
+                        ds.absolute_relative_index
+                      )}`}
+                    >
+                      {ds.absolute_relative_index}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {new Date(ds.created_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-3 py-2">{cleanedStatus(ds.is_cleaned)}</td>
+                  <td className="px-3 py-2">
+                    <div className="inline-flex items-center gap-2">
+                      {healthBadge(health[ds.id])}
+                      <button
+                        onClick={() => recalcSingleHealth(ds)}
+                        title="Recalculate health"
+                        className="text-gray-500 hover:text-blue-600"
+                      >
+                        <RefreshCcw size={14} />
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 flex gap-3 items-center">
+                    <button
+                      onClick={() => setEditDataset(ds)}
+                      className="text-gray-600 hover:text-blue-600"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    {!ds.is_cleaned && (
+                      <button
+                        onClick={() => handleClean(ds.id, ds.type)}
+                        className="text-gray-600 hover:text-amber-600"
+                      >
+                        <Wand2 size={16} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() =>
+                        (window.location.href = `/datasets/raw/${ds.id}`)
+                      }
+                      className="text-gray-600 hover:text-blue-600"
+                    >
+                      <Eye size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(ds.id)}
+                      className="text-gray-600 hover:text-red-600"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
