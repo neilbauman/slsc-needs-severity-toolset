@@ -214,18 +214,11 @@ export default function DatasetsPage() {
         />
       )}
 
-      {deriveOpen && (
-        <DerivedDatasetModal
-          open={deriveOpen}
-          onOpenChange={setDeriveOpen}
-          onCreated={loadDatasets}
-          baseDatasetA=""
-          baseDatasetB=""
-          method="ratio"
-          name="New Derived Dataset"
-          targetAdminLevel="ADM3"
-        />
-      )}
+      <DerivedDatasetModal
+        open={deriveOpen}
+        onOpenChange={setDeriveOpen}
+        onCreated={loadDatasets}
+      />
 
       {editDataset && (
         <EditDatasetModal
