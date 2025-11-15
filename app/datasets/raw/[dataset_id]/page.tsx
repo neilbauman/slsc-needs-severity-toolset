@@ -150,14 +150,14 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
       {/* Cleaning Modals */}
       {/* ─────────────────────────────── */}
       {showNumericModal && (
-        <CleanNumericDatasetModal
-          datasetId={datasetId}
-          datasetName={dataset.name}
-          open={showNumericModal}
-          onOpenChange={setShowNumericModal}
-          onCleaned={loadAll}
-        />
-      )}
+  <CleanNumericDatasetModal
+    datasetId={datasetId}
+    datasetName={dataset?.name || ''}
+    open={showNumericModal}
+    onOpenChange={setShowNumericModal}
+    onCleaned={loadAll}
+  />
+)}
 
       {showCategoricalModal && (
         <CleanCategoricalDatasetModal
