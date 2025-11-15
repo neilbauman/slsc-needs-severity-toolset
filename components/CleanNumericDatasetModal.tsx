@@ -10,139 +10,224 @@ interface CleanNumericDatasetModalProps {
   onCleaned: () => Promise<void>;
 }
 
+interface PreviewResult {
+  match_status: string;
+  count: number;
+  percentage: number;
+}
+
 export default function CleanNumericDatasetModal({
   datasetId,
   datasetName,
   onClose,
   onCleaned,
 }: CleanNumericDatasetModalProps) {
-  const [totalRows, setTotalRows] = useState<number | null>(null);
-  const [processed, setProcessed] = useState(0);
+  const [previewData, setPreviewData] = useState<PreviewResult[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(true);
+  const [cleaning, setCleaning] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState<string>('Preparing...');
-  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
 
-  const batchSize = 5000;
-
-  // Count total rows in dataset_values_numeric_raw
-  useEffect(() => {
-    const loadCount = async () => {
-      const { count, error } = await supabase
-        .from('dataset_values_numeric_raw')
-        .select('*', { count: 'exact', head: true })
-        .eq('dataset_id', datasetId);
-
-      if (error) {
-        setError('Failed to load dataset row count.');
-        console.error(error);
-      } else {
-        setTotalRows(count ?? 0);
-      }
-    };
-
-    loadCount();
-  }, [datasetId]);
-
-  // Cleaning handler
-  const handleClean = async () => {
-    if (!totalRows || totalRows === 0) {
-      setError('No rows found in raw dataset.');
-      return;
-    }
-
-    setRunning(true);
+  // ────────────────────────────────────────────────
+  // Step 1: Load preview (via preview_numeric_cleaning_v2)
+  // ────────────────────────────────────────────────
+  const loadPreview = async () => {
+    setLoadingPreview(true);
     setError(null);
-    setStatus('Starting cleaning...');
-
-    let offset = 0;
 
     try {
-      while (offset < totalRows) {
-        setStatus(
-          `Cleaning rows ${offset + 1} to ${Math.min(offset + batchSize, totalRows)}...`
-        );
+      const { data, error } = await supabase.rpc(
+        'preview_numeric_cleaning_v2',
+        { dataset_id: datasetId }
+      );
 
-        const { error } = await supabase.rpc('clean_numeric_dataset_v2', {
-          in_dataset_id: datasetId,
-          in_offset: offset,
-          in_limit: batchSize,
-        });
-
-        if (error) throw error;
-
-        offset += batchSize;
-        setProcessed(offset);
-        setProgress(Math.min((offset / totalRows) * 100, 100));
+      if (error) {
+        console.error('Preview error:', error);
+        throw error;
       }
 
-      // Mark dataset as cleaned
-      await supabase
-        .from('datasets')
-        .update({ is_cleaned: true })
-        .eq('id', datasetId);
-
-      setStatus('Cleaning complete!');
-      setProgress(100);
-      await onCleaned();
-
-      setTimeout(onClose, 1000);
+      setPreviewData(data || []);
     } catch (err: any) {
-      console.error('Cleaning error:', err);
-      setError('Cleaning failed. See console for details.');
-      setRunning(false);
+      console.error('Preview RPC failed:', err);
+      setError('Failed to load cleaning preview.');
+    } finally {
+      setLoadingPreview(false);
     }
   };
 
+  useEffect(() => {
+    loadPreview();
+  }, [datasetId]);
+
+  // ────────────────────────────────────────────────
+  // Step 2: Run cleaning process (via clean_numeric_dataset_v2)
+  // ────────────────────────────────────────────────
+  const runCleaning = async () => {
+    setCleaning(true);
+    setError(null);
+    setSuccess(false);
+    setProgress(0);
+
+    try {
+      const { error } = await supabase.rpc('clean_numeric_dataset_v2', {
+        in_dataset_id: datasetId,
+      });
+
+      if (error) throw error;
+
+      // simulate gradual progress bar for better UX
+      for (let i = 0; i <= 100; i += 10) {
+        await new Promise((res) => setTimeout(res, 100));
+        setProgress(i);
+      }
+
+      setSuccess(true);
+      await onCleaned();
+    } catch (err: any) {
+      console.error('Cleaning error:', err);
+      setError(
+        err?.message || 'Cleaning failed. See console for details.'
+      );
+    } finally {
+      setCleaning(false);
+    }
+  };
+
+  // ────────────────────────────────────────────────
+  // Render helpers
+  // ────────────────────────────────────────────────
+  const renderPreview = () => {
+    if (loadingPreview) {
+      return (
+        <div className="p-4 text-gray-600 text-sm text-center">
+          Loading cleaning preview…
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="p-4 text-red-600 text-sm text-center">
+          {error}
+        </div>
+      );
+    }
+
+    if (!previewData || previewData.length === 0) {
+      return (
+        <div className="p-4 text-gray-500 text-sm text-center">
+          No data available for preview.
+        </div>
+      );
+    }
+
+    return (
+      <div className="w-full mt-2">
+        <div className="grid grid-cols-3 gap-3">
+          {previewData.map((row) => (
+            <div
+              key={row.match_status}
+              className="rounded-lg border p-3 text-center bg-gray-50"
+            >
+              <div className="text-sm text-gray-500">
+                {row.match_status}
+              </div>
+              <div className="text-xl font-semibold text-gray-800">
+                {row.count.toLocaleString()}
+              </div>
+              <div className="text-sm text-gray-400">
+                {row.percentage.toFixed(2)}%
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-xs text-gray-500 mt-4 text-center">
+          This will overwrite existing cleaned numeric values for this
+          dataset.
+        </p>
+      </div>
+    );
+  };
+
+  const renderCleaningProgress = () => (
+    <div className="flex flex-col items-center justify-center py-6">
+      <p className="text-sm text-gray-700 mb-2">Cleaning in progress…</p>
+      <div className="w-full bg-gray-200 h-3 rounded">
+        <div
+          className="bg-[var(--ssc-blue)] h-3 rounded transition-all duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <p className="text-xs text-gray-500 mt-2">{progress}%</p>
+    </div>
+  );
+
+  const renderResult = () => {
+    if (success) {
+      return (
+        <div className="text-center py-4 text-green-700 text-sm">
+          ✅ Cleaning completed successfully!
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="text-center py-4 text-red-600 text-sm">
+          ⚠️ Cleaning failed. See console for details.
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // ────────────────────────────────────────────────
+  // Main Modal Render
+  // ────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Clean Dataset
-        </h2>
-        <p className="text-sm text-gray-600 mb-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+        <h2 className="text-lg font-semibold mb-1">Clean Dataset</h2>
+        <p className="text-sm text-gray-600 mb-4">
           Dataset: <span className="font-medium">{datasetName}</span>
         </p>
 
-        {error && (
-          <div className="bg-red-50 text-red-700 border border-red-200 p-2 rounded mb-3 text-sm">
-            ⚠ {error}
-          </div>
-        )}
+        {!cleaning && !success && renderPreview()}
+        {cleaning && renderCleaningProgress()}
+        {!cleaning && renderResult()}
 
-        {running ? (
-          <div>
-            <div className="w-full bg-gray-200 rounded h-3 mb-2 overflow-hidden">
-              <div
-                className="bg-[var(--ssc-blue)] h-3 transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="text-sm text-gray-700 text-center">
-              {status}
-              <br />
-              {totalRows
-                ? `${processed}/${totalRows} rows processed (${progress.toFixed(1)}%)`
-                : 'Counting rows...'}
-            </p>
-          </div>
-        ) : (
-          <div className="flex justify-end gap-3">
+        <div className="mt-6 flex justify-end space-x-3">
+          {!cleaning && !success && (
+            <>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              {!error && previewData.length > 0 && (
+                <button
+                  onClick={runCleaning}
+                  className="px-4 py-2 text-sm bg-[var(--ssc-blue)] text-white rounded hover:bg-blue-800"
+                >
+                  Apply &amp; Save Cleaned Dataset
+                </button>
+              )}
+            </>
+          )}
+
+          {success && (
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md"
+              className="px-4 py-2 text-sm bg-[var(--ssc-blue)] text-white rounded hover:bg-blue-800"
             >
-              Cancel
+              Close
             </button>
-            <button
-              onClick={handleClean}
-              className="px-4 py-2 text-sm bg-[var(--ssc-blue)] hover:bg-blue-800 text-white rounded-md"
-              disabled={totalRows === null}
-            >
-              Start Cleaning
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
