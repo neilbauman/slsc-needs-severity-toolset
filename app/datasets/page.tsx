@@ -8,8 +8,6 @@ import {
   Trash2,
   Pencil,
   Wand2,
-  Activity,
-  RefreshCcw,
 } from 'lucide-react';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
 import DeriveDatasetModal from '@/components/DeriveDatasetModal';
@@ -27,9 +25,7 @@ type Dataset = {
 
 export default function DatasetsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [health, setHealth] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
@@ -44,76 +40,15 @@ export default function DatasetsPage() {
       )
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setDatasets(data as Dataset[]);
-      await fetchHealthForDatasets(data);
-    } else {
-      console.error('Failed to load datasets', error);
-    }
+    if (!error && data) setDatasets(data as Dataset[]);
+    else console.error('Failed to load datasets', error);
+
     setLoading(false);
   };
 
   useEffect(() => {
     loadDatasets();
   }, []);
-
-  // ───────────── Health calculation
-  const fetchHealthForDatasets = async (list: Dataset[]) => {
-    const newHealth: Record<string, number | null> = {};
-    for (const ds of list) {
-      const pct = await calculateHealth(ds);
-      newHealth[ds.id] = pct;
-    }
-    setHealth(newHealth);
-  };
-
-  const calculateHealth = async (ds: Dataset): Promise<number | null> => {
-    try {
-      let table: string | null = null;
-
-      const { count: numCount } = await supabase
-        .from('dataset_values_numeric')
-        .select('*', { count: 'exact', head: true })
-        .eq('dataset_id', ds.id);
-      const { count: catCount } = await supabase
-        .from('dataset_values_categorical')
-        .select('*', { count: 'exact', head: true })
-        .eq('dataset_id', ds.id);
-
-      if ((numCount ?? 0) > 0) table = 'dataset_values_numeric';
-      else if ((catCount ?? 0) > 0) table = 'dataset_values_categorical';
-      if (!table) return null;
-
-      const { count: total } = await supabase
-        .from(table)
-        .select('*', { count: 'exact', head: true })
-        .eq('dataset_id', ds.id);
-
-      const { count: valid } = await supabase
-        .from(table)
-        .select('*', { count: 'exact', head: true })
-        .eq('dataset_id', ds.id)
-        .filter('value', 'not.is', null)
-        .filter('value', 'neq', '');
-
-      if (!total || total === 0) return null;
-      return Math.round(((valid ?? 0) / total) * 100);
-    } catch (err) {
-      console.error(`Health calc failed for ${ds.name}`, err);
-      return null;
-    }
-  };
-
-  const recalcSingleHealth = async (ds: Dataset) => {
-    const pct = await calculateHealth(ds);
-    setHealth((prev) => ({ ...prev, [ds.id]: pct }));
-  };
-
-  const recalcAllHealth = async () => {
-    setRefreshing(true);
-    await fetchHealthForDatasets(datasets);
-    setRefreshing(false);
-  };
 
   // ───────────── Actions
   const handleDelete = async (id: string) => {
@@ -149,30 +84,6 @@ export default function DatasetsPage() {
       <span className="text-red-700 font-medium">Raw</span>
     );
 
-  const healthBadge = (pct: number | null | undefined) => {
-    if (pct === null || pct === undefined)
-      return (
-        <span className="text-gray-400 flex items-center gap-1">
-          <Activity size={12} /> –
-        </span>
-      );
-
-    const color =
-      pct >= 90
-        ? 'bg-green-100 text-green-800'
-        : pct >= 60
-        ? 'bg-yellow-100 text-yellow-800'
-        : 'bg-red-100 text-red-800';
-
-    return (
-      <span
-        className={`px-2 py-1 rounded text-xs font-medium ${color} flex items-center gap-1`}
-      >
-        <Activity size={12} /> {pct}%
-      </span>
-    );
-  };
-
   // ───────────── Render
   return (
     <div className="p-6 space-y-6">
@@ -185,18 +96,6 @@ export default function DatasetsPage() {
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={recalcAllHealth}
-            disabled={refreshing}
-            className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 text-sm font-medium"
-          >
-            <RefreshCcw
-              size={16}
-              className={refreshing ? 'animate-spin text-blue-600' : ''}
-            />
-            {refreshing ? 'Recalculating…' : 'Recalculate Health'}
-          </button>
-
           <button
             onClick={() => setDeriveOpen(true)}
             className="flex items-center gap-1 px-3 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 text-sm font-medium"
@@ -247,20 +146,19 @@ export default function DatasetsPage() {
               <th className="px-3 py-2 text-left">Abs/Rel/Idx</th>
               <th className="px-3 py-2 text-left">Uploaded</th>
               <th className="px-3 py-2 text-left">Status</th>
-              <th className="px-3 py-2 text-left">Health</th>
               <th className="px-3 py-2 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
+                <td colSpan={7} className="px-3 py-4 text-center text-gray-500">
                   Loading…
                 </td>
               </tr>
             ) : datasets.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-4 text-center text-gray-500">
+                <td colSpan={7} className="px-3 py-4 text-center text-gray-500">
                   No datasets found.
                 </td>
               </tr>
@@ -285,22 +183,11 @@ export default function DatasetsPage() {
                     {new Date(ds.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-3 py-2">{cleanedStatus(ds.is_cleaned)}</td>
-                  <td className="px-3 py-2">
-                    <div className="inline-flex items-center gap-2">
-                      {healthBadge(health[ds.id])}
-                      <button
-                        onClick={() => recalcSingleHealth(ds)}
-                        title="Recalculate health"
-                        className="text-gray-500 hover:text-blue-600"
-                      >
-                        <RefreshCcw size={14} />
-                      </button>
-                    </div>
-                  </td>
                   <td className="px-3 py-2 flex gap-3 items-center">
                     <button
                       onClick={() => setEditDataset(ds)}
                       className="text-gray-600 hover:text-blue-600"
+                      title="Edit metadata"
                     >
                       <Pencil size={16} />
                     </button>
@@ -308,6 +195,7 @@ export default function DatasetsPage() {
                       <button
                         onClick={() => handleClean(ds.id, ds.type)}
                         className="text-gray-600 hover:text-amber-600"
+                        title="Clean dataset"
                       >
                         <Wand2 size={16} />
                       </button>
@@ -317,12 +205,14 @@ export default function DatasetsPage() {
                         (window.location.href = `/datasets/raw/${ds.id}`)
                       }
                       className="text-gray-600 hover:text-blue-600"
+                      title="View dataset"
                     >
                       <Eye size={16} />
                     </button>
                     <button
                       onClick={() => handleDelete(ds.id)}
                       className="text-gray-600 hover:text-red-600"
+                      title="Delete dataset"
                     >
                       <Trash2 size={16} />
                     </button>
