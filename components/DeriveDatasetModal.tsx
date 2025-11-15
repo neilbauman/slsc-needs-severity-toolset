@@ -45,18 +45,19 @@ export default function DeriveDatasetModal({
       // Step 2: Get all dataset IDs that have numeric/categorical values
       const { data: numericValues } = await supabase
         .from('dataset_values_numeric')
-        .select('dataset_id', { distinct: true });
+        .select('dataset_id');
 
       const { data: categoricalValues } = await supabase
         .from('dataset_values_categorical')
-        .select('dataset_id', { distinct: true });
+        .select('dataset_id');
 
+      // Step 3: Combine and deduplicate dataset IDs
       const validIds = new Set([
         ...(numericValues?.map((v) => v.dataset_id) || []),
         ...(categoricalValues?.map((v) => v.dataset_id) || []),
       ]);
 
-      // Step 3: Filter datasets with real values
+      // Step 4: Filter datasets with real values
       const filtered = baseDatasets.filter((d) => validIds.has(d.id));
       setDatasets(filtered);
     } catch (err: any) {
