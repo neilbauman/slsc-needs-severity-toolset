@@ -25,7 +25,6 @@ export default function CleanNumericDatasetModal({
 
   if (!open) return null;
 
-  // Load cleaning preview
   useEffect(() => {
     if (open) fetchPreview();
   }, [open]);
@@ -37,16 +36,10 @@ export default function CleanNumericDatasetModal({
       dataset_id: datasetId,
     });
     setLoading(false);
-
-    if (error) {
-      console.error('Preview failed:', error);
-      setError(error.message);
-    } else {
-      setPreview(data || []);
-    }
+    if (error) setError(error.message);
+    else setPreview(data || []);
   };
 
-  // Confirm clean
   const handleClean = async () => {
     if (!confirm('Confirm cleaning this dataset?')) return;
 
@@ -56,23 +49,20 @@ export default function CleanNumericDatasetModal({
     });
     setCleaning(false);
 
-    if (error) {
-      console.error('Cleaning failed:', error);
-      alert('Cleaning failed: ' + error.message);
-    } else {
+    if (error) alert('Cleaning failed: ' + error.message);
+    else {
       alert('Dataset successfully cleaned.');
       await onCleaned();
       onOpenChange(false);
     }
   };
 
-  // Render modal
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-gray-800">
-            Clean Dataset — {datasetName}
+            Clean Numeric Dataset — {datasetName}
           </h2>
           <button
             onClick={() => onOpenChange(false)}
@@ -91,12 +81,8 @@ export default function CleanNumericDatasetModal({
         {loading ? (
           <p className="text-gray-500 text-sm">Loading preview…</p>
         ) : preview.length > 0 ? (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              Cleaning preview completed. Summary below:
-            </p>
-
-            <table className="min-w-full text-sm border rounded overflow-hidden">
+          <>
+            <table className="min-w-full text-sm border rounded">
               <thead className="bg-gray-100 text-gray-700">
                 <tr>
                   {Object.keys(preview[0]).map((col) => (
@@ -134,11 +120,9 @@ export default function CleanNumericDatasetModal({
                 {cleaning ? 'Cleaning…' : 'Confirm Clean'}
               </button>
             </div>
-          </div>
+          </>
         ) : (
-          !error && (
-            <p className="text-gray-500 text-sm">No preview data available.</p>
-          )
+          !error && <p className="text-gray-500 text-sm">No preview data.</p>
         )}
       </div>
     </div>
