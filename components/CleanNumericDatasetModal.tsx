@@ -30,7 +30,7 @@ export default function CleanNumericDatasetModal({
   const [success, setSuccess] = useState(false);
 
   // ────────────────────────────────────────────────
-  // Step 1: Load preview (via preview_numeric_cleaning_v2)
+  // Load cleaning preview
   // ────────────────────────────────────────────────
   const loadPreview = async () => {
     setLoadingPreview(true);
@@ -42,11 +42,7 @@ export default function CleanNumericDatasetModal({
         { dataset_id: datasetId }
       );
 
-      if (error) {
-        console.error('Preview error:', error);
-        throw error;
-      }
-
+      if (error) throw error;
       setPreviewData(data || []);
     } catch (err: any) {
       console.error('Preview RPC failed:', err);
@@ -61,7 +57,7 @@ export default function CleanNumericDatasetModal({
   }, [datasetId]);
 
   // ────────────────────────────────────────────────
-  // Step 2: Run cleaning process (via clean_numeric_dataset_v2)
+  // Execute cleaning RPC (explicit args)
   // ────────────────────────────────────────────────
   const runCleaning = async () => {
     setCleaning(true);
@@ -70,15 +66,18 @@ export default function CleanNumericDatasetModal({
     setProgress(0);
 
     try {
+      // Explicitly provide all parameters to avoid ambiguity
       const { error } = await supabase.rpc('clean_numeric_dataset_v2', {
         in_dataset_id: datasetId,
+        in_offset: 0,
+        in_limit: 5000,
       });
 
       if (error) throw error;
 
-      // simulate gradual progress bar for better UX
+      // Simulate progress updates for better UX
       for (let i = 0; i <= 100; i += 10) {
-        await new Promise((res) => setTimeout(res, 100));
+        await new Promise((res) => setTimeout(res, 120));
         setProgress(i);
       }
 
@@ -108,9 +107,7 @@ export default function CleanNumericDatasetModal({
 
     if (error) {
       return (
-        <div className="p-4 text-red-600 text-sm text-center">
-          {error}
-        </div>
+        <div className="p-4 text-red-600 text-sm text-center">{error}</div>
       );
     }
 
@@ -144,8 +141,7 @@ export default function CleanNumericDatasetModal({
         </div>
 
         <p className="text-xs text-gray-500 mt-4 text-center">
-          This will overwrite existing cleaned numeric values for this
-          dataset.
+          This process will overwrite existing cleaned numeric values for this dataset.
         </p>
       </div>
     );
