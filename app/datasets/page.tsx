@@ -12,7 +12,7 @@ import {
   RefreshCcw,
 } from 'lucide-react';
 import UploadDatasetModal from '@/components/UploadDatasetModal';
-import DerivedDatasetModal from '@/components/DeriveDatasetModal';
+import DeriveDatasetModal from '@/components/DeriveDatasetModal';
 import EditDatasetModal from '@/components/EditDatasetModal';
 
 type Dataset = {
@@ -34,9 +34,9 @@ export default function DatasetsPage() {
   const [deriveOpen, setDeriveOpen] = useState(false);
   const [editDataset, setEditDataset] = useState<Dataset | null>(null);
 
-  // ───────────────────────────────
+  // ──────────────────────────────
   // Load datasets
-  // ───────────────────────────────
+  // ──────────────────────────────
   const loadDatasets = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -49,6 +49,8 @@ export default function DatasetsPage() {
     if (!error && data) {
       setDatasets(data as Dataset[]);
       await fetchHealthForDatasets(data);
+    } else {
+      console.error('Failed to load datasets', error);
     }
     setLoading(false);
   };
@@ -57,9 +59,9 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
-  // ───────────────────────────────
+  // ──────────────────────────────
   // Health calculation
-  // ───────────────────────────────
+  // ──────────────────────────────
   const fetchHealthForDatasets = async (list: Dataset[]) => {
     const newHealth: Record<string, number | null> = {};
     for (const ds of list) {
@@ -71,36 +73,46 @@ export default function DatasetsPage() {
 
   const calculateHealth = async (ds: Dataset): Promise<number | null> => {
     try {
+      let table: string | null = null;
+
+      // Detect which table the dataset exists in
       const { count: numCount } = await supabase
         .from('dataset_values_numeric')
         .select('*', { count: 'exact', head: true })
         .eq('dataset_id', ds.id);
-
       const { count: catCount } = await supabase
         .from('dataset_values_categorical')
         .select('*', { count: 'exact', head: true })
         .eq('dataset_id', ds.id);
 
-      let table: string | null = null;
       if ((numCount ?? 0) > 0) table = 'dataset_values_numeric';
       else if ((catCount ?? 0) > 0) table = 'dataset_values_categorical';
       if (!table) return null;
 
+      // Count total and valid
       const { count: total } = await supabase
         .from(table)
         .select('*', { count: 'exact', head: true })
         .eq('dataset_id', ds.id);
+
       const { count: valid } = await supabase
         .from(table)
         .select('*', { count: 'exact', head: true })
         .eq('dataset_id', ds.id)
-        .not('value', 'is', null)
-        .not('value', 'eq', '');
+        .filter('value', 'not.is', null)
+        .filter('value', 'neq', '');
+
       if (!total || total === 0) return null;
-      return Math.round((valid! / total) * 100);
-    } catch {
+      return Math.round(((valid ?? 0) / total) * 100);
+    } catch (err) {
+      console.error(`Health calc failed for ${ds.name}`, err);
       return null;
     }
+  };
+
+  const recalcSingleHealth = async (ds: Dataset) => {
+    const pct = await calculateHealth(ds);
+    setHealth((prev) => ({ ...prev, [ds.id]: pct }));
   };
 
   const recalcAllHealth = async () => {
@@ -109,13 +121,13 @@ export default function DatasetsPage() {
     setRefreshing(false);
   };
 
-  // ───────────────────────────────
+  // ──────────────────────────────
   // Actions
-  // ───────────────────────────────
+  // ──────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
-    await supabase.from('datasets').delete().eq('id', id);
-    loadDatasets();
+    const { error } = await supabase.from('datasets').delete().eq('id', id);
+    if (!error) loadDatasets();
   };
 
   const handleClean = (id: string, type: string) => {
@@ -124,9 +136,9 @@ export default function DatasetsPage() {
     }`;
   };
 
-  // ───────────────────────────────
+  // ──────────────────────────────
   // UI helpers
-  // ───────────────────────────────
+  // ──────────────────────────────
   const badgeColor = (status: string) => {
     switch (status) {
       case 'absolute':
@@ -171,11 +183,12 @@ export default function DatasetsPage() {
     );
   };
 
-  // ───────────────────────────────
+  // ──────────────────────────────
   // UI Rendering
-  // ───────────────────────────────
+  // ──────────────────────────────
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-xl font-semibold text-gray-800">Datasets</h1>
@@ -183,138 +196,9 @@ export default function DatasetsPage() {
             Manage raw, cleaned, and derived datasets.
           </p>
         </div>
+
         <div className="flex gap-2">
           <button
             onClick={recalcAllHealth}
             disabled={refreshing}
-            className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 text-sm font-medium"
-          >
-            <RefreshCcw size={16} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Recalculating…' : 'Recalculate Health'}
-          </button>
-          <button
-            onClick={() => setDeriveOpen(true)}
-            className="flex items-center gap-1 px-3 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 text-sm font-medium"
-          >
-            <PlusCircle size={16} /> Derived Dataset
-          </button>
-          <button
-            onClick={() => setUploadOpen(true)}
-            className="flex items-center gap-1 px-3 py-2 bg-[var(--ssc-blue)] text-white rounded hover:bg-blue-800 text-sm font-medium"
-          >
-            <PlusCircle size={16} /> Upload Dataset
-          </button>
-        </div>
-      </div>
-
-      {uploadOpen && (
-        <UploadDatasetModal
-          onClose={() => setUploadOpen(false)}
-          onUploaded={loadDatasets}
-        />
-      )}
-
-      <DerivedDatasetModal
-        open={deriveOpen}
-        onOpenChange={setDeriveOpen}
-        onCreated={loadDatasets}
-      />
-
-      {editDataset && (
-        <EditDatasetModal
-          dataset={editDataset}
-          onClose={() => setEditDataset(null)}
-          onSave={loadDatasets}
-        />
-      )}
-
-      <div className="overflow-x-auto border rounded-lg">
-        <table className="min-w-full text-sm border-collapse">
-          <thead className="bg-gray-100 text-gray-700">
-            <tr>
-              <th className="px-3 py-2 text-left">Name</th>
-              <th className="px-3 py-2 text-left">Type</th>
-              <th className="px-3 py-2 text-left">Admin Level</th>
-              <th className="px-3 py-2 text-left">Abs/Rel/Idx</th>
-              <th className="px-3 py-2 text-left">Uploaded</th>
-              <th className="px-3 py-2 text-left">Status</th>
-              <th className="px-3 py-2 text-left">Health</th>
-              <th className="px-3 py-2 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={8} className="text-center py-4">
-                  Loading…
-                </td>
-              </tr>
-            ) : datasets.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="text-center py-4">
-                  No datasets found.
-                </td>
-              </tr>
-            ) : (
-              datasets.map((ds) => (
-                <tr key={ds.id} className="border-t hover:bg-gray-50">
-                  <td className="px-3 py-2 font-medium">{ds.name}</td>
-                  <td className="px-3 py-2 capitalize">{ds.type}</td>
-                  <td className="px-3 py-2">{ds.admin_level}</td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={`px-2 py-1 rounded text-xs font-medium ${badgeColor(
-                        ds.absolute_relative_index
-                      )}`}
-                    >
-                      {ds.absolute_relative_index}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    {new Date(ds.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-3 py-2">{cleanedStatus(ds.is_cleaned)}</td>
-                  <td className="px-3 py-2">{healthBadge(health[ds.id])}</td>
-                  <td className="px-3 py-2 flex gap-3">
-                    <button
-                      onClick={() => setEditDataset(ds)}
-                      title="Edit metadata"
-                      className="text-gray-600 hover:text-blue-700"
-                    >
-                      <Pencil size={16} />
-                    </button>
-                    {!ds.is_cleaned && (
-                      <button
-                        onClick={() => handleClean(ds.id, ds.type)}
-                        title="Clean dataset"
-                        className="text-gray-600 hover:text-amber-600"
-                      >
-                        <Wand2 size={16} />
-                      </button>
-                    )}
-                    <button
-                      onClick={() =>
-                        (window.location.href = `/datasets/raw/${ds.id}`)
-                      }
-                      title="View dataset"
-                      className="text-gray-600 hover:text-blue-700"
-                    >
-                      <Eye size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(ds.id)}
-                      title="Delete dataset"
-                      className="text-gray-600 hover:text-red-700"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+            className="flex items-center gap-1 px-3 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 text
