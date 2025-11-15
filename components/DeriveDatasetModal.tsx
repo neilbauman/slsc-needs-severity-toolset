@@ -30,36 +30,20 @@ export default function DeriveDatasetModal({
     if (open) loadDatasets();
   }, [open]);
 
+  // ✅ Pull cleaned datasets with numeric values
   const loadDatasets = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-
-      // Step 1: Get all cleaned datasets
-      const { data: baseDatasets, error: baseError } = await supabase
+      const { data: baseDatasets, error } = await supabase
         .from('datasets')
-        .select('id, name, admin_level, is_cleaned, type')
-        .eq('is_cleaned', true);
+        .select('id, name, admin_level, type, is_cleaned')
+        .eq('is_cleaned', true)
+        .eq('type', 'numeric');
 
-      if (baseError) throw baseError;
+      if (error) throw error;
 
-      // Step 2: Get all dataset IDs that have numeric/categorical values
-      const { data: numericValues } = await supabase
-        .from('dataset_values_numeric')
-        .select('dataset_id');
-
-      const { data: categoricalValues } = await supabase
-        .from('dataset_values_categorical')
-        .select('dataset_id');
-
-      // Step 3: Combine and deduplicate dataset IDs
-      const validIds = new Set([
-        ...(numericValues?.map((v) => v.dataset_id) || []),
-        ...(categoricalValues?.map((v) => v.dataset_id) || []),
-      ]);
-
-      // Step 4: Filter datasets with real values
-      const filtered = baseDatasets.filter((d) => validIds.has(d.id));
-      setDatasets(filtered);
+      setDatasets(baseDatasets || []);
     } catch (err: any) {
       console.error('Error loading datasets:', err);
       setError(err.message);
@@ -78,13 +62,12 @@ export default function DeriveDatasetModal({
 
   const handlePreview = async () => {
     if (!datasetA || !datasetB) {
-      setError('Please select two cleaned datasets.');
+      setError('Please select two datasets.');
       return;
     }
 
     setLoading(true);
     setError(null);
-    setPreview([]);
 
     const { data, error } = await supabase.rpc('preview_derived_dataset_v2', {
       base_a: datasetA,
@@ -98,9 +81,10 @@ export default function DeriveDatasetModal({
     if (error) {
       console.error(error);
       setError(error.message);
-    } else {
-      setPreview(data || []);
+      return;
     }
+
+    setPreview(data || []);
   };
 
   const handleSave = async () => {
@@ -130,12 +114,9 @@ export default function DeriveDatasetModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 overflow-auto">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6 my-8 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 my-8 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">
-            Derive New Dataset
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-800">Derive New Dataset</h2>
           <button
             onClick={handleClose}
             className="text-gray-500 hover:text-gray-700"
@@ -145,12 +126,10 @@ export default function DeriveDatasetModal({
         </div>
 
         <p className="text-sm text-gray-600 mb-4">
-          This tool allows you to create a derived dataset by combining two
-          cleaned datasets (e.g. ratio, difference, or sum). The result will be
-          stored as a new dataset.
+          This tool allows you to create a derived dataset by combining two cleaned numeric datasets
+          (e.g. ratio, difference, or sum). The result will be stored as a new dataset.
         </p>
 
-        {/* Dataset selectors */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <select
             value={datasetA}
@@ -179,7 +158,6 @@ export default function DeriveDatasetModal({
           </select>
         </div>
 
-        {/* Method + Target Level */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <select
             value={method}
@@ -203,7 +181,6 @@ export default function DeriveDatasetModal({
           </select>
         </div>
 
-        {/* Buttons */}
         <div className="flex gap-3 mb-4">
           <button
             onClick={handlePreview}
@@ -229,14 +206,12 @@ export default function DeriveDatasetModal({
           </button>
         </div>
 
-        {/* Error */}
         {error && (
           <div className="bg-red-100 text-red-700 text-sm p-2 rounded mb-4">
             {error}
           </div>
         )}
 
-        {/* Preview */}
         {preview.length > 0 && (
           <div className="mt-4 border rounded-md overflow-auto max-h-[40vh]">
             <table className="min-w-full text-sm text-left">
