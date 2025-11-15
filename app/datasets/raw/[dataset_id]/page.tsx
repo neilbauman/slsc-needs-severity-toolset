@@ -1,136 +1,113 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { Loader2, Wand2 } from 'lucide-react';
 import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
-import CleanCategoricalDatasetModal from '@/components/CleanCategoricalDatasetModal';
+import { Loader2 } from 'lucide-react';
 
-export default function DatasetRawPage({ params }: { params: { dataset_id: string } }) {
+export default function RawDatasetPage({ params }: { params: { dataset_id: string } }) {
   const datasetId = params.dataset_id;
   const [dataset, setDataset] = useState<any>(null);
-  const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<any[]>([]);
   const [showNumericModal, setShowNumericModal] = useState(false);
-  const [showCategoricalModal, setShowCategoricalModal] = useState(false);
 
-  useEffect(() => {
-    loadAll();
-  }, []);
-
+  // Load dataset + raw data preview
   const loadAll = async () => {
     setLoading(true);
-
-    const { data: ds, error: dsError } = await supabase
+    const { data: ds } = await supabase
       .from('datasets')
       .select('*')
       .eq('id', datasetId)
       .single();
 
-    if (dsError) {
-      console.error('Failed to load dataset metadata:', dsError);
-      setLoading(false);
-      return;
-    }
+    setDataset(ds || null);
 
-    setDataset(ds);
-
-    const table =
-      ds.type === 'categorical'
-        ? 'dataset_values_categorical_raw'
-        : 'dataset_values_numeric_raw';
-
-    const { data: values, error: valError } = await supabase
-      .from(table)
+    const { data: raw } = await supabase
+      .from('dataset_values_numeric_raw')
       .select('*')
       .eq('dataset_id', datasetId)
-      .limit(1000);
+      .limit(20);
 
-    if (valError) {
-      console.error('Failed to load dataset values:', valError);
-    }
-
-    setRows(values || []);
+    setRows(raw || []);
     setLoading(false);
   };
 
+  useEffect(() => {
+    loadAll();
+  }, [datasetId]);
+
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64 text-gray-500">
-        <Loader2 size={20} className="animate-spin mr-2" /> Loading dataset…
+      <div className="flex items-center justify-center h-96 text-gray-600">
+        <Loader2 className="animate-spin mr-2" /> Loading dataset…
+      </div>
+    );
+  }
+
+  if (!dataset) {
+    return (
+      <div className="text-center text-gray-500 mt-10">
+        Dataset not found.
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-xl font-semibold text-gray-800">{dataset?.name}</h1>
-        <div className="flex gap-2">
-          {dataset?.type === 'numeric' && (
-            <button
-              onClick={() => setShowNumericModal(true)}
-              className="flex items-center gap-1 px-3 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 text-sm font-medium"
-            >
-              <Wand2 size={16} /> Clean Dataset
-            </button>
-          )}
-          {dataset?.type === 'categorical' && (
-            <button
-              onClick={() => setShowCategoricalModal(true)}
-              className="flex items-center gap-1 px-3 py-2 bg-amber-500 text-white rounded hover:bg-amber-600 text-sm font-medium"
-            >
-              <Wand2 size={16} /> Clean Dataset
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="p-6 space-y-4">
+      <h1 className="text-xl font-semibold text-gray-800 mb-2">
+        {dataset.name}
+      </h1>
+      <p className="text-gray-500 text-sm">
+        Admin Level: {dataset.admin_level} | Type: {dataset.type}
+      </p>
 
-      <div className="border rounded-lg overflow-x-auto">
+      <div className="border rounded-md overflow-x-auto">
         <table className="min-w-full text-sm border-collapse">
-          <thead className="bg-gray-100 text-gray-700">
+          <thead className="bg-gray-100">
             <tr>
-              {rows.length > 0 &&
-                Object.keys(rows[0]).map((col) => (
-                  <th key={col} className="px-3 py-2 text-left">
-                    {col}
-                  </th>
-                ))}
+              <th className="px-3 py-2 text-left">Admin Code</th>
+              <th className="px-3 py-2 text-left">Admin Name</th>
+              <th className="px-3 py-2 text-left">Value</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-t hover:bg-gray-50">
-                {Object.values(row).map((val: any, j) => (
-                  <td key={j} className="px-3 py-2 text-gray-700">
-                    {val?.toString() || '–'}
-                  </td>
-                ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-3 py-4 text-center text-gray-500">
+                  No rows found.
+                </td>
               </tr>
-            ))}
+            ) : (
+              rows.map((r, i) => (
+                <tr key={i} className="border-t hover:bg-gray-50">
+                  <td className="px-3 py-2">{r.admin_pcode_raw}</td>
+                  <td className="px-3 py-2">{r.admin_name_raw}</td>
+                  <td className="px-3 py-2">{r.value_raw}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
-
-        {rows.length === 0 && (
-          <div className="text-center text-gray-500 py-6">No data found.</div>
-        )}
       </div>
 
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowNumericModal(true)}
+          className="px-4 py-2 bg-[var(--ssc-blue)] hover:bg-blue-800 text-white rounded-md text-sm font-medium"
+        >
+          Clean Dataset
+        </button>
+      </div>
+
+      {/* ✅ Updated Modal Call */}
       {showNumericModal && (
         <CleanNumericDatasetModal
           datasetId={datasetId}
-          datasetName={dataset?.name}
-          onClose={() => setShowNumericModal(false)}
-          onSaved={loadAll}
-        />
-      )}
-
-      {showCategoricalModal && (
-        <CleanCategoricalDatasetModal
-          datasetId={datasetId}
-          datasetName={dataset?.name}
-          onClose={() => setShowCategoricalModal(false)}
-          onSaved={loadAll}
+          datasetName={dataset.name}
+          open={showNumericModal}
+          onOpenChange={setShowNumericModal}
+          onCleaned={loadAll}
         />
       )}
     </div>
