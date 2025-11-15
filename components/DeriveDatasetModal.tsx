@@ -2,299 +2,147 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import DerivedDatasetPreviewModal from '@/components/DerivedDatasetPreviewModal';
+import { Loader2, X } from 'lucide-react';
 
-type Dataset = {
-  id: string;
+interface DerivedDatasetModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated: () => Promise<void>;
+  baseDatasetA: string;
+  baseDatasetB: string;
+  method: string; // e.g. "ratio" or "aggregate"
   name: string;
-  type: 'numeric' | 'categorical';
-  admin_level: string;
-  value_type: 'absolute' | 'relative';
-};
+  targetAdminLevel: string;
+}
 
-export default function DeriveDatasetModal({ onClose, onCreated }: any) {
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [datasetA, setDatasetA] = useState('');
-  const [datasetB, setDatasetB] = useState('');
-  const [useScalar, setUseScalar] = useState(false);
-  const [scalar, setScalar] = useState<number | ''>('');
-  const [operator, setOperator] = useState('+');
-  const [newName, setNewName] = useState('');
+export default function DerivedDatasetModal({
+  open,
+  onOpenChange,
+  onCreated,
+  baseDatasetA,
+  baseDatasetB,
+  method,
+  name,
+  targetAdminLevel,
+}: DerivedDatasetModalProps) {
   const [loading, setLoading] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [targetLevel, setTargetLevel] = useState('ADM3');
-  const [levels, setLevels] = useState<string[]>([]);
-  const [weightingId, setWeightingId] = useState('');
-  const [levelNote, setLevelNote] = useState<string | null>(null);
-  const [alignmentMethod, setAlignmentMethod] = useState<'aggregate' | 'disaggregate' | 'keep'>('keep');
-
-  // Load datasets + admin levels
-  useEffect(() => {
-    const load = async () => {
-      const { data: ds } = await supabase
-        .from('datasets')
-        .select('id, name, type, admin_level, value_type')
-        .order('created_at', { ascending: false });
-
-      const { data: lv } = await supabase
-        .from('admin_boundaries')
-        .select('admin_level')
-        .not('admin_level', 'is', null);
-
-      if (ds) setDatasets(ds);
-      if (lv) {
-        const uniqueLevels = Array.from(new Set(lv.map((l: any) => l.admin_level))).sort();
-        setLevels(uniqueLevels);
-      }
-    };
-    load();
-  }, []);
+  const [preview, setPreview] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!datasetA || (!datasetB && !useScalar)) return;
-    const aLevel = datasets.find((d) => d.id === datasetA)?.admin_level;
-    const bLevel = datasets.find((d) => d.id === datasetB)?.admin_level;
-    if (!aLevel || !bLevel || useScalar) setLevelNote(null);
-    else if (aLevel !== bLevel)
-      setLevelNote(`Levels differ (${aLevel} vs ${bLevel})`);
-    else setLevelNote(null);
-  }, [datasetA, datasetB, useScalar, datasets]);
+    if (open) loadPreview();
+  }, [open]);
 
-  const formula = useScalar
-    ? `${datasetA} ${operator} ${scalar}`
-    : `${datasetA} ${operator} ${datasetB}`;
-
-  const handleCreate = async () => {
-    if (!datasetA || (!datasetB && !useScalar) || !newName) return;
+  const loadPreview = async () => {
     setLoading(true);
+    setError(null);
+    setPreview([]);
 
-    const baseIds = useScalar ? [datasetA] : [datasetA, datasetB];
-    const { error } = await supabase.rpc('create_derived_dataset', {
-      base_dataset_ids: baseIds,
-      formula,
-      new_name: newName,
-      target_level: targetLevel,
-      alignment_method: alignmentMethod,
-      weight_dataset_id: weightingId || null,
+    const { data, error } = await supabase.rpc('preview_derived_dataset_v2', {
+      base_a: baseDatasetA,
+      base_b: baseDatasetB,
+      method,
+      target_admin_level: targetAdminLevel,
     });
 
-    setLoading(false);
     if (error) {
       console.error(error);
-      alert('Failed to create derived dataset.');
+      setError(error.message);
     } else {
-      onCreated();
-      onClose();
+      setPreview(data || []);
     }
+    setLoading(false);
   };
 
+  const handleSave = async () => {
+    setLoading(true);
+    setError(null);
+
+    const { error } = await supabase.rpc('apply_derived_dataset_v2', {
+      base_a: baseDatasetA,
+      base_b: baseDatasetB,
+      method,
+      target_admin_level: targetAdminLevel,
+      name,
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    await onCreated();
+    onOpenChange(false);
+  };
+
+  if (!open) return null;
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-5 shadow-lg max-w-lg w-full space-y-4">
-        <h2 className="text-lg font-semibold text-gray-800">
-          Create Derived Dataset
-        </h2>
+    <div className="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6 relative">
+        {/* Close Button */}
+        <button
+          className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+          onClick={() => onOpenChange(false)}
+        >
+          <X size={20} />
+        </button>
 
-        {/* Builder */}
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={datasetA}
-            onChange={(e) => setDatasetA(e.target.value)}
-            className="border rounded p-2 text-sm flex-1 min-w-[140px]"
-          >
-            <option value="">Select Dataset A</option>
-            {datasets.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name} ({d.admin_level})
-              </option>
-            ))}
-          </select>
+        <h2 className="text-lg font-semibold mb-1">Derived Dataset Preview</h2>
+        <p className="text-gray-600 text-sm mb-4">
+          {name} (Method: {method}, Target: {targetAdminLevel})
+        </p>
 
-          <select
-            value={operator}
-            onChange={(e) => setOperator(e.target.value)}
-            className="border rounded p-2 text-sm w-16 text-center"
-          >
-            <option value="+">+</option>
-            <option value="-">−</option>
-            <option value="*">×</option>
-            <option value="/">÷</option>
-          </select>
-
-          {useScalar ? (
-            <input
-              type="number"
-              placeholder="Enter scalar"
-              value={scalar}
-              onChange={(e) =>
-                setScalar(e.target.value === '' ? '' : Number(e.target.value))
-              }
-              className="border rounded p-2 text-sm w-32"
-            />
-          ) : (
-            <select
-              value={datasetB}
-              onChange={(e) => setDatasetB(e.target.value)}
-              className="border rounded p-2 text-sm flex-1 min-w-[140px]"
-            >
-              <option value="">Select Dataset B</option>
-              {datasets
-                .filter((d) => d.id !== datasetA)
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.admin_level})
-                  </option>
+        {loading ? (
+          <div className="flex justify-center items-center h-40 text-gray-600">
+            <Loader2 className="animate-spin mr-2" /> Generating preview…
+          </div>
+        ) : error ? (
+          <div className="text-red-600 bg-red-50 p-3 rounded border border-red-200 text-sm">
+            {error}
+          </div>
+        ) : preview.length === 0 ? (
+          <div className="text-gray-500 text-sm text-center py-8">
+            No preview data found.
+          </div>
+        ) : (
+          <div className="overflow-x-auto border rounded-md mb-4">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100 text-gray-700">
+                <tr>
+                  <th className="px-3 py-2 text-left">Admin PCode</th>
+                  <th className="px-3 py-2 text-left">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((row, i) => (
+                  <tr key={i} className="border-t hover:bg-gray-50">
+                    <td className="px-3 py-2">{row.admin_pcode}</td>
+                    <td className="px-3 py-2">{Number(row.value).toFixed(2)}</td>
+                  </tr>
                 ))}
-            </select>
-          )}
-
-          <button
-            onClick={() => {
-              setUseScalar(!useScalar);
-              setDatasetB('');
-              setScalar('');
-            }}
-            className="text-xs text-[var(--ssc-blue)] hover:underline"
-          >
-            {useScalar ? 'Use Dataset B' : 'Use Scalar'}
-          </button>
-        </div>
-
-        {/* Value type indicators */}
-        {datasetA && (
-          <p className="text-xs text-gray-600">
-            🧮 A: {datasets.find((d) => d.id === datasetA)?.value_type}
-          </p>
-        )}
-        {datasetB && !useScalar && (
-          <p className="text-xs text-gray-600">
-            🧮 B: {datasets.find((d) => d.id === datasetB)?.value_type}
-          </p>
-        )}
-
-        {/* Target Level */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Target Administrative Level
-          </label>
-          <select
-            value={targetLevel}
-            onChange={(e) => setTargetLevel(e.target.value)}
-            className="border rounded p-2 text-sm w-full"
-          >
-            {levels.map((lvl) => (
-              <option key={lvl} value={lvl}>
-                {lvl}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Alignment Method */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Alignment Method
-          </label>
-          <select
-            value={alignmentMethod}
-            onChange={(e) =>
-              setAlignmentMethod(e.target.value as 'aggregate' | 'disaggregate' | 'keep')
-            }
-            className="border rounded p-2 text-sm w-full"
-          >
-            <option value="keep">Keep Source Level</option>
-            <option value="aggregate">Aggregate to Higher Level</option>
-            <option value="disaggregate">Disaggregate to Lower Level</option>
-          </select>
-        </div>
-
-        {/* Weighting Dataset */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Weighting Dataset (optional)
-          </label>
-          <select
-            value={weightingId}
-            onChange={(e) => setWeightingId(e.target.value)}
-            className="border rounded p-2 text-sm w-full"
-          >
-            <option value="">None</option>
-            {datasets
-              .filter((d) => d.type === 'numeric')
-              .map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.admin_level})
-                </option>
-              ))}
-          </select>
-        </div>
-
-        {/* Level warning */}
-        {levelNote && (
-          <div className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 p-2 rounded mt-1">
-            ⚠ {levelNote}. Data will be aligned to {targetLevel} using the selected method.
+              </tbody>
+            </table>
           </div>
         )}
 
-        {/* Formula Preview */}
-        <div className="text-sm text-gray-600 italic">
-          {datasetA && (datasetB || useScalar)
-            ? `Formula: ${formula}`
-            : 'Select inputs to see formula'}
-        </div>
-
-        {/* Dataset Name */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            New Dataset Name
-          </label>
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Enter new dataset name"
-            className="w-full border rounded p-2 text-sm"
-          />
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-between items-center mt-2">
+        <div className="flex justify-end gap-3">
           <button
-            onClick={() => setPreviewOpen(true)}
-            disabled={!datasetA || (!datasetB && !useScalar)}
-            className="text-sm text-[var(--ssc-blue)] hover:underline"
+            onClick={() => onOpenChange(false)}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md text-sm font-medium"
           >
-            Preview Derived Result
+            Cancel
           </button>
-
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-800"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCreate}
-              disabled={loading}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-[var(--ssc-blue)] hover:bg-blue-800 text-white"
-            >
-              {loading ? 'Creating…' : 'Create'}
-            </button>
-          </div>
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="px-4 py-2 bg-[var(--ssc-blue)] hover:bg-blue-800 text-white rounded-md text-sm font-medium disabled:opacity-50"
+          >
+            {loading ? 'Saving…' : 'Apply & Save Derived Dataset'}
+          </button>
         </div>
       </div>
-
-      {previewOpen && (
-        <DerivedDatasetPreviewModal
-          baseDatasetIds={useScalar ? [datasetA] : [datasetA, datasetB]}
-          formula={formula}
-          targetLevel={targetLevel}
-          weight_dataset_id={weightingId || null}
-          alignment_method={alignmentMethod}
-          onClose={() => setPreviewOpen(false)}
-        />
-      )}
     </div>
   );
 }
