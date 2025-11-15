@@ -8,36 +8,65 @@ import CleanCategoricalDatasetModal from '@/components/CleanCategoricalDatasetMo
 export default function RawDatasetPage({ params }: { params: { dataset_id: string } }) {
   const datasetId = params.dataset_id;
   const [dataset, setDataset] = useState<any>(null);
+  const [values, setValues] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showNumericModal, setShowNumericModal] = useState(false);
   const [showCategoricalModal, setShowCategoricalModal] = useState(false);
 
+  // Load dataset info and its values
   useEffect(() => {
     loadDataset();
   }, [datasetId]);
 
   const loadDataset = async () => {
-    const { data, error } = await supabase
+    setLoading(true);
+
+    const { data: datasetData, error: datasetError } = await supabase
       .from('datasets')
       .select('*')
       .eq('id', datasetId)
       .single();
 
-    if (error) console.error(error);
-    else setDataset(data);
+    if (datasetError) {
+      console.error(datasetError);
+      setLoading(false);
+      return;
+    }
+
+    setDataset(datasetData);
+
+    // Load dataset values depending on type
+    const valueTable =
+      datasetData.type === 'numeric'
+        ? 'dataset_values_numeric'
+        : 'dataset_values_categorical';
+
+    const { data: valuesData, error: valuesError } = await supabase
+      .from(valueTable)
+      .select('*')
+      .eq('dataset_id', datasetId)
+      .limit(500); // keep it light for browser view
+
+    if (valuesError) console.error(valuesError);
+    else setValues(valuesData || []);
+
+    setLoading(false);
   };
 
   const isNumeric = dataset?.type === 'numeric';
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-semibold mb-2">
-        {dataset?.name || 'Dataset'}
-      </h1>
-      <p className="text-sm text-gray-600 mb-4">
-        Admin Level: {dataset?.admin_level} | Type: {dataset?.type}
-      </p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-semibold mb-2">
+            {dataset?.name || 'Dataset'}
+          </h1>
+          <p className="text-sm text-gray-600">
+            Admin Level: {dataset?.admin_level} | Type: {dataset?.type}
+          </p>
+        </div>
 
-      <div className="flex justify-end mb-4">
         <button
           onClick={() =>
             isNumeric ? setShowNumericModal(true) : setShowCategoricalModal(true)
@@ -48,7 +77,39 @@ export default function RawDatasetPage({ params }: { params: { dataset_id: strin
         </button>
       </div>
 
-      {/* Table or other dataset view here */}
+      {/* Data Table */}
+      <div className="mt-6">
+        {loading ? (
+          <p className="text-gray-500">Loading dataset values…</p>
+        ) : values.length === 0 ? (
+          <p className="text-gray-500">No data found for this dataset.</p>
+        ) : (
+          <div className="overflow-x-auto border rounded">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-100 text-gray-700">
+                <tr>
+                  {Object.keys(values[0]).map((col) => (
+                    <th key={col} className="px-3 py-2 text-left">
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {values.map((row, i) => (
+                  <tr key={i} className="border-t">
+                    {Object.values(row).map((val, j) => (
+                      <td key={j} className="px-3 py-1">
+                        {String(val)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Modals */}
       {showNumericModal && (
