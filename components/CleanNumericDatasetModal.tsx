@@ -25,9 +25,7 @@ export default function CleanNumericDatasetModal({
 
   if (!open) return null;
 
-  // ────────────────────────────────────────────────
-  // Load cleaning preview (calls preview_numeric_cleaning_v3)
-  // ────────────────────────────────────────────────
+  // Load cleaning preview
   useEffect(() => {
     if (open) fetchPreview();
   }, [open]);
@@ -38,8 +36,8 @@ export default function CleanNumericDatasetModal({
     const { data, error } = await supabase.rpc('preview_numeric_cleaning_v3', {
       dataset_id: datasetId,
     });
-
     setLoading(false);
+
     if (error) {
       console.error('Preview failed:', error);
       setError(error.message);
@@ -48,9 +46,7 @@ export default function CleanNumericDatasetModal({
     }
   };
 
-  // ────────────────────────────────────────────────
   // Confirm clean
-  // ────────────────────────────────────────────────
   const handleClean = async () => {
     if (!confirm('Confirm cleaning this dataset?')) return;
 
@@ -70,9 +66,7 @@ export default function CleanNumericDatasetModal({
     }
   };
 
-  // ────────────────────────────────────────────────
   // Render modal
-  // ────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
