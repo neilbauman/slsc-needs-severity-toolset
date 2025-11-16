@@ -45,15 +45,16 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
 
       const rpcName = getRPCName();
       const { error } = await supabase.rpc(rpcName, { in_dataset_id: datasetId });
-
       if (error) throw error;
+
       setProgress(70);
       setMessage('Cleaning in progress... please wait');
 
-      // Give the DB a moment to finalize inserts
+      // Wait for database commits
       await new Promise((r) => setTimeout(r, 1500));
 
-      const { data: summary, error: summaryError } = await supabase.from('dataset_cleaning_audit_log')
+      const { data: summary, error: summaryError } = await supabase
+        .from('dataset_cleaning_audit_log')
         .select('total_cleaned')
         .eq('dataset_id', datasetId)
         .order('cleaned_at', { ascending: false })
@@ -70,14 +71,29 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
         total_cleaned: summary?.total_cleaned ?? 0,
       });
 
-      // Finalize and refresh
+      // Give UI a moment to display success
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Refresh dataset view
       await onCleaned();
-      setTimeout(onClose, 1500);
+
+      // Delay and then close modal
+      setTimeout(() => {
+        resetModal();
+        onClose();
+      }, 1200);
     } catch (err: any) {
       console.error('Cleaning error:', err);
       setStatus('error');
       setMessage(err.message || 'An unexpected error occurred.');
     }
+  };
+
+  const resetModal = () => {
+    setStatus('idle');
+    setProgress(0);
+    setMessage('');
+    setResult(null);
   };
 
   return (
@@ -131,12 +147,16 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
 
         <div className="flex justify-end gap-2">
           <button
-            onClick={onClose}
+            onClick={() => {
+              resetModal();
+              onClose();
+            }}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
             disabled={status === 'running'}
           >
-            Cancel
+            {status === 'completed' ? 'Close Now' : 'Cancel'}
           </button>
+
           <button
             onClick={handleClean}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
