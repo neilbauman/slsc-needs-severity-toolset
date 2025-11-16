@@ -5,8 +5,8 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Explicitly tell TypeScript this is fine
-    const { data, error } = await supabase.rpc('derive_dataset', body as Record<string, any>);
+    // Explicitly type the RPC call to bypass "never" errors
+    const { data, error } = await supabase.rpc<any>('derive_dataset', body);
 
     if (error) throw error;
 
