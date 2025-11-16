@@ -46,7 +46,6 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
     async (instanceId: string, adminScope?: string[]) => {
       // 1. Try scores first
       const { data, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
-
       if (!error && data) {
         setAdm3(data);
         return;
@@ -57,11 +56,11 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
 
       // 2. Fallback: use admin_boundaries for the affected ADM2 (ADM3 level only)
       const adm2 = adminScope[adminScope.length - 1];
-      const { data: fallback, error: e2 } = await supabase
+      const { data: rows, error: e2 } = await supabase
         .from('admin_boundaries')
-        .select('name, admin_pcode, geom')
+        .select('name, admin_pcode, parent_pcode, ST_AsGeoJSON(geom) AS geom_json')
         .eq('admin_level', 'ADM3')
-        .like('parent_pcode', adm2 + '%');
+        .or(`parent_pcode.ilike.${adm2}%,admin_pcode.ilike.${adm2}%`);
 
       if (e2) {
         console.error('Failed to load fallback ADM3 boundaries:', e2);
@@ -71,9 +70,9 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
       // Transform PostGIS to GeoJSON FeatureCollection
       const fc = {
         type: 'FeatureCollection',
-        features: (fallback || []).map((row: any) => ({
+        features: (rows || []).map((row: any) => ({
           type: 'Feature',
-          geometry: row.geom,
+          geometry: JSON.parse(row.geom_json),
           properties: {
             name: row.name,
             pcode: row.admin_pcode,
