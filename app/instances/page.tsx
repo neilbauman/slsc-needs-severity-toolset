@@ -24,7 +24,7 @@ export default function InstancesPage() {
   const [newDesc, setNewDesc] = useState('');
   const [areaModalFor, setAreaModalFor] = useState<Instance | null>(null);
 
-  // Load all instances
+  // Load instances
   const load = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -45,7 +45,7 @@ export default function InstancesPage() {
     load();
   }, []);
 
-  // Create a new instance
+  // Create new instance
   const createInstance = async () => {
     if (!newName.trim()) {
       alert('Instance name is required.');
@@ -53,6 +53,7 @@ export default function InstancesPage() {
     }
 
     setCreating(true);
+
     const { data, error } = await supabase
       .from('instances')
       .insert({
@@ -76,7 +77,7 @@ export default function InstancesPage() {
     setNewDesc('');
     await load();
 
-    // Immediately open Define Affected Area modal
+    // Open DefineAffectedAreaModal for new instance
     setAreaModalFor(data as Instance);
   };
 
@@ -94,11 +95,15 @@ export default function InstancesPage() {
         </div>
       </header>
 
-      {/* Create Instance Card */}
+      {/* Create Instance */}
       <div className="card p-4 no-print">
-        <h2 className="text-base font-semibold mb-2" style={{ color: 'var(--gsc-green)' }}>
+        <h2
+          className="text-base font-semibold mb-2"
+          style={{ color: 'var(--gsc-green)' }}
+        >
           Create New Instance
         </h2>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <input
             className="border rounded-md px-3 py-2 text-sm"
@@ -113,6 +118,7 @@ export default function InstancesPage() {
             onChange={(e) => setNewDesc(e.target.value)}
           />
         </div>
+
         <div className="flex justify-end mt-3">
           <button
             className="btn btn-primary"
@@ -197,7 +203,7 @@ export default function InstancesPage() {
       {/* Define Affected Area Modal */}
       {areaModalFor && (
         <DefineAffectedAreaModal
-          instanceId={areaModalFor.id}
+          instance={areaModalFor}
           initialScope={areaModalFor.admin_scope ?? []}
           onClose={() => setAreaModalFor(null)}
           onSaved={load}
