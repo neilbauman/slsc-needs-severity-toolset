@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { Loader2 } from 'lucide-react'
 
@@ -23,48 +23,87 @@ export default function CleanNumericDatasetModal({
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [complete, setComplete] = useState(false)
+  const [currentBatch, setCurrentBatch] = useState(0)
+  const [totalBatches, setTotalBatches] = useState<number | null>(null)
+  const [adaptiveBatchSize, setAdaptiveBatchSize] = useState(2000)
+  const cleaningRef = useRef(false)
 
   useEffect(() => {
     if (!open) {
       setProgress(0)
       setError(null)
       setComplete(false)
+      setCleaning(false)
+      setCurrentBatch(0)
+      setTotalBatches(null)
     }
   }, [open])
 
+  async function estimateTotalRows() {
+    const { count, error } = await supabase
+      .from('dataset_values_numeric_raw')
+      .select('*', { count: 'exact', head: true })
+      .eq('dataset_id', datasetId)
+
+    if (error) {
+      console.warn('Could not estimate total rows:', error.message)
+      return 40000 // fallback guess
+    }
+    return count || 40000
+  }
+
   async function handleClean() {
+    if (cleaningRef.current) return // prevent double start
+    cleaningRef.current = true
     setCleaning(true)
     setError(null)
-    setProgress(0)
     setComplete(false)
+    setProgress(0)
 
     try {
-      let batch = 0
-      const batchSize = 2000
+      const totalRows = await estimateTotalRows()
+      const batches = Math.ceil(totalRows / adaptiveBatchSize)
+      setTotalBatches(batches)
 
-      // 1️⃣ Step 1 - clear existing numeric values
+      // wipe any previously cleaned data
       await supabase.rpc('delete_existing_numeric', { in_dataset_id: datasetId })
 
-      // 2️⃣ Step 2 - begin cleaning in batches
-      while (true) {
+      for (let batch = 0; batch < batches; batch++) {
+        setCurrentBatch(batch + 1)
+        const offset = batch * adaptiveBatchSize
+
+        const startTime = performance.now()
         const { error: rpcError } = await supabase.rpc('clean_numeric_dataset_v2', {
           in_dataset_id: datasetId,
-          in_offset: batch * batchSize,
-          in_limit: batchSize
+          in_offset: offset,
+          in_limit: adaptiveBatchSize
         })
+        const endTime = performance.now()
 
         if (rpcError) {
-          if (rpcError.code === 'PGRST204') break // no more batches
-          throw rpcError
+          // adaptive handling of timeout
+          if (rpcError.code === '57014' || rpcError.message.includes('timeout')) {
+            const newSize = Math.max(250, Math.floor(adaptiveBatchSize / 2))
+            console.warn(`Batch timeout — reducing batch size to ${newSize}`)
+            setAdaptiveBatchSize(newSize)
+            batch-- // retry the same batch
+            continue
+          } else {
+            throw rpcError
+          }
         }
 
-        batch += 1
-        setProgress(Math.min(100, (batch * batchSize) / 42000 * 100))
+        // adaptive speed increase if very fast
+        const elapsed = endTime - startTime
+        if (elapsed < 2000 && adaptiveBatchSize < 4000) {
+          const newSize = Math.min(4000, Math.floor(adaptiveBatchSize * 1.5))
+          setAdaptiveBatchSize(newSize)
+        }
 
-        if (progress >= 99) break
+        const pct = Math.min(100, ((batch + 1) / batches) * 100)
+        setProgress(pct)
       }
 
-      // 3️⃣ Step 3 - mark dataset as cleaned
       await supabase
         .from('datasets')
         .update({ is_cleaned: true })
@@ -78,6 +117,7 @@ export default function CleanNumericDatasetModal({
       setError(err.message || 'An unknown error occurred')
     } finally {
       setCleaning(false)
+      cleaningRef.current = false
     }
   }
 
@@ -97,10 +137,12 @@ export default function CleanNumericDatasetModal({
           <p className="text-green-600 mb-6">✅ Cleaning complete!</p>
         ) : cleaning ? (
           <>
-            <p className="text-gray-700 mb-4">Cleaning in progress…</p>
-            <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
+            <p className="text-gray-700 mb-4">
+              Cleaning batch {currentBatch}/{totalBatches ?? '?'} (Batch size: {adaptiveBatchSize})
+            </p>
+            <div className="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden">
               <div
-                className="bg-blue-600 h-3 rounded-full transition-all"
+                className="bg-blue-600 h-3 transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
