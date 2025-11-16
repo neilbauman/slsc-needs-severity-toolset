@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabaseClient';
 
 interface CleanNumericDatasetModalProps {
@@ -22,7 +22,18 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
   const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState('');
-  const [result, setResult] = useState<{ total_cleaned?: number; distinct_codes?: number } | null>(null);
+  const [result, setResult] = useState<{ total_cleaned?: number } | null>(null);
+
+  // Automatically close modal after successful cleaning
+  useEffect(() => {
+    if (status === 'completed') {
+      const timer = setTimeout(() => {
+        resetModal();
+        onClose();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [status]);
 
   const getRPCName = () => {
     switch (mode) {
@@ -47,21 +58,19 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
       const { error } = await supabase.rpc(rpcName, { in_dataset_id: datasetId });
       if (error) throw error;
 
-      setProgress(70);
+      setProgress(65);
       setMessage('Cleaning in progress... please wait');
 
-      // Wait for database commits
-      await new Promise((r) => setTimeout(r, 1500));
+      // Wait for the database operation to complete
+      await new Promise((r) => setTimeout(r, 1000));
 
-      const { data: summary, error: summaryError } = await supabase
+      const { data: summary } = await supabase
         .from('dataset_cleaning_audit_log')
         .select('total_cleaned')
         .eq('dataset_id', datasetId)
         .order('cleaned_at', { ascending: false })
         .limit(1)
         .single();
-
-      if (summaryError) console.warn('No audit summary found', summaryError);
 
       setProgress(100);
       setStatus('completed');
@@ -71,17 +80,13 @@ const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
         total_cleaned: summary?.total_cleaned ?? 0,
       });
 
-      // Give UI a moment to display success
-      await new Promise((r) => setTimeout(r, 1000));
-
-      // Refresh dataset view
       await onCleaned();
 
-      // Delay and then close modal
+      // Safety: ensure modal closes even if UI update lags
       setTimeout(() => {
         resetModal();
         onClose();
-      }, 1200);
+      }, 800);
     } catch (err: any) {
       console.error('Cleaning error:', err);
       setStatus('error');
