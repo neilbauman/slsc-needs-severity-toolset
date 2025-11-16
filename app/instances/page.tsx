@@ -191,12 +191,13 @@ export default function InstancesPage() {
       </div>
 
       {areaModalFor && (
-        <DefineAffectedAreaModal
-          instance={areaModalFor}
-          onClose={() => setAreaModalFor(null)}
-          onSaved={load}
-        />
-      )}
+  <DefineAffectedAreaModal
+    open={!!areaModalFor}
+    instance={areaModalFor}
+    onClose={() => setAreaModalFor(null)}
+    onSaved={load}
+  />
+)}
     </div>
   );
 }
