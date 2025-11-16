@@ -1,10 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
 import supabase from '@/lib/supabaseClient';
 
 interface EditDatasetModalProps {
@@ -81,37 +77,83 @@ export default function EditDatasetModal({ dataset, onClose, onSaved }: EditData
   if (!dataset) return null;
 
   return (
-    <Dialog open={!!dataset} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Edit Dataset</DialogTitle>
-        </DialogHeader>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-semibold mb-4">Edit Dataset</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="name">Name</Label>
-            <Input id="name" name="name" value={formData.name} onChange={handleChange} required />
+            <label className="block text-sm font-medium mb-1" htmlFor="name">
+              Name
+            </label>
+            <input
+              id="name"
+              name="name"
+              type="text"
+              value={formData.name}
+              onChange={handleChange}
+              required
+              className="w-full border rounded px-3 py-2"
+            />
           </div>
+
           <div>
-            <Label htmlFor="description">Description</Label>
-            <Input
+            <label className="block text-sm font-medium mb-1" htmlFor="description">
+              Description
+            </label>
+            <textarea
               id="description"
               name="description"
               value={formData.description}
               onChange={handleChange}
+              className="w-full border rounded px-3 py-2"
             />
           </div>
+
           <div>
-            <Label htmlFor="source">Source</Label>
-            <Input id="source" name="source" value={formData.source} onChange={handleChange} />
+            <label className="block text-sm font-medium mb-1" htmlFor="source">
+              Source
+            </label>
+            <input
+              id="source"
+              name="source"
+              value={formData.source}
+              onChange={handleChange}
+              className="w-full border rounded px-3 py-2"
+            />
           </div>
+
           <div>
-            <Label htmlFor="license">License</Label>
-            <Input id="license" name="license" value={formData.license} onChange={handleChange} />
+            <label className="block text-sm font-medium mb-1" htmlFor="license">
+              License
+            </label>
+            <input
+              id="license"
+              name="license"
+              value={formData.license}
+              onChange={handleChange}
+              className="w-full border rounded px-3 py-2"
+            />
           </div>
+
           <div>
-            <Label htmlFor="tags">Tags</Label>
-            <Input id="tags" name="tags" value={formData.tags} onChange={handleChange} />
+            <label className="block text-sm font-medium mb-1" htmlFor="tags">
+              Tags
+            </label>
+            <input
+              id="tags"
+              name="tags"
+              value={formData.tags}
+              onChange={handleChange}
+              className="w-full border rounded px-3 py-2"
+            />
           </div>
+
           <div className="flex items-center space-x-2">
             <input
               id="is_public"
@@ -120,18 +162,30 @@ export default function EditDatasetModal({ dataset, onClose, onSaved }: EditData
               checked={formData.is_public}
               onChange={handleChange}
             />
-            <Label htmlFor="is_public">Publicly Visible</Label>
+            <label htmlFor="is_public" className="text-sm">
+              Publicly Visible
+            </label>
           </div>
+
           <div className="flex justify-end space-x-2 pt-4">
-            <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="px-4 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+            >
               Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
               {loading ? 'Saving...' : 'Save Changes'}
-            </Button>
+            </button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
