@@ -8,11 +8,13 @@ import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import InstanceCategoryConfigModal from '@/components/InstanceCategoryConfigModal';
 import InstanceRecomputePanel from '@/components/InstanceRecomputePanel';
 
-// Dynamically import Leaflet components (to prevent window errors)
+// ✅ Dynamically import only components
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
-const useMap = dynamic(() => import('react-leaflet').then(m => m.useMap), { ssr: false });
+
+// ✅ Hooks can be imported directly (no SSR problems)
+import { useMap } from 'react-leaflet';
 
 // --- Types ---
 interface Instance {
