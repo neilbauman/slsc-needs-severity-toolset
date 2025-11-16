@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 interface CleanNumericDatasetModalProps {
@@ -29,7 +29,7 @@ export default function CleanNumericDatasetModal({
       setStatus("cleaning");
       setProgress(0);
 
-      // Get total row count to calculate progress %
+      // Get total row count
       const { count, error: countError } = await supabase
         .from("dataset_values_numeric_raw")
         .select("*", { count: "exact", head: true })
@@ -40,8 +40,8 @@ export default function CleanNumericDatasetModal({
       let offset = 0;
       let hasMore = true;
       let cleanedCount = 0;
+      const total = count ?? 1;
 
-      // Loop until the function returns false (meaning cleaning complete)
       while (hasMore) {
         const { data, error: rpcError } = await supabase.rpc(
           "clean_numeric_dataset_v2",
@@ -53,18 +53,25 @@ export default function CleanNumericDatasetModal({
         cleanedCount += batchSize;
         offset += batchSize;
 
-        const pct = Math.min(
-          Math.round((cleanedCount / (count ?? 1)) * 100),
-          100
-        );
+        const pct = Math.min(Math.round((cleanedCount / total) * 100), 100);
         setProgress(pct);
 
-        // RPC returns TRUE if more batches remain
-        hasMore = data === true;
+        if (data === false || data === null) {
+          hasMore = false;
+        } else {
+          hasMore = true;
+        }
       }
+
+      // Mark dataset as cleaned for UI consistency
+      await supabase
+        .from("datasets")
+        .update({ is_cleaned: true })
+        .eq("id", datasetId);
 
       setProgress(100);
       setStatus("success");
+
       await onCleaned();
       setTimeout(() => onClose(), 1500);
     } catch (err: any) {
@@ -79,7 +86,7 @@ export default function CleanNumericDatasetModal({
   }, []);
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/30">
+    <div className="fixed inset-0 flex items-center justify-center bg-black/30 z-50">
       <div className="bg-white rounded-lg p-6 shadow-md w-[420px] text-center">
         <h2 className="text-xl font-semibold mb-2">Clean Dataset</h2>
         <p className="text-gray-600 mb-4">
