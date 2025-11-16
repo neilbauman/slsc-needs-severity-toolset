@@ -16,7 +16,7 @@ export default function DatasetsPage() {
     const { data, error } = await supabase
       .from('datasets')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('name', { ascending: true });
 
     if (error) {
       console.error('Error loading datasets:', error);
@@ -63,14 +63,16 @@ export default function DatasetsPage() {
                 <th className="p-3 font-semibold">Name</th>
                 <th className="p-3 font-semibold">Type</th>
                 <th className="p-3 font-semibold">Source</th>
+                <th className="p-3 font-semibold">Admin Level</th>
+                <th className="p-3 font-semibold">Value Type</th>
                 <th className="p-3 font-semibold">Description</th>
-                <th className="p-3 font-semibold">Created</th>
                 <th className="p-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {datasets.map((d) => (
                 <tr key={d.id} className="border-t hover:bg-gray-50">
+                  {/* Name */}
                   <td className="p-3">
                     <Link
                       href={`/datasets/raw/${d.id}`}
@@ -79,9 +81,11 @@ export default function DatasetsPage() {
                       {d.name}
                     </Link>
                   </td>
-                  <td className="p-3">{d.type}</td>
 
-                  {/* Source column: Raw vs Derived */}
+                  {/* Type */}
+                  <td className="p-3">{d.type || '—'}</td>
+
+                  {/* Source: Raw / Derived */}
                   <td className="p-3">
                     {d.is_derived ? (
                       <span className="inline-block px-2 py-1 text-xs rounded bg-blue-100 text-blue-800 font-medium">
@@ -94,15 +98,43 @@ export default function DatasetsPage() {
                     )}
                   </td>
 
+                  {/* Admin Level */}
+                  <td className="p-3">
+                    {d.admin_level ? (
+                      <span className="inline-block px-2 py-1 text-xs rounded bg-indigo-100 text-indigo-700 font-medium uppercase">
+                        {d.admin_level}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+
+                  {/* Absolute / Relative / Index */}
+                  <td className="p-3">
+                    {d.absolute_relative_index ? (
+                      <span
+                        className={`inline-block px-2 py-1 text-xs rounded font-medium ${
+                          d.absolute_relative_index === 'absolute'
+                            ? 'bg-green-100 text-green-700'
+                            : d.absolute_relative_index === 'relative'
+                            ? 'bg-yellow-100 text-yellow-700'
+                            : 'bg-purple-100 text-purple-700'
+                        }`}
+                      >
+                        {d.absolute_relative_index.charAt(0).toUpperCase() +
+                          d.absolute_relative_index.slice(1)}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+
+                  {/* Description */}
                   <td className="p-3 text-gray-700">
                     {d.description || <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="p-3 text-gray-500">
-                    {d.created_at
-                      ? new Date(d.created_at).toLocaleString()
-                      : '—'}
-                  </td>
 
+                  {/* Actions */}
                   <td className="p-3 text-right space-x-2">
                     <button
                       onClick={() => setEditingDataset(d)}
