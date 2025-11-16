@@ -1,129 +1,52 @@
-"use client";
+CREATE OR REPLACE FUNCTION clean_numeric_dataset_v5(
+  in_dataset_id uuid,
+  in_offset integer DEFAULT 0,
+  in_limit integer DEFAULT 5000
+)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  cleaned_count integer := 0;
+BEGIN
+  DROP TABLE IF EXISTS tmp_cleaned;
 
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabaseClient";
+  -- ✅ Create batch only from records that don’t already exist in the cleaned table
+  CREATE TEMP TABLE tmp_cleaned AS
+  SELECT
+    r.dataset_id,
+    a.admin_pcode,
+    a.name AS admin_name,
+    r.value_raw::numeric AS value
+  FROM dataset_values_numeric_raw r
+  JOIN admin_boundaries a
+    ON LOWER(TRIM(r.admin_name_raw)) = LOWER(TRIM(a.name))
+   AND LENGTH(a.admin_pcode) = (
+     SELECT LENGTH(admin_pcode)
+     FROM admin_boundaries
+     WHERE admin_level = (
+       SELECT admin_level
+       FROM datasets
+       WHERE id = in_dataset_id
+     )
+     LIMIT 1
+   )
+  WHERE r.dataset_id = in_dataset_id
+    AND NOT EXISTS (
+      SELECT 1 FROM dataset_values_numeric c
+      WHERE c.dataset_id = r.dataset_id
+        AND c.admin_pcode = a.admin_pcode
+    )
+  OFFSET in_offset LIMIT in_limit;
 
-interface CleanNumericDatasetModalProps {
-  datasetId: string;
-  datasetName: string;
-  onClose: () => void;
-  onCleaned: () => Promise<void>;
-}
+  INSERT INTO dataset_values_numeric (dataset_id, admin_pcode, admin_name, value)
+  SELECT dataset_id, admin_pcode, admin_name, value
+  FROM tmp_cleaned;
 
-export default function CleanNumericDatasetModal({
-  datasetId,
-  datasetName,
-  onClose,
-  onCleaned,
-}: CleanNumericDatasetModalProps) {
-  const [progress, setProgress] = useState(0);
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  GET DIAGNOSTICS cleaned_count = ROW_COUNT;
 
-  const BATCH_SIZE = 5000;
-  const MAX_ITERATIONS = 1000;
+  DROP TABLE IF EXISTS tmp_cleaned;
 
-  const cleanDataset = async () => {
-    try {
-      setIsCleaning(true);
-      setProgress(0);
-      setStatusMessage("Initializing cleaning...");
-      setErrorMessage(null);
-
-      let offset = 0;
-      let totalCleaned = 0;
-      let iteration = 0;
-
-      while (iteration < MAX_ITERATIONS) {
-        const { data, error } = await supabase.rpc("clean_numeric_dataset_v5", {
-          in_dataset_id: datasetId,
-          in_offset: offset,
-          in_limit: BATCH_SIZE,
-        });
-
-        if (error) {
-          console.error("RPC error:", error);
-          setErrorMessage(`Error cleaning batch at offset ${offset}: ${error.message}`);
-          break;
-        }
-
-        const cleanedCount = data ?? 0;
-        totalCleaned += cleanedCount;
-
-        if (cleanedCount === 0) break; // stop when done
-
-        offset += BATCH_SIZE;
-        iteration++;
-
-        setProgress(Math.min(100, (iteration * 100) / MAX_ITERATIONS));
-        setStatusMessage(`Processed ${totalCleaned.toLocaleString()} records...`);
-      }
-
-      setProgress(100);
-      setStatusMessage(`Cleaning complete. ${totalCleaned.toLocaleString()} records processed.`);
-
-      await supabase.from("datasets").update({ is_cleaned: true }).eq("id", datasetId);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      await onCleaned();
-      onClose();
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || "An unexpected error occurred.");
-    } finally {
-      setIsCleaning(false);
-    }
-  };
-
-  useEffect(() => {
-    let started = false;
-    if (!started) {
-      started = true;
-      cleanDataset();
-    }
-    return () => {
-      started = true; // prevent re-run under StrictMode
-    };
-  }, []);
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white w-full max-w-lg rounded-xl shadow-lg p-6 text-center">
-        <h2 className="text-xl font-semibold mb-4">
-          Cleaning Dataset: <span className="text-blue-600">{datasetName}</span>
-        </h2>
-
-        {statusMessage && <p className="text-gray-700 text-sm mb-4">{statusMessage}</p>}
-
-        <div className="w-full bg-gray-200 rounded-full h-4 mb-4 overflow-hidden">
-          <div
-            className="bg-blue-500 h-4 transition-all duration-500 ease-in-out"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-
-        {errorMessage && (
-          <div className="bg-red-100 text-red-700 p-3 rounded-md mb-4">{errorMessage}</div>
-        )}
-
-        {!isCleaning && !errorMessage && (
-          <button
-            onClick={onClose}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md"
-          >
-            Close
-          </button>
-        )}
-
-        {isCleaning && (
-          <button
-            disabled
-            className="bg-gray-400 text-white px-4 py-2 rounded-md cursor-not-allowed"
-          >
-            Cleaning...
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+  RETURN cleaned_count;
+END;
+$$;
