@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import EditDatasetModal from '@/components/EditDatasetModal';
 import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
-import { Pencil, Trash2, Broom } from 'lucide-react';
+import { Pencil, Trash2, Brush } from 'lucide-react';
 
 export default function DatasetDetailPage() {
   const { dataset_id } = useParams();
@@ -104,7 +104,7 @@ export default function DatasetDetailPage() {
             className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-100"
             onClick={() => setShowClean(true)}
           >
-            <Broom size={16} /> Clean
+            <Brush size={16} /> Clean
           </button>
           <button
             className="flex items-center gap-1 px-3 py-1 border text-red-500 hover:bg-red-50 rounded"
