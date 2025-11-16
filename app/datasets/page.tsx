@@ -1,18 +1,22 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Edit, Brush } from 'lucide-react';
+import { Pencil, Broom, Trash2 } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
+import Link from 'next/link';
 import EditDatasetModal from '@/components/EditDatasetModal';
 import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
-import Link from 'next/link';
 
 interface Dataset {
   id: string;
   name: string;
-  description?: string;
   type: string;
+  description?: string;
   created_at?: string;
+  admin_level?: string;
+  absolute_relative_index?: string;
+  is_derived?: boolean;
+  is_cleaned?: boolean;
 }
 
 export default function DatasetsPage() {
@@ -27,8 +31,11 @@ export default function DatasetsPage() {
       .from('datasets')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) console.error('Error loading datasets:', error);
-    else setDatasets(data || []);
+    if (error) {
+      console.error('Error loading datasets:', error);
+    } else {
+      setDatasets(data || []);
+    }
     setLoading(false);
   };
 
@@ -36,12 +43,39 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
-  if (loading) {
+  const handleDelete = async (dataset: Dataset) => {
+    if (!confirm(`Delete dataset "${dataset.name}"? This cannot be undone.`)) return;
+    const { error } = await supabase.from('datasets').delete().eq('id', dataset.id);
+    if (error) {
+      console.error('Error deleting dataset:', error);
+      alert('Failed to delete dataset.');
+    } else {
+      setDatasets((prev) => prev.filter((d) => d.id !== dataset.id));
+    }
+  };
+
+  const badge = (text?: string, color?: string) => {
+    if (!text) return null;
+    const colors: Record<string, string> = {
+      indigo: 'bg-indigo-100 text-indigo-700',
+      green: 'bg-green-100 text-green-700',
+      yellow: 'bg-yellow-100 text-yellow-700',
+      blue: 'bg-blue-100 text-blue-700',
+      gray: 'bg-gray-100 text-gray-700',
+      violet: 'bg-violet-100 text-violet-700',
+      emerald: 'bg-emerald-100 text-emerald-700',
+    };
     return (
-      <div className="p-6 text-gray-600 text-center">
-        Loading datasets...
-      </div>
+      <span
+        className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color || 'gray']}`}
+      >
+        {text}
+      </span>
     );
+  };
+
+  if (loading) {
+    return <div className="p-6 text-gray-600 text-center">Loading datasets...</div>;
   }
 
   return (
@@ -57,6 +91,8 @@ export default function DatasetsPage() {
               name: '',
               type: 'numeric',
               description: '',
+              admin_level: '',
+              absolute_relative_index: '',
             })
           }
         >
@@ -66,9 +102,7 @@ export default function DatasetsPage() {
 
       {/* Table */}
       {datasets.length === 0 ? (
-        <p className="text-gray-500 text-center mt-10">
-          No datasets found.
-        </p>
+        <p className="text-gray-500 text-center mt-10">No datasets found.</p>
       ) : (
         <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
           <table className="w-full text-sm border-collapse">
@@ -76,6 +110,8 @@ export default function DatasetsPage() {
               <tr>
                 <th className="px-3 py-2 border-b">Name</th>
                 <th className="px-3 py-2 border-b">Type</th>
+                <th className="px-3 py-2 border-b">Admin Level</th>
+                <th className="px-3 py-2 border-b">Index Type</th>
                 <th className="px-3 py-2 border-b">Description</th>
                 <th className="px-3 py-2 border-b">Created</th>
                 <th className="px-3 py-2 border-b text-right">Actions</th>
@@ -92,8 +128,19 @@ export default function DatasetsPage() {
                       {dataset.name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 border-b capitalize text-gray-700">
+                  <td className="px-3 py-2 border-b text-gray-700 capitalize">
                     {dataset.type}
+                  </td>
+                  <td className="px-3 py-2 border-b">
+                    {badge(dataset.admin_level?.toUpperCase(), 'indigo')}
+                  </td>
+                  <td className="px-3 py-2 border-b">
+                    {dataset.absolute_relative_index === 'absolute' &&
+                      badge('Absolute', 'green')}
+                    {dataset.absolute_relative_index === 'relative' &&
+                      badge('Relative', 'yellow')}
+                    {dataset.absolute_relative_index === 'index' &&
+                      badge('Index', 'blue')}
                   </td>
                   <td className="px-3 py-2 border-b text-gray-600">
                     {dataset.description || '—'}
@@ -110,7 +157,7 @@ export default function DatasetsPage() {
                         onClick={() => setEditDataset(dataset)}
                         className="p-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
                       >
-                        <Edit size={16} />
+                        <Pencil size={16} />
                       </button>
                       {dataset.type === 'numeric' && (
                         <button
@@ -118,9 +165,16 @@ export default function DatasetsPage() {
                           onClick={() => setCleanDataset(dataset)}
                           className="p-1.5 rounded bg-yellow-500 text-white hover:bg-yellow-600"
                         >
-                          <Brush size={16} />
+                          <Broom size={16} />
                         </button>
                       )}
+                      <button
+                        title="Delete dataset"
+                        onClick={() => handleDelete(dataset)}
+                        className="p-1.5 rounded bg-red-600 text-white hover:bg-red-700"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </td>
                 </tr>
