@@ -10,44 +10,48 @@ interface Props {
   open: boolean;
 }
 
-interface Adm1 {
-  adm1_pcode: string;
-  adm1_name: string;
+interface AdminBoundary {
+  adm_pcode: string;
+  adm_name: string;
+  adm_level: number;
+  parent_pcode?: string;
 }
 
-interface Adm2 {
-  adm2_pcode: string;
-  adm2_name: string;
-  adm1_pcode: string;
-}
-
-export default function DefineAffectedAreaModal({ instance, onClose, onSaved, open }: Props) {
-  const [adm1List, setAdm1List] = useState<Adm1[]>([]);
-  const [adm2List, setAdm2List] = useState<Adm2[]>([]);
+export default function DefineAffectedAreaModal({
+  instance,
+  onClose,
+  onSaved,
+  open,
+}: Props) {
+  const [adm1List, setAdm1List] = useState<AdminBoundary[]>([]);
+  const [adm2List, setAdm2List] = useState<AdminBoundary[]>([]);
   const [selectedAdm1, setSelectedAdm1] = useState<string[]>([]);
   const [excludedAdm2, setExcludedAdm2] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Load ADM1 + ADM2 list
+  // Load ADM1 + ADM2 levels from admin_boundaries
   useEffect(() => {
     if (!open) return;
     const load = async () => {
       setLoading(true);
-      const { data: a1, error: e1 } = await supabase
-        .from('ph_adm1')
-        .select('adm1_pcode, adm1_name')
-        .order('adm1_name');
-      if (e1) console.error(e1);
-      else setAdm1List(a1 || []);
 
-      const { data: a2, error: e2 } = await supabase
-        .from('ph_adm2')
-        .select('adm2_pcode, adm2_name, adm1_pcode')
-        .order('adm2_name');
-      if (e2) console.error(e2);
-      else setAdm2List(a2 || []);
+      const { data: adm1, error: e1 } = await supabase
+        .from('admin_boundaries')
+        .select('adm_pcode, adm_name, adm_level')
+        .eq('adm_level', 1)
+        .order('adm_name');
+      if (e1) console.error('ADM1 load error:', e1);
+      else setAdm1List(adm1 || []);
 
-      setSelectedAdm1(instance?.admin_scope || []);
+      const { data: adm2, error: e2 } = await supabase
+        .from('admin_boundaries')
+        .select('adm_pcode, adm_name, adm_level, parent_pcode')
+        .eq('adm_level', 2)
+        .order('adm_name');
+      if (e2) console.error('ADM2 load error:', e2);
+      else setAdm2List(adm2 || []);
+
+      setSelectedAdm1(instance?.admin_scope ?? []);
       setLoading(false);
     };
     load();
@@ -73,6 +77,7 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved, op
         admin_scope: selectedAdm1,
       })
       .eq('id', instance.id);
+
     setLoading(false);
     if (error) {
       alert('Failed to save affected area: ' + error.message);
@@ -97,37 +102,45 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved, op
               <h3 className="text-sm font-semibold mb-2">Step 1: Select ADM1 Regions</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
                 {adm1List.map((a1) => (
-                  <label key={a1.adm1_pcode} className="flex items-center gap-2 text-sm">
+                  <label key={a1.adm_pcode} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={selectedAdm1.includes(a1.adm1_pcode)}
-                      onChange={() => toggleAdm1(a1.adm1_pcode)}
+                      checked={selectedAdm1.includes(a1.adm_pcode)}
+                      onChange={() => toggleAdm1(a1.adm_pcode)}
                     />
-                    {a1.adm1_name}
+                    {a1.adm_name}
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* Step 2: refine ADM2s */}
             {selectedAdm1.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold mb-2">Step 2: Refine ADM2 (Optional)</h3>
-                {selectedAdm1.map((pcode) => {
-                  const a1 = adm1List.find((a) => a.adm1_pcode === pcode);
-                  const a2s = adm2List.filter((a) => a.adm1_pcode === pcode);
+                <h3 className="text-sm font-semibold mb-2">
+                  Step 2: Refine ADM2 (Optional)
+                </h3>
+                {selectedAdm1.map((adm1Code) => {
+                  const a1 = adm1List.find((a) => a.adm_pcode === adm1Code);
+                  const a2s = adm2List.filter(
+                    (a) => a.parent_pcode === adm1Code
+                  );
                   return (
-                    <div key={pcode} className="mb-4">
-                      <div className="font-medium text-gray-700 mb-1">{a1?.adm1_name}</div>
+                    <div key={adm1Code} className="mb-4">
+                      <div className="font-medium text-gray-700 mb-1">
+                        {a1?.adm_name}
+                      </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
                         {a2s.map((a2) => (
-                          <label key={a2.adm2_pcode} className="flex items-center gap-2 text-xs">
+                          <label
+                            key={a2.adm_pcode}
+                            className="flex items-center gap-2 text-xs"
+                          >
                             <input
                               type="checkbox"
-                              checked={!excludedAdm2.includes(a2.adm2_pcode)}
-                              onChange={() => toggleAdm2(a2.adm2_pcode)}
+                              checked={!excludedAdm2.includes(a2.adm_pcode)}
+                              onChange={() => toggleAdm2(a2.adm_pcode)}
                             />
-                            {a2.adm2_name}
+                            {a2.adm_name}
                           </label>
                         ))}
                       </div>
@@ -150,7 +163,9 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved, op
             onClick={handleSave}
             disabled={loading}
             className={`px-3 py-1.5 text-sm rounded-md text-white ${
-              loading ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+              loading
+                ? 'bg-blue-300 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700'
             }`}
           >
             {loading ? 'Saving…' : 'Save Affected Area'}
