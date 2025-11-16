@@ -155,11 +155,12 @@ export default function DatasetRawPage() {
       {/* Cleaning Modal */}
       {showNumericModal && (
   <CleanNumericDatasetModal
-    datasetId={datasetId}
-    datasetName={dataset?.name || ""}
-    onClose={() => setShowNumericModal(false)}
-    onCleaned={handleCleaned}
-  />
+  datasetId={datasetId}
+  datasetName={dataset?.name ?? ''}
+  open={showNumericModal}
+  onOpenChange={setShowNumericModal}
+  onCleaned={loadAll}
+/>
 )}
       {/* Data Preview */}
       <div className="border rounded-lg overflow-x-auto">
