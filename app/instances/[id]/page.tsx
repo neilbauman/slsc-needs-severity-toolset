@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 
-// Dynamic imports (Leaflet)
+// Dynamic imports for Leaflet
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
@@ -44,49 +44,42 @@ export default function InstancePage() {
     const { data: m } = await supabase.rpc('get_instance_summary', { in_instance: id });
     setMetrics(m?.[0] ?? null);
 
-    // Load affected ADM3 polygons
-    if (inst?.admin_scope?.length) {
-      const { data, error: admErr } = await supabase
-        .from('admin_boundaries')
-        .select('admin_pcode, name, admin_level, parent_pcode, geom')
-        .in('admin_level', ['ADM3'])
-        .or(
-          inst.admin_scope
-            .map(
-              (p) =>
-                `parent_pcode.eq.${p},and(admin_level.eq.ADM3,substring(admin_pcode,1,4).eq.${p})`
-            )
-            .join(',')
-        );
+    // Load all ADM3 geometries once, filter locally
+    const { data: allAdm3, error: admErr } = await supabase
+      .from('admin_boundaries')
+      .select('admin_pcode, name, parent_pcode, admin_level, geom')
+      .eq('admin_level', 'ADM3');
 
-      if (admErr) console.error('ADM3 load error:', admErr);
-      else if (data && data.length > 0) {
-        // Build GeoJSON
-        const features = data.map((r: any) => ({
-          type: 'Feature',
-          geometry: JSON.parse(r.geom as any),
-          properties: {
-            admin_pcode: r.admin_pcode,
-            name: r.name,
-            admin_level: r.admin_level,
-          },
-        }));
-
-        const geojson = {
-          type: 'FeatureCollection',
-          features,
-        };
-
-        setAdm3Geojson(geojson);
-
-        // Collect names for UI
-        const { data: namesData } = await supabase
-          .from('admin_boundaries')
-          .select('name')
-          .in('admin_pcode', inst.admin_scope);
-        setAffectedNames(namesData?.map((d) => d.name) ?? []);
-      }
+    if (admErr) {
+      console.error('ADM3 load error:', admErr);
+      setLoading(false);
+      return;
     }
+
+    const scope = inst?.admin_scope ?? [];
+    const filtered = (allAdm3 || []).filter((r: any) => {
+      if (!scope.length) return false;
+      const prefix = r.admin_pcode?.substring(0, 4);
+      return scope.includes(r.parent_pcode) || scope.includes(prefix);
+    });
+
+    const features = filtered.map((r: any) => ({
+      type: 'Feature',
+      geometry: JSON.parse(r.geom),
+      properties: { admin_pcode: r.admin_pcode, name: r.name },
+    }));
+
+    setAdm3Geojson({ type: 'FeatureCollection', features });
+
+    // Load readable names
+    if (scope.length) {
+      const { data: namesData } = await supabase
+        .from('admin_boundaries')
+        .select('name')
+        .in('admin_pcode', scope);
+      setAffectedNames(namesData?.map((d) => d.name) ?? []);
+    }
+
     setLoading(false);
   }, [id, supabase]);
 
@@ -94,31 +87,20 @@ export default function InstancePage() {
     loadInstance();
   }, [loadInstance]);
 
-  const getColor = (score: number | null) => {
-    if (score == null) return '#ccc';
-    if (score >= 4) return '#b30000';
-    if (score >= 3) return '#e34a33';
-    if (score >= 2) return '#fc8d59';
-    if (score >= 1) return '#fdbb84';
-    return '#fdd49e';
-  };
-
   const style = () => ({
     color: '#555',
-    weight: 0.5,
+    weight: 0.6,
     fillColor: '#8bb7f0',
     fillOpacity: 0.5,
   });
 
   const onEachFeature = (feature: any, layer: any) => {
-    const props = feature.properties || {};
-    const name = props.name || props.admin_pcode;
-    layer.bindTooltip(`${name}`, { sticky: true });
+    const name = feature.properties?.name || feature.properties?.admin_pcode;
+    layer.bindTooltip(name, { sticky: true });
   };
 
   return (
     <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen">
-      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
           {instance?.name ?? 'Instance'}
@@ -142,33 +124,21 @@ export default function InstancePage() {
 
       {/* Metrics */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="p-4 bg-white border rounded text-center shadow-sm">
-          <div className="text-xs text-gray-600">Framework Avg</div>
-          <div className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
-            {metrics?.framework_avg?.toFixed(3) ?? '-'}
+        {[
+          { label: 'Framework Avg', value: metrics?.framework_avg },
+          { label: 'Final Avg', value: metrics?.final_avg },
+          { label: 'People Affected', value: metrics?.people_affected },
+          { label: 'People in Need', value: metrics?.people_in_need },
+        ].map((m, i) => (
+          <div key={i} className="p-4 bg-white border rounded text-center shadow-sm">
+            <div className="text-xs text-gray-600">{m.label}</div>
+            <div className="text-xl font-semibold text-gray-800">
+              {m.value ? Number(m.value).toLocaleString() : '-'}
+            </div>
           </div>
-        </div>
-        <div className="p-4 bg-white border rounded text-center shadow-sm">
-          <div className="text-xs text-gray-600">Final Avg</div>
-          <div className="text-xl font-semibold text-[var(--gsc-red,#630710)]">
-            {metrics?.final_avg?.toFixed(3) ?? '-'}
-          </div>
-        </div>
-        <div className="p-4 bg-white border rounded text-center shadow-sm">
-          <div className="text-xs text-gray-600">People Affected</div>
-          <div className="text-lg font-semibold text-gray-800">
-            {metrics?.people_affected?.toLocaleString() ?? '-'}
-          </div>
-        </div>
-        <div className="p-4 bg-white border rounded text-center shadow-sm">
-          <div className="text-xs text-gray-600">People in Need</div>
-          <div className="text-lg font-semibold text-gray-800">
-            {metrics?.people_in_need?.toLocaleString() ?? '-'}
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Affected Area Summary */}
       {affectedNames.length > 0 && (
         <div className="bg-white border rounded-md p-3 mb-4 shadow-sm">
           <div className="text-sm text-gray-700">
@@ -178,9 +148,8 @@ export default function InstancePage() {
         </div>
       )}
 
-      {/* Map + Side Panel */}
+      {/* Map */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Map */}
         <div className="col-span-9">
           <div className="h-[600px] w-full border rounded shadow overflow-hidden relative">
             {loading ? (
@@ -206,25 +175,10 @@ export default function InstancePage() {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="col-span-3 bg-white border rounded-lg shadow-sm p-3 overflow-y-auto max-h-[600px]">
-          <div className="text-sm font-semibold mb-2 text-gray-700">
-            Top Locations
-          </div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b text-gray-500">
-                <th className="text-left py-1">Admin</th>
-                <th className="text-right py-1">Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="py-1 text-gray-500">No data yet</td>
-                <td className="py-1 text-right">–</td>
-              </tr>
-            </tbody>
-          </table>
+        {/* Side table placeholder */}
+        <div className="col-span-3 bg-white border rounded-lg shadow-sm p-3">
+          <div className="text-sm font-semibold mb-2 text-gray-700">Top Locations</div>
+          <p className="text-xs text-gray-500">No data yet</p>
         </div>
       </div>
     </div>
