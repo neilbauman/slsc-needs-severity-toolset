@@ -1,29 +1,15 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Pencil, Brush, Trash2 } from 'lucide-react';
-import supabase from '@/lib/supabaseClient';
 import Link from 'next/link';
+import { Pencil, Trash2, Wand2 } from 'lucide-react';
+import supabase from '@/lib/supabaseClient';
 import EditDatasetModal from '@/components/EditDatasetModal';
-import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
-
-interface Dataset {
-  id: string;
-  name: string;
-  type: string;
-  description?: string;
-  created_at?: string;
-  admin_level?: string;
-  absolute_relative_index?: string;
-  is_derived?: boolean;
-  is_cleaned?: boolean;
-}
 
 export default function DatasetsPage() {
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editDataset, setEditDataset] = useState<Dataset | null>(null);
-  const [cleanDataset, setCleanDataset] = useState<Dataset | null>(null);
+  const [editingDataset, setEditingDataset] = useState<any | null>(null);
 
   const loadDatasets = async () => {
     setLoading(true);
@@ -31,6 +17,7 @@ export default function DatasetsPage() {
       .from('datasets')
       .select('*')
       .order('created_at', { ascending: false });
+
     if (error) {
       console.error('Error loading datasets:', error);
     } else {
@@ -43,161 +30,121 @@ export default function DatasetsPage() {
     loadDatasets();
   }, []);
 
-  const handleDelete = async (dataset: Dataset) => {
-    if (!confirm(`Delete dataset "${dataset.name}"? This cannot be undone.`)) return;
-    const { error } = await supabase.from('datasets').delete().eq('id', dataset.id);
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this dataset?')) return;
+    const { error } = await supabase.from('datasets').delete().eq('id', id);
     if (error) {
       console.error('Error deleting dataset:', error);
       alert('Failed to delete dataset.');
     } else {
-      setDatasets((prev) => prev.filter((d) => d.id !== dataset.id));
+      loadDatasets();
     }
   };
 
-  const badge = (text?: string, color?: string) => {
-    if (!text) return null;
-    const colors: Record<string, string> = {
-      indigo: 'bg-indigo-100 text-indigo-700',
-      green: 'bg-green-100 text-green-700',
-      yellow: 'bg-yellow-100 text-yellow-700',
-      blue: 'bg-blue-100 text-blue-700',
-      gray: 'bg-gray-100 text-gray-700',
-      violet: 'bg-violet-100 text-violet-700',
-      emerald: 'bg-emerald-100 text-emerald-700',
-    };
-    return (
-      <span
-        className={`px-2 py-0.5 rounded text-xs font-medium ${colors[color || 'gray']}`}
-      >
-        {text}
-      </span>
-    );
-  };
-
-  if (loading) {
-    return <div className="p-6 text-gray-600 text-center">Loading datasets...</div>;
-  }
-
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
-        <button
-          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-          onClick={() =>
-            setEditDataset({
-              id: '',
-              name: '',
-              type: 'numeric',
-              description: '',
-              admin_level: '',
-              absolute_relative_index: '',
-            })
-          }
+    <div className="p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Datasets</h1>
+        <Link
+          href="/datasets/new"
+          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
         >
           New Dataset
-        </button>
+        </Link>
       </div>
 
-      {/* Table */}
-      {datasets.length === 0 ? (
-        <p className="text-gray-500 text-center mt-10">No datasets found.</p>
+      {loading ? (
+        <p>Loading datasets...</p>
       ) : (
-        <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
+        <div className="bg-white rounded shadow">
           <table className="w-full text-sm border-collapse">
-            <thead className="bg-gray-50 text-left text-gray-600">
-              <tr>
-                <th className="px-3 py-2 border-b">Name</th>
-                <th className="px-3 py-2 border-b">Type</th>
-                <th className="px-3 py-2 border-b">Admin Level</th>
-                <th className="px-3 py-2 border-b">Index Type</th>
-                <th className="px-3 py-2 border-b">Description</th>
-                <th className="px-3 py-2 border-b">Created</th>
-                <th className="px-3 py-2 border-b text-right">Actions</th>
+            <thead>
+              <tr className="bg-gray-50 border-b text-left">
+                <th className="p-3 font-semibold">Name</th>
+                <th className="p-3 font-semibold">Type</th>
+                <th className="p-3 font-semibold">Source</th>
+                <th className="p-3 font-semibold">Description</th>
+                <th className="p-3 font-semibold">Created</th>
+                <th className="p-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {datasets.map((dataset) => (
-                <tr key={dataset.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 border-b font-medium text-blue-700">
+              {datasets.map((d) => (
+                <tr key={d.id} className="border-t hover:bg-gray-50">
+                  <td className="p-3">
                     <Link
-                      href={`/datasets/${dataset.id}`}
-                      className="hover:underline"
+                      href={`/datasets/raw/${d.id}`}
+                      className="text-blue-600 hover:underline font-medium"
                     >
-                      {dataset.name}
+                      {d.name}
                     </Link>
                   </td>
-                  <td className="px-3 py-2 border-b text-gray-700 capitalize">
-                    {dataset.type}
+                  <td className="p-3">{d.type}</td>
+
+                  {/* Source column: Raw vs Derived */}
+                  <td className="p-3">
+                    {d.is_derived ? (
+                      <span className="inline-block px-2 py-1 text-xs rounded bg-blue-100 text-blue-800 font-medium">
+                        Derived
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 font-medium">
+                        Raw
+                      </span>
+                    )}
                   </td>
-                  <td className="px-3 py-2 border-b">
-                    {badge(dataset.admin_level?.toUpperCase(), 'indigo')}
+
+                  <td className="p-3 text-gray-700">
+                    {d.description || <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="px-3 py-2 border-b">
-                    {dataset.absolute_relative_index === 'absolute' &&
-                      badge('Absolute', 'green')}
-                    {dataset.absolute_relative_index === 'relative' &&
-                      badge('Relative', 'yellow')}
-                    {dataset.absolute_relative_index === 'index' &&
-                      badge('Index', 'blue')}
+                  <td className="p-3 text-gray-500">
+                    {d.created_at
+                      ? new Date(d.created_at).toLocaleString()
+                      : '—'}
                   </td>
-                  <td className="px-3 py-2 border-b text-gray-600">
-                    {dataset.description || '—'}
-                  </td>
-                  <td className="px-3 py-2 border-b text-gray-500 text-xs">
-                    {dataset.created_at
-                      ? new Date(dataset.created_at).toLocaleString()
-                      : ''}
-                  </td>
-                  <td className="px-3 py-2 border-b text-right">
-                    <div className="flex justify-end space-x-2">
+
+                  <td className="p-3 text-right space-x-2">
+                    <button
+                      onClick={() => setEditingDataset(d)}
+                      title="Edit dataset"
+                      className="inline-flex items-center justify-center p-2 rounded bg-blue-500 hover:bg-blue-600 text-white"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(d.id)}
+                      title="Delete dataset"
+                      className="inline-flex items-center justify-center p-2 rounded bg-red-500 hover:bg-red-600 text-white"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                    {d.type === 'numeric' && (
                       <button
-                        title="Edit dataset"
-                        onClick={() => setEditDataset(dataset)}
-                        className="p-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                        title="Clean numeric dataset"
+                        className="inline-flex items-center justify-center p-2 rounded bg-yellow-400 hover:bg-yellow-500 text-white"
                       >
-                        <Pencil size={16} />
+                        <Wand2 size={16} />
                       </button>
-                      {dataset.type === 'numeric' && (
-                        <button
-                          title="Clean dataset"
-                          onClick={() => setCleanDataset(dataset)}
-                          className="p-1.5 rounded bg-yellow-500 text-white hover:bg-yellow-600"
-                        >
-                          <Brush size={16} />
-                        </button>
-                      )}
-                      <button
-                        title="Delete dataset"
-                        onClick={() => handleDelete(dataset)}
-                        className="p-1.5 rounded bg-red-600 text-white hover:bg-red-700"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {datasets.length === 0 && (
+            <p className="text-gray-500 text-sm p-4 text-center">
+              No datasets found.
+            </p>
+          )}
         </div>
       )}
 
-      {/* Modals */}
-      {editDataset && (
+      {editingDataset && (
         <EditDatasetModal
-          dataset={editDataset}
-          onClose={() => setEditDataset(null)}
+          dataset={editingDataset}
+          onClose={() => setEditingDataset(null)}
           onSaved={loadDatasets}
-        />
-      )}
-
-      {cleanDataset && (
-        <CleanNumericDatasetModal
-          dataset={cleanDataset}
-          onClose={() => setCleanDataset(null)}
-          onCleaned={loadDatasets}
         />
       )}
     </div>
