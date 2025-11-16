@@ -24,7 +24,6 @@ export default function InstancesPage() {
   const [newDesc, setNewDesc] = useState('');
   const [areaModalFor, setAreaModalFor] = useState<Instance | null>(null);
 
-  // Load instances
   const load = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -45,7 +44,6 @@ export default function InstancesPage() {
     load();
   }, []);
 
-  // Create new instance
   const createInstance = async () => {
     if (!newName.trim()) {
       alert('Instance name is required.');
@@ -53,7 +51,6 @@ export default function InstancesPage() {
     }
 
     setCreating(true);
-
     const { data, error } = await supabase
       .from('instances')
       .insert({
@@ -76,14 +73,11 @@ export default function InstancesPage() {
     setNewName('');
     setNewDesc('');
     await load();
-
-    // Open DefineAffectedAreaModal for new instance
     setAreaModalFor(data as Instance);
   };
 
   return (
     <div className="p-4 space-y-4">
-      {/* Header */}
       <header className="flex items-center justify-between no-print">
         <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-blue)' }}>
           Instances
@@ -95,7 +89,6 @@ export default function InstancesPage() {
         </div>
       </header>
 
-      {/* Create Instance */}
       <div className="card p-4 no-print">
         <h2
           className="text-base font-semibold mb-2"
@@ -130,7 +123,6 @@ export default function InstancesPage() {
         </div>
       </div>
 
-      {/* Instances List */}
       <div className="card p-4 print-safe">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-semibold">Your Instances</h2>
@@ -173,9 +165,7 @@ export default function InstancesPage() {
                         : '—'}
                     </td>
                     <td className="py-2 pr-3">{inst.type ?? '—'}</td>
-                    <td className="py-2 pr-3">
-                      {inst.admin_scope?.length ?? 0}
-                    </td>
+                    <td className="py-2 pr-3">{inst.admin_scope?.length ?? 0}</td>
                     <td className="py-2 pr-0">
                       <div className="flex items-center gap-2 justify-end">
                         <button
@@ -200,11 +190,9 @@ export default function InstancesPage() {
         )}
       </div>
 
-      {/* Define Affected Area Modal */}
       {areaModalFor && (
         <DefineAffectedAreaModal
           instance={areaModalFor}
-          initialScope={areaModalFor.admin_scope ?? []}
           onClose={() => setAreaModalFor(null)}
           onSaved={load}
         />
