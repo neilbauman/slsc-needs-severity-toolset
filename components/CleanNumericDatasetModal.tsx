@@ -1,155 +1,153 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { createClientComponentClient } from "@/lib/supabaseClient";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { Progress } from "@/components/ui/progress";
-import { toast } from "sonner";
+import React, { useState } from 'react';
+import { createClient } from '@/lib/supabaseClient';
 
 interface CleanNumericDatasetModalProps {
   datasetId: string;
   datasetName: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onClose: () => void;
   onCleaned: () => Promise<void>;
 }
 
-export default function CleanNumericDatasetModal({
+const CleanNumericDatasetModal: React.FC<CleanNumericDatasetModalProps> = ({
   datasetId,
   datasetName,
-  open,
-  onOpenChange,
+  onClose,
   onCleaned,
-}: CleanNumericDatasetModalProps) {
-  const supabase = createClientComponentClient();
-  const [isCleaning, setIsCleaning] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [method, setMethod] = useState("v11");
-  const [result, setResult] = useState<{ total_cleaned?: number; cleaned_at?: string } | null>(null);
+}) => {
+  const supabase = createClient();
 
-  const cleaningOptions = [
-    {
-      value: "v11",
-      label: "PCode Match Only (Fast, Exact)",
-      description: "Matches rows by exact or truncated pcode only (ADM4 focus).",
-    },
-    {
-      value: "v12",
-      label: "PCode Hierarchical (ADM3/ADM2)",
-      description: "Matches pcodes and aggregates child admin levels if needed.",
-    },
-    {
-      value: "v13",
-      label: "Fuzzy Name Match (Coming Soon)",
-      description: "Uses name similarity for unmatched rows (disabled).",
-      disabled: true,
-    },
-  ];
+  const [mode, setMode] = useState<'pcode' | 'hierarchical' | 'fuzzy'>('pcode');
+  const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'error'>('idle');
+  const [progress, setProgress] = useState(0);
+  const [message, setMessage] = useState('');
+  const [result, setResult] = useState<{ total_cleaned?: number; distinct_codes?: number } | null>(null);
+
+  const getRPCName = () => {
+    switch (mode) {
+      case 'pcode':
+        return 'clean_dataset_v11';
+      case 'hierarchical':
+        return 'clean_dataset_v12';
+      case 'fuzzy':
+        return 'clean_dataset_v13_refine_unmatched';
+      default:
+        return 'clean_dataset_v11';
+    }
+  };
 
   const handleClean = async () => {
-    setIsCleaning(true);
-    setProgress(10);
-    setResult(null);
-
     try {
-      toast.info("Starting cleaning process...");
+      setStatus('running');
+      setMessage('Starting dataset cleaning process...');
+      setProgress(5);
 
-      const rpcName =
-        method === "v11"
-          ? "clean_dataset_v11"
-          : method === "v12"
-          ? "clean_dataset_v12"
-          : "clean_dataset_v11"; // fallback
-
-      // Run the RPC
+      const rpcName = getRPCName();
       const { error } = await supabase.rpc(rpcName, { in_dataset_id: datasetId });
 
       if (error) throw error;
+      setProgress(70);
+      setMessage('Cleaning in progress... please wait');
 
-      setProgress(90);
+      // Give the DB a moment to finalize inserts
+      await new Promise((r) => setTimeout(r, 1500));
 
-      // Fetch results from audit log
-      const { data: logs, error: logError } = await supabase
-        .from("dataset_cleaning_audit_log")
-        .select("cleaned_at, total_cleaned")
-        .eq("dataset_id", datasetId)
-        .order("cleaned_at", { ascending: false })
+      const { data: summary, error: summaryError } = await supabase.from('dataset_cleaning_audit_log')
+        .select('total_cleaned')
+        .eq('dataset_id', datasetId)
+        .order('cleaned_at', { ascending: false })
         .limit(1)
-        .maybeSingle();
+        .single();
 
-      if (logError) throw logError;
+      if (summaryError) console.warn('No audit summary found', summaryError);
 
-      setResult(logs || {});
       setProgress(100);
-      toast.success("Cleaning completed successfully!");
+      setStatus('completed');
+      setMessage('Cleaning complete.');
+
+      setResult({
+        total_cleaned: summary?.total_cleaned ?? 0,
+      });
+
+      // Finalize and refresh
       await onCleaned();
+      setTimeout(onClose, 1500);
     } catch (err: any) {
-      console.error("Cleaning error:", err);
-      toast.error(`Error: ${err.message || "Unknown cleaning error"}`);
-    } finally {
-      setIsCleaning(false);
-      setTimeout(() => setProgress(0), 1000);
+      console.error('Cleaning error:', err);
+      setStatus('error');
+      setMessage(err.message || 'An unexpected error occurred.');
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Clean Dataset: {datasetName}</DialogTitle>
-        </DialogHeader>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-lg">
+        <h2 className="text-xl font-semibold mb-4">Clean Dataset: {datasetName}</h2>
 
-        <div className="space-y-4 mt-2">
-          <div>
-            <label className="text-sm font-medium">Cleaning Method</label>
-            <Select value={method} onValueChange={setMethod}>
-              <SelectTrigger className="w-full mt-1">
-                <SelectValue placeholder="Select cleaning strategy..." />
-              </SelectTrigger>
-              <SelectContent>
-                {cleaningOptions.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled}>
-                    <div>
-                      <div className="font-medium">{opt.label}</div>
-                      <div className="text-xs text-muted-foreground">{opt.description}</div>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-2">Cleaning Method</label>
+          <select
+            className="border border-gray-300 rounded-lg px-3 py-2 w-full"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as any)}
+            disabled={status === 'running'}
+          >
+            <option value="pcode">PCode Match Only (Fast, ADM4)</option>
+            <option value="hierarchical">PCode Hierarchical (ADM2/ADM3/ADM4)</option>
+            <option value="fuzzy">Fuzzy Refinement (Experimental)</option>
+          </select>
+        </div>
 
-          <div className="flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCleaning}>
-              Cancel
-            </Button>
-            <Button onClick={handleClean} disabled={isCleaning}>
-              {isCleaning ? "Cleaning..." : "Start Cleaning"}
-            </Button>
-          </div>
-
-          {isCleaning && (
-            <div className="mt-4">
-              <Progress value={progress} className="w-full" />
-              <p className="text-xs text-muted-foreground mt-2">Cleaning in progress...</p>
+        <div className="mb-4">
+          {status === 'running' && (
+            <div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+                <div
+                  className="bg-blue-600 h-2.5 rounded-full transition-all"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-sm text-gray-600">{message}</p>
             </div>
           )}
 
-          {result && (
-            <div className="mt-4 border rounded-md p-3 bg-muted/40">
-              <p className="text-sm">
-                <strong>Last Cleaned:</strong>{" "}
-                {new Date(result.cleaned_at || "").toLocaleString() || "N/A"}
+          {status === 'completed' && result && (
+            <div className="bg-green-100 border border-green-300 rounded-lg p-3">
+              <p className="font-medium text-green-800">Cleaning Complete</p>
+              <p className="text-sm text-green-700 mt-1">
+                Rows cleaned: {result.total_cleaned?.toLocaleString() ?? '0'}
               </p>
-              <p className="text-sm">
-                <strong>Total Cleaned Rows:</strong> {result.total_cleaned || 0}
-              </p>
+            </div>
+          )}
+
+          {status === 'error' && (
+            <div className="bg-red-100 border border-red-300 rounded-lg p-3">
+              <p className="font-medium text-red-800">Error</p>
+              <p className="text-sm text-red-700 mt-1">{message}</p>
             </div>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+            disabled={status === 'running'}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleClean}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            disabled={status === 'running'}
+          >
+            {status === 'running' ? 'Cleaning…' : 'Start Cleaning'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
-}
+};
+
+export default CleanNumericDatasetModal;
