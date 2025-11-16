@@ -3,10 +3,10 @@ import supabase from '@/lib/supabaseClient';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, unknown>;
 
-    // Explicitly type the RPC call to bypass "never" errors
-    const { data, error } = await supabase.rpc<any>('derive_dataset', body);
+    // Explicit cast for both parameters: avoids "never" type issue
+    const { data, error } = await (supabase as any).rpc('derive_dataset', body);
 
     if (error) throw error;
 
