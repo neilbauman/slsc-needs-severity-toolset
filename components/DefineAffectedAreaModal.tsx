@@ -3,9 +3,9 @@
 import { useEffect, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabaseClient';
-import * as turf from '@turf/turf';
 import 'leaflet/dist/leaflet.css';
 
+// --- dynamic imports for react-leaflet (to avoid SSR issues)
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
@@ -18,7 +18,7 @@ interface Props {
 }
 
 export default function DefineAffectedAreaModal({ instance, open, onClose, onSaved }: Props) {
-  const targetLevel = instance?.target_admin_level || 'ADM3'; // fallback
+  const targetLevel = instance?.target_admin_level || 'ADM3';
   const [adm1List, setAdm1List] = useState<any[]>([]);
   const [adm2List, setAdm2List] = useState<any[]>([]);
   const [adm3List, setAdm3List] = useState<any[]>([]);
@@ -29,26 +29,28 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
   const [loading, setLoading] = useState(false);
   const mapRef = useRef<any>(null);
 
-  // Load ADM1 initially
+  // --- Load ADM1 on open
   useEffect(() => {
     if (!open) return;
     const loadADM1 = async () => {
       setLoading(true);
       const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', { level: 'ADM1' });
-      if (error) console.error(error);
+      if (error) console.error('ADM1 geojson error:', error);
       setGeojson(data);
-      const { data: list } = await supabase
+
+      const { data: list, error: listErr } = await supabase
         .from('admin_boundaries')
-        .select('admin_pcode,name')
+        .select('admin_pcode, name')
         .eq('admin_level', 'ADM1')
         .order('name');
+      if (listErr) console.error('ADM1 list error:', listErr);
       setAdm1List(list || []);
       setLoading(false);
     };
     loadADM1();
   }, [open]);
 
-  // When ADM1 selected → load ADM2
+  // --- When ADM1 changes, load ADM2
   useEffect(() => {
     if (selectedADM1.length === 0) return;
     const loadADM2 = async () => {
@@ -56,13 +58,13 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         level: 'ADM2',
         parents: selectedADM1,
       });
-      if (error) console.error(error);
+      if (error) console.error('ADM2 load error:', error);
       if (data) setAdm2List(data.features.map((f: any) => f.properties));
     };
     loadADM2();
   }, [selectedADM1]);
 
-  // When ADM2 selected → load ADM3 if target is ADM3
+  // --- When ADM2 changes, load ADM3 if needed
   useEffect(() => {
     if (targetLevel !== 'ADM3' || selectedADM2.length === 0) return;
     const loadADM3 = async () => {
@@ -70,22 +72,22 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         level: 'ADM3',
         parents: selectedADM2,
       });
-      if (error) console.error(error);
+      if (error) console.error('ADM3 load error:', error);
       if (data) setAdm3List(data.features.map((f: any) => f.properties));
     };
     loadADM3();
   }, [selectedADM2]);
 
+  // --- selection toggle logic
   const toggle = (code: string, level: 'ADM1' | 'ADM2' | 'ADM3') => {
-    if (level === 'ADM1') {
-      setSelectedADM1(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
-    } else if (level === 'ADM2') {
-      setSelectedADM2(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
-    } else {
-      setSelectedADM3(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
-    }
+    const updater = (prev: string[]) =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code];
+    if (level === 'ADM1') setSelectedADM1(updater);
+    else if (level === 'ADM2') setSelectedADM2(updater);
+    else setSelectedADM3(updater);
   };
 
+  // --- get selected subset of GeoJSON
   const getSelectedGeojson = () => {
     if (!geojson) return null;
     const selectedCodes =
@@ -98,18 +100,17 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     return { type: 'FeatureCollection', features: selected };
   };
 
+  // --- zoom to selected using pure Leaflet
   const fitToSelection = () => {
     const gj = getSelectedGeojson();
     if (!gj || !mapRef.current) return;
-    const bounds = turf.bbox(gj);
-    if (bounds && Array.isArray(bounds)) {
-      mapRef.current.fitBounds([
-        [bounds[1], bounds[0]],
-        [bounds[3], bounds[2]],
-      ]);
-    }
+    const L = (window as any).L;
+    const layerGroup = L.geoJSON(gj);
+    const bounds = layerGroup.getBounds();
+    if (bounds.isValid()) mapRef.current.fitBounds(bounds);
   };
 
+  // --- save admin_scope to instances
   const handleSave = async () => {
     const finalScope =
       targetLevel === 'ADM1' ? selectedADM1 :
@@ -121,13 +122,18 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
       .update({ admin_scope: finalScope })
       .eq('id', instance.id);
 
-    if (error) alert('Error saving affected area: ' + error.message);
-    else await onSaved();
+    if (error) {
+      console.error('Save error:', error);
+      alert('Error saving affected area: ' + error.message);
+      return;
+    }
+    await onSaved();
     onClose();
   };
 
   if (!open) return null;
 
+  // --- map style and events
   const getColor = (code: string) =>
     selectedADM1.includes(code) || selectedADM2.includes(code) || selectedADM3.includes(code)
       ? '#2563eb'
@@ -156,7 +162,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
           <div className="text-sm text-gray-500">Loading boundaries…</div>
         ) : (
           <>
-            {/* ADM1 */}
+            {/* --- ADM1 --- */}
             <div>
               <h3 className="text-sm font-semibold mb-2">Step 1: Select ADM1 Regions</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-1 overflow-y-auto max-h-32">
@@ -173,7 +179,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
               </div>
             </div>
 
-            {/* ADM2 Refinement */}
+            {/* --- ADM2 refinement --- */}
             {selectedADM1.length > 0 && adm2List.length > 0 && (
               <div>
                 <h3 className="text-sm font-semibold mb-2">Step 2: Refine by ADM2</h3>
@@ -192,7 +198,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
               </div>
             )}
 
-            {/* ADM3 Refinement */}
+            {/* --- ADM3 refinement --- */}
             {targetLevel === 'ADM3' && selectedADM2.length > 0 && adm3List.length > 0 && (
               <div>
                 <h3 className="text-sm font-semibold mb-2">Step 3: Refine by ADM3</h3>
@@ -211,6 +217,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
               </div>
             )}
 
+            {/* --- map --- */}
             <div className="border rounded-md overflow-hidden h-[400px]">
               {geojson && (
                 <MapContainer
@@ -231,6 +238,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
           </>
         )}
 
+        {/* --- footer --- */}
         <div className="flex justify-between items-center pt-2">
           <button
             onClick={fitToSelection}
