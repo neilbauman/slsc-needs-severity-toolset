@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabaseClient"; // ✅ Correct and consistent path
 
 interface CleanNumericDatasetModalProps {
   datasetId: string;
@@ -18,7 +18,6 @@ export default function CleanNumericDatasetModal({
   onOpenChange,
   onCleaned,
 }: CleanNumericDatasetModalProps) {
-  const supabase = createClientComponentClient();
   const [isCleaning, setIsCleaning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [batchSize] = useState(5000);
@@ -36,7 +35,7 @@ export default function CleanNumericDatasetModal({
     setProgress(0);
 
     let offset = 0;
-    const maxIterations = 2000; // safety limit
+    const maxIterations = 2000; // Safety limit to avoid infinite loops
     let iteration = 0;
 
     try {
@@ -51,6 +50,7 @@ export default function CleanNumericDatasetModal({
         });
 
         if (error) throw error;
+
         const cleanedCount = data || 0;
 
         if (cleanedCount === 0) {
@@ -61,16 +61,18 @@ export default function CleanNumericDatasetModal({
         setTotalCleaned((prev) => prev + cleanedCount);
         offset += batchSize;
 
-        // crude progress: assume 100k as approximate max
         const newProgress = Math.min(100, Math.round((offset / 100000) * 100));
         setProgress(newProgress);
       }
 
       setDone(true);
       setIsCleaning(false);
-      await onCleaned();
       setProgress(100);
-      setLog((prev) => [...prev, `🎯 Total cleaned: ${totalCleaned.toLocaleString()}`]);
+      setLog((prev) => [
+        ...prev,
+        `🎯 Total cleaned: ${totalCleaned.toLocaleString()}`,
+      ]);
+      await onCleaned();
     } catch (err: any) {
       console.error("Cleaning failed", err);
       setError(err.message || "Unknown error");
@@ -83,9 +85,7 @@ export default function CleanNumericDatasetModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-        <h2 className="text-xl font-semibold mb-2">
-          Clean Numeric Dataset
-        </h2>
+        <h2 className="text-xl font-semibold mb-2">Clean Numeric Dataset</h2>
         <p className="text-sm text-gray-600 mb-4">
           Dataset: <span className="font-medium">{datasetName}</span>
         </p>
