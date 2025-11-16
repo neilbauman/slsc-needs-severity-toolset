@@ -3,7 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
-import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
+import dynamic from 'next/dynamic';
+
+// 👇 dynamically import modal (Leaflet is client-only)
+const DefineAffectedAreaModal = dynamic(
+  () => import('@/components/DefineAffectedAreaModal'),
+  { ssr: false }
+);
 
 type Instance = {
   id: string;
