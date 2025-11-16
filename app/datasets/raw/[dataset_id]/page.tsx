@@ -219,12 +219,11 @@ export default function DatasetRawPage() {
       {/* Cleaning Modals */}
       {dataset && dataset.type === 'numeric' && (
         <CleanNumericDatasetModal
-          datasetId={datasetId}
-          datasetName={dataset.name}
-          open={showNumericModal}
-          onOpenChange={setShowNumericModal}
-          onCleaned={loadAll}
-        />
+  datasetId={datasetId}
+  datasetName={dataset.name}
+  onClose={() => setShowNumericModal(false)}
+  onCleaned={loadAll}
+/>
       )}
 
       {dataset && dataset.type === 'categorical' && (
