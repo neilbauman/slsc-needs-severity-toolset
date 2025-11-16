@@ -1,7 +1,12 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { createClient } from '@/lib/supabaseClient';
+import { useState } from "react";
+import { createClientComponentClient } from "@/lib/supabaseClient";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { toast } from "sonner";
 
 interface CleanNumericDatasetModalProps {
   datasetId: string;
@@ -18,179 +23,133 @@ export default function CleanNumericDatasetModal({
   onOpenChange,
   onCleaned,
 }: CleanNumericDatasetModalProps) {
-  const supabase = createClient();
+  const supabase = createClientComponentClient();
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [method, setMethod] = useState("v11");
+  const [result, setResult] = useState<{ total_cleaned?: number; cleaned_at?: string } | null>(null);
 
-  const [cleaningMode, setCleaningMode] = useState<string>('pcode_exact');
-  const [progress, setProgress] = useState<number>(0);
-  const [status, setStatus] = useState<string>('');
-  const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [previewStats, setPreviewStats] = useState<any>(null);
-  const [showPreview, setShowPreview] = useState<boolean>(false);
+  const cleaningOptions = [
+    {
+      value: "v11",
+      label: "PCode Match Only (Fast, Exact)",
+      description: "Matches rows by exact or truncated pcode only (ADM4 focus).",
+    },
+    {
+      value: "v12",
+      label: "PCode Hierarchical (ADM3/ADM2)",
+      description: "Matches pcodes and aggregates child admin levels if needed.",
+    },
+    {
+      value: "v13",
+      label: "Fuzzy Name Match (Coming Soon)",
+      description: "Uses name similarity for unmatched rows (disabled).",
+      disabled: true,
+    },
+  ];
 
-  if (!open) return null;
-
-  // 🧠 Preview matching results before cleaning
-  async function handlePreview() {
-    setShowPreview(true);
-    setStatus('Generating preview...');
+  const handleClean = async () => {
+    setIsCleaning(true);
     setProgress(10);
-
-    const { data, error } = await supabase.rpc('preview_clean_numeric_dataset', {
-      in_dataset_id: datasetId,
-      in_mode: cleaningMode,
-    });
-
-    if (error) {
-      console.error(error);
-      setStatus('Error generating preview.');
-      return;
-    }
-
-    setPreviewStats(data);
-    setStatus('Preview ready.');
-    setProgress(100);
-  }
-
-  // 🧹 Run the actual cleaning
-  async function handleRunCleaning() {
-    setIsRunning(true);
-    setProgress(0);
-    setStatus('Starting cleaning process...');
+    setResult(null);
 
     try {
-      let currentProgress = 0;
+      toast.info("Starting cleaning process...");
 
-      // Step 1: Start cleaning
-      const { data, error } = await supabase.rpc('clean_numeric_dataset_v7', {
-        in_dataset_id: datasetId,
-        in_mode: cleaningMode,
-      });
+      const rpcName =
+        method === "v11"
+          ? "clean_dataset_v11"
+          : method === "v12"
+          ? "clean_dataset_v12"
+          : "clean_dataset_v11"; // fallback
+
+      // Run the RPC
+      const { error } = await supabase.rpc(rpcName, { in_dataset_id: datasetId });
 
       if (error) throw error;
 
-      // Simulated progress for user feedback
-      const interval = setInterval(() => {
-        currentProgress += 10;
-        setProgress(Math.min(currentProgress, 95));
-      }, 500);
+      setProgress(90);
 
-      setTimeout(() => {
-        clearInterval(interval);
-        setProgress(100);
-        setStatus('Cleaning complete.');
-        setIsRunning(false);
-        onCleaned();
-        onOpenChange(false);
-      }, 4000);
+      // Fetch results from audit log
+      const { data: logs, error: logError } = await supabase
+        .from("dataset_cleaning_audit_log")
+        .select("cleaned_at, total_cleaned")
+        .eq("dataset_id", datasetId)
+        .order("cleaned_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (logError) throw logError;
+
+      setResult(logs || {});
+      setProgress(100);
+      toast.success("Cleaning completed successfully!");
+      await onCleaned();
     } catch (err: any) {
-      console.error(err);
-      setStatus('Cleaning failed.');
-      setIsRunning(false);
+      console.error("Cleaning error:", err);
+      toast.error(`Error: ${err.message || "Unknown cleaning error"}`);
+    } finally {
+      setIsCleaning(false);
+      setTimeout(() => setProgress(0), 1000);
     }
-  }
-
-  // 🛑 Close and reset modal
-  function handleClose() {
-    onOpenChange(false);
-    setStatus('');
-    setProgress(0);
-    setShowPreview(false);
-  }
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
-        <h2 className="text-2xl font-bold mb-4">
-          Clean Dataset – {datasetName}
-        </h2>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Clean Dataset: {datasetName}</DialogTitle>
+        </DialogHeader>
 
-        {/* Cleaning Mode Selection */}
-        <div className="mb-6">
-          <label className="font-semibold block mb-2">
-            Choose Cleaning Strategy
-          </label>
-          <select
-            value={cleaningMode}
-            onChange={(e) => setCleaningMode(e.target.value)}
-            className="border rounded-lg px-3 py-2 w-full"
-            disabled={isRunning}
-          >
-            <option value="pcode_exact">Exact PCode Match (Fast, Safe)</option>
-            <option value="pcode_fuzzy">PCode Fuzzy Match (Trims, Prefix/Suffix)</option>
-            <option value="name_fuzzy">Admin Name Fuzzy Match</option>
-            <option value="hierarchical">Hierarchical Roll-up (ADM3 fallback)</option>
-          </select>
-        </div>
-
-        {/* Preview */}
-        {!isRunning && !showPreview && (
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={handlePreview}
-              className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-lg"
-            >
-              Preview Cleaning Impact
-            </button>
-            <button
-              onClick={handleRunCleaning}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
-            >
-              Run Cleaning
-            </button>
+        <div className="space-y-4 mt-2">
+          <div>
+            <label className="text-sm font-medium">Cleaning Method</label>
+            <Select value={method} onValueChange={setMethod}>
+              <SelectTrigger className="w-full mt-1">
+                <SelectValue placeholder="Select cleaning strategy..." />
+              </SelectTrigger>
+              <SelectContent>
+                {cleaningOptions.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled}>
+                    <div>
+                      <div className="font-medium">{opt.label}</div>
+                      <div className="text-xs text-muted-foreground">{opt.description}</div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        )}
 
-        {/* Preview Results */}
-        {showPreview && previewStats && (
-          <div className="bg-gray-50 border rounded-lg p-3 mb-4">
-            <h3 className="font-semibold mb-2">Preview Results</h3>
-            <p>
-              <strong>Total Rows:</strong> {previewStats.total_rows}
-            </p>
-            <p>
-              <strong>Matched:</strong> {previewStats.matched_rows}
-            </p>
-            <p>
-              <strong>Unmatched:</strong> {previewStats.unmatched_rows}
-            </p>
-            <p className="text-sm text-gray-600 mt-2">
-              You can adjust your cleaning strategy above to improve alignment.
-            </p>
+          <div className="flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCleaning}>
+              Cancel
+            </Button>
+            <Button onClick={handleClean} disabled={isCleaning}>
+              {isCleaning ? "Cleaning..." : "Start Cleaning"}
+            </Button>
           </div>
-        )}
 
-        {/* Progress */}
-        {isRunning && (
-          <div className="my-4">
-            <div className="h-4 w-full bg-gray-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-600 transition-all"
-                style={{ width: `${progress}%` }}
-              />
+          {isCleaning && (
+            <div className="mt-4">
+              <Progress value={progress} className="w-full" />
+              <p className="text-xs text-muted-foreground mt-2">Cleaning in progress...</p>
             </div>
-            <p className="text-sm text-gray-600 mt-2">{status}</p>
-          </div>
-        )}
+          )}
 
-        {/* Footer */}
-        <div className="flex justify-end gap-2 mt-6">
-          <button
-            onClick={handleClose}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-2 rounded-lg"
-            disabled={isRunning}
-          >
-            Close
-          </button>
-          {!isRunning && (
-            <button
-              onClick={handleRunCleaning}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
-            >
-              Confirm & Run Cleaning
-            </button>
+          {result && (
+            <div className="mt-4 border rounded-md p-3 bg-muted/40">
+              <p className="text-sm">
+                <strong>Last Cleaned:</strong>{" "}
+                {new Date(result.cleaned_at || "").toLocaleString() || "N/A"}
+              </p>
+              <p className="text-sm">
+                <strong>Total Cleaned Rows:</strong> {result.total_cleaned || 0}
+              </p>
+            </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
