@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Pencil, Broom, Trash2 } from 'lucide-react';
+import { Pencil, Brush, Trash2 } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import Link from 'next/link';
 import EditDatasetModal from '@/components/EditDatasetModal';
@@ -165,7 +165,7 @@ export default function DatasetsPage() {
                           onClick={() => setCleanDataset(dataset)}
                           className="p-1.5 rounded bg-yellow-500 text-white hover:bg-yellow-600"
                         >
-                          <Broom size={16} />
+                          <Brush size={16} />
                         </button>
                       )}
                       <button
