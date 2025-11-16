@@ -156,9 +156,8 @@ export default function DatasetRawPage() {
       {showNumericModal && (
   <CleanNumericDatasetModal
     datasetId={datasetId}
-    datasetName={dataset?.name || ''}
-    open={showNumericModal}
-    onOpenChange={setShowNumericModal}
+    datasetName={dataset?.name || ""}
+    onClose={() => setShowNumericModal(false)}
     onCleaned={handleCleaned}
   />
 )}
