@@ -1,162 +1,146 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabaseClient';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
+import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
 
-type Instance = {
+interface Instance {
   id: string;
   name: string;
   description: string | null;
   created_at: string | null;
   admin_scope: string[] | null;
-  active: boolean | null;
-  type: string | null;
-};
+}
 
 export default function InstancesPage() {
+  const router = useRouter();
   const supabase = createClient();
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [areaModalFor, setAreaModalFor] = useState<Instance | null>(null);
+  const [showAreaModal, setShowAreaModal] = useState(false);
+  const [showDatasetModal, setShowDatasetModal] = useState(false);
+  const [selectedInstance, setSelectedInstance] = useState<Instance | null>(null);
 
-  const load = async () => {
+  useEffect(() => {
+    // ensure client-side execution only
+    if (typeof window === 'undefined') return;
+    loadInstances();
+  }, []);
+
+  const loadInstances = async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('instances')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) console.error(error);
-    setInstances(data || []);
+
+    if (error) {
+      console.error('Error loading instances:', error);
+    } else {
+      setInstances(data || []);
+    }
     setLoading(false);
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  const handleCreateInstance = async () => {
+    const name = prompt('Enter a name for the new instance:');
+    if (!name) return;
 
-  const createInstance = async () => {
-    if (!newName.trim()) return alert('Instance name required');
-    setCreating(true);
     const { data, error } = await supabase
       .from('instances')
-      .insert({
-        name: newName.trim(),
-        description: newDesc || null,
-        type: 'baseline',
-        active: true,
-        admin_scope: null,
-      })
+      .insert({ name })
       .select()
       .single();
-    setCreating(false);
-    if (error) return alert(error.message);
-    setNewName('');
-    setNewDesc('');
-    await load();
-    setAreaModalFor(data);
+
+    if (error) {
+      console.error('Error creating instance:', error);
+      return;
+    }
+
+    router.push(`/instances/${data.id}`);
   };
 
   return (
-    <div className="p-6 space-y-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-[var(--gsc-blue)]">Instances</h1>
-        <Link href="/" className="text-sm text-blue-600 hover:underline">
-          Home
-        </Link>
-      </header>
-
-      {/* Create form */}
-      <div className="p-4 bg-white rounded shadow">
-        <h2 className="font-semibold text-[var(--gsc-green)] mb-2">Create New Instance</h2>
-        <div className="grid grid-cols-3 gap-3">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            className="border rounded px-2 py-1"
-            placeholder="Instance name"
-          />
-          <input
-            value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
-            className="border rounded px-2 py-1 col-span-2"
-            placeholder="Description"
-          />
-        </div>
-        <div className="flex justify-end mt-3">
-          <button
-            onClick={createInstance}
-            disabled={creating}
-            className="bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700"
-          >
-            {creating ? 'Creating…' : 'Create'}
-          </button>
-        </div>
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Instances</h1>
+        <button className="btn btn-primary" onClick={handleCreateInstance}>
+          + New Instance
+        </button>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded shadow p-4">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="font-semibold">Your Instances</h2>
-          <span className="text-xs text-gray-500">{instances.length} total</span>
+      {loading ? (
+        <div className="text-sm text-gray-600">Loading instances...</div>
+      ) : instances.length === 0 ? (
+        <div className="text-sm text-gray-500">No instances yet. Create one to begin.</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {instances.map(instance => (
+            <div
+              key={instance.id}
+              className="card p-4 border border-gray-200 rounded hover:shadow cursor-pointer transition"
+              onClick={() => router.push(`/instances/${instance.id}`)}
+            >
+              <h2 className="font-medium text-lg">{instance.name}</h2>
+              <div className="text-xs text-gray-500 mt-1">
+                Created:{' '}
+                {instance.created_at
+                  ? new Date(instance.created_at).toLocaleString()
+                  : '—'}
+              </div>
+              {instance.description && (
+                <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                  {instance.description}
+                </p>
+              )}
+              {instance.admin_scope && instance.admin_scope.length > 0 && (
+                <div className="text-xs text-blue-600 mt-2">
+                  🌍 Scope: {instance.admin_scope.join(', ')}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 mt-3">
+                <button
+                  className="text-xs btn btn-secondary"
+                  onClick={e => {
+                    e.stopPropagation();
+                    setSelectedInstance(instance);
+                    setShowDatasetModal(true);
+                  }}
+                >
+                  Configure
+                </button>
+                <button
+                  className="text-xs btn btn-primary"
+                  onClick={e => {
+                    e.stopPropagation();
+                    setSelectedInstance(instance);
+                    setShowAreaModal(true);
+                  }}
+                >
+                  Area
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
+      )}
 
-        {loading ? (
-          <p className="text-sm text-gray-500">Loading…</p>
-        ) : instances.length === 0 ? (
-          <p className="text-sm text-gray-500">No instances yet.</p>
-        ) : (
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b text-gray-500">
-                <th className="text-left py-2">Name</th>
-                <th>Created</th>
-                <th>Type</th>
-                <th>Affected ADM1</th>
-                <th className="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {instances.map((inst) => (
-                <tr key={inst.id} className="border-t">
-                  <td className="py-2">{inst.name}</td>
-                  <td>{inst.created_at ? new Date(inst.created_at).toLocaleString() : '—'}</td>
-                  <td>{inst.type ?? '—'}</td>
-                  <td>{inst.admin_scope?.length ?? 0}</td>
-                  <td className="text-right">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => setAreaModalFor(inst)}
-                        className="text-sm px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
-                      >
-                        Define Area
-                      </button>
-                      <Link
-                        href={`/instances/${inst.id}`}
-                        className="text-sm px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        Open
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Area Modal */}
-      {areaModalFor && (
+      {showAreaModal && selectedInstance && (
         <DefineAffectedAreaModal
-          open={!!areaModalFor}  // ✅ FIX: add this required prop
-          instance={areaModalFor}
-          onClose={() => setAreaModalFor(null)}
-          onSaved={load}
+          instance={selectedInstance}
+          onClose={() => setShowAreaModal(false)}
+          onSaved={loadInstances}
+        />
+      )}
+
+      {showDatasetModal && selectedInstance && (
+        <InstanceDatasetConfigModal
+          instance={selectedInstance}
+          onClose={() => setShowDatasetModal(false)}
+          onSaved={loadInstances}
         />
       )}
     </div>
