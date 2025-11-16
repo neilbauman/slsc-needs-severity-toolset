@@ -57,30 +57,33 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return "#ff0000";
   };
 
-  // Load geometry
-  useEffect(() => {
-    const loadGeoms = async () => {
-      if (!instance?.admin_scope?.length) return;
-      const admScope = instance.admin_scope[instance.admin_scope.length - 1];
+  // Load geometry (ADM3/ADM4)
+useEffect(() => {
+  const loadGeoms = async () => {
+    if (!instance?.admin_scope?.length) return;
+    const admScope = instance.admin_scope[instance.admin_scope.length - 1];
 
-      const { data, error } = await supabase.rpc("get_admin_geoms", {
-        parent_pcode: admScope,
-      });
+    // ✅ Updated RPC name — must match actual Postgres function
+    const { data, error } = await supabase.rpc("get_adm3_scores", {
+      p_admin_scope: admScope,
+    });
 
-      if (error) {
-        console.error("Error loading geoms:", error);
-        return;
-      }
+    if (error) {
+      console.error("Error loading geoms:", error);
+      return;
+    }
 
-      const joined = (data || []).map((d: any) => ({
-        ...d,
-        score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
-      }));
+    // ✅ Safe join between geometry and current scores
+    const joined = (data || []).map((d: any) => ({
+      ...d,
+      geom_json: typeof d.geom_json === "string" ? JSON.parse(d.geom_json) : d.geom_json,
+      score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
+    }));
 
-      setFeatures(joined);
-    };
-    loadGeoms();
-  }, [instance, scores]);
+    setFeatures(joined);
+  };
+  loadGeoms();
+}, [instance, scores]);
 
   // Recompute scores
   const recomputeScores = async () => {
