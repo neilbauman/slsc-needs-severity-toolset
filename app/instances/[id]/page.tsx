@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
 import * as L from 'leaflet';
 
-// Dynamic imports for Leaflet
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
@@ -16,8 +15,8 @@ interface Instance {
   id: string;
   name: string;
   description: string | null;
-  admin_scope: string[] | null;
   created_at: string | null;
+  admin_scope: string[] | null;
   active: boolean | null;
   type: string | null;
 }
@@ -25,19 +24,22 @@ interface Instance {
 export default function InstancePage() {
   const { id } = useParams();
   const supabase = createClient();
-
   const [instance, setInstance] = useState<Instance | null>(null);
-  const [metrics, setMetrics] = useState<any>(null);
   const [adm3Geojson, setAdm3Geojson] = useState<any>(null);
   const [affectedNames, setAffectedNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [mapReady, setMapReady] = useState(false);
-
   const mapRef = useRef<L.Map | null>(null);
 
+  // Load instance and its geographic scope
   const loadInstance = useCallback(async () => {
     setLoading(true);
-    const { data: inst, error } = await supabase.from('instances').select('*').eq('id', id).single();
+
+    const { data: inst, error } = await supabase
+      .from('instances')
+      .select('*')
+      .eq('id', id)
+      .single();
     if (error) {
       console.error('Instance load error:', error);
       setLoading(false);
@@ -45,14 +47,10 @@ export default function InstancePage() {
     }
     setInstance(inst);
 
-    const { data: m } = await supabase.rpc('get_instance_summary', { in_instance: id });
-    setMetrics(m?.[0] ?? null);
-
     const { data: allAdm3, error: admErr } = await supabase
       .from('admin_boundaries')
       .select('admin_pcode, name, parent_pcode, admin_level, geom')
       .eq('admin_level', 'ADM3');
-
     if (admErr) {
       console.error('ADM3 load error:', admErr);
       setLoading(false);
@@ -60,17 +58,19 @@ export default function InstancePage() {
     }
 
     const scope = inst?.admin_scope ?? [];
+    const adm1Codes = scope.filter((p) => p.length === 4); // e.g. "PH07"
+    const adm2Codes = scope.filter((p) => p.length === 6); // e.g. "PH0702"
+
+    // Filter ADM3s precisely by selected ADM2s or ADM1s
     const filtered = (allAdm3 || []).filter((r: any) => {
-      if (!scope.length) return false;
-      const prefix = r.admin_pcode?.substring(0, 4);
-      return scope.includes(r.parent_pcode) || scope.includes(prefix);
+      if (adm2Codes.length && adm2Codes.includes(r.parent_pcode)) return true;
+      if (adm1Codes.length && adm1Codes.includes(r.admin_pcode?.substring(0, 4))) return true;
+      return false;
     });
 
-    // ✅ Fix: geom may already be a parsed object
     const features = filtered
       .map((r: any) => {
         let geometry = null;
-        if (!r.geom) return null;
         if (typeof r.geom === 'string') {
           try {
             geometry = JSON.parse(r.geom);
@@ -80,28 +80,28 @@ export default function InstancePage() {
         } else if (typeof r.geom === 'object') {
           geometry = r.geom;
         }
-
         if (!geometry) return null;
         return {
           type: 'Feature',
           geometry,
-          properties: { admin_pcode: r.admin_pcode, name: r.name },
+          properties: {
+            admin_pcode: r.admin_pcode,
+            name: r.name,
+            parent_pcode: r.parent_pcode,
+          },
         };
       })
       .filter(Boolean);
 
-    if (features.length === 0) {
-      console.warn('No ADM3 geometries found for scope', scope);
-    }
-
     setAdm3Geojson({ type: 'FeatureCollection', features });
 
+    // Load readable names for display
     if (scope.length) {
-      const { data: namesData } = await supabase
+      const { data: names } = await supabase
         .from('admin_boundaries')
         .select('name')
         .in('admin_pcode', scope);
-      setAffectedNames(namesData?.map((d) => d.name) ?? []);
+      setAffectedNames(names?.map((d) => d.name) ?? []);
     }
 
     setLoading(false);
@@ -111,27 +111,32 @@ export default function InstancePage() {
     loadInstance();
   }, [loadInstance]);
 
-  // Auto-fit bounds once map and data are ready
+  // Fit map to loaded bounds
   useEffect(() => {
-    if (!mapRef.current || !adm3Geojson || !adm3Geojson.features?.length) return;
-    try {
-      const geoLayer = L.geoJSON(adm3Geojson);
-      mapRef.current.fitBounds(geoLayer.getBounds());
-    } catch (err) {
-      console.warn('Failed to fit map bounds:', err);
-    }
+    if (!mapRef.current || !adm3Geojson?.features?.length) return;
+    const geoLayer = L.geoJSON(adm3Geojson);
+    mapRef.current.fitBounds(geoLayer.getBounds());
   }, [adm3Geojson, mapReady]);
 
-  const style = () => ({
-    color: '#555',
-    weight: 0.6,
-    fillColor: '#8bb7f0',
-    fillOpacity: 0.5,
-  });
+  // Style logic — deselected ADM2 children appear lighter
+  const style = (feature: any) => {
+    const parent = feature.properties?.parent_pcode;
+    const scope = instance?.admin_scope ?? [];
+    const isActive =
+      scope.includes(parent) ||
+      scope.includes(feature.properties?.admin_pcode?.substring(0, 4));
+    return {
+      color: '#555',
+      weight: 0.6,
+      fillColor: isActive ? '#8bb7f0' : '#e0e0e0',
+      fillOpacity: isActive ? 0.6 : 0.25,
+    };
+  };
 
   const onEachFeature = (feature: any, layer: any) => {
-    const name = feature.properties?.name || feature.properties?.admin_pcode;
-    layer.bindTooltip(name, { sticky: true });
+    layer.bindTooltip(feature.properties?.name ?? feature.properties?.admin_pcode, {
+      sticky: true,
+    });
   };
 
   return (
@@ -157,33 +162,15 @@ export default function InstancePage() {
           : 'Unknown'}
       </div>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        {[
-          { label: 'Framework Avg', value: metrics?.framework_avg },
-          { label: 'Final Avg', value: metrics?.final_avg },
-          { label: 'People Affected', value: metrics?.people_affected },
-          { label: 'People in Need', value: metrics?.people_in_need },
-        ].map((m, i) => (
-          <div key={i} className="p-4 bg-white border rounded text-center shadow-sm">
-            <div className="text-xs text-gray-600">{m.label}</div>
-            <div className="text-xl font-semibold text-gray-800">
-              {m.value ? Number(m.value).toLocaleString() : '-'}
-            </div>
-          </div>
-        ))}
-      </div>
-
       {affectedNames.length > 0 && (
         <div className="bg-white border rounded-md p-3 mb-4 shadow-sm">
           <div className="text-sm text-gray-700">
-            🗺️ <strong>Affected Area:</strong>{' '}
-            {affectedNames.join(' → ')} (Target Level: <strong>ADM3</strong>)
+            🗺️ <strong>Affected Area:</strong> {affectedNames.join(' → ')}{' '}
+            (Target Level: <strong>ADM3</strong>)
           </div>
         </div>
       )}
 
-      {/* Map */}
       <div className="grid grid-cols-12 gap-4">
         <div className="col-span-9">
           <div className="h-[600px] w-full border rounded shadow overflow-hidden relative">
