@@ -1,173 +1,179 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import EditDatasetModal from '@/components/EditDatasetModal';
 import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
+import { Pencil, Trash2, Broom } from 'lucide-react';
 
-interface Dataset {
-  id: string;
-  name: string;
-  description?: string;
-  type: string;
-  source?: string;
-  license?: string;
-  tags?: string;
-  is_public?: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
+export default function DatasetDetailPage() {
+  const { dataset_id } = useParams();
+  const router = useRouter();
 
-export default function DatasetDetailPage({ params }: { params: { dataset_id: string } }) {
-  const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [dataset, setDataset] = useState<any>(null);
+  const [dataRows, setDataRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
   const [showClean, setShowClean] = useState(false);
-  const [values, setValues] = useState<any[]>([]);
 
-  const datasetId = params.dataset_id;
-
-  const loadDataset = async () => {
+  async function loadDataset() {
     setLoading(true);
-
     const { data, error } = await supabase
       .from('datasets')
       .select('*')
-      .eq('id', datasetId)
+      .eq('id', dataset_id)
       .single();
 
     if (error) {
-      console.error('Error loading dataset:', error);
-      setDataset(null);
-    } else {
-      setDataset(data);
+      console.error('Failed to load dataset:', error);
+      setLoading(false);
+      return;
     }
 
+    setDataset(data);
+    await loadDataValues(data);
     setLoading(false);
-  };
+  }
 
-  const loadValues = async () => {
-    if (!dataset) return;
-    const table =
-      dataset.type === 'numeric'
+  async function loadDataValues(ds: any) {
+    if (!ds) return;
+    let cleanedTable =
+      ds.type === 'numeric'
         ? 'dataset_values_numeric'
         : 'dataset_values_categorical';
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .eq('dataset_id', dataset.id)
-      .limit(100);
+    let rawTable =
+      ds.type === 'numeric'
+        ? 'dataset_values_numeric_raw'
+        : 'dataset_values_categorical_raw';
 
-    if (error) console.error('Error loading values:', error);
-    else setValues(data || []);
-  };
+    // Try cleaned first
+    let { data: cleaned, error: cleanedErr } = await supabase
+      .from(cleanedTable)
+      .select('*')
+      .eq('dataset_id', ds.id);
+
+    if (cleanedErr) console.error(cleanedErr);
+
+    if (cleaned && cleaned.length > 0) {
+      setDataRows(cleaned);
+      return;
+    }
+
+    // Fallback to raw
+    let { data: raw, error: rawErr } = await supabase
+      .from(rawTable)
+      .select('*')
+      .eq('dataset_id', ds.id);
+
+    if (rawErr) console.error(rawErr);
+    setDataRows(raw || []);
+  }
+
+  async function deleteDataset() {
+    if (!confirm('Are you sure you want to delete this dataset?')) return;
+    const { error } = await supabase.from('datasets').delete().eq('id', dataset_id);
+    if (error) alert('Delete failed: ' + error.message);
+    else router.push('/datasets');
+  }
 
   useEffect(() => {
     loadDataset();
-  }, [datasetId]);
+  }, [dataset_id]);
 
-  useEffect(() => {
-    if (dataset) loadValues();
-  }, [dataset]);
-
-  if (loading) {
-    return (
-      <div className="p-6 text-gray-600 text-center">
-        Loading dataset details...
-      </div>
-    );
-  }
-
-  if (!dataset) {
-    return (
-      <div className="p-6 text-red-600 text-center">
-        Failed to load dataset.
-      </div>
-    );
-  }
+  if (loading) return <div className="p-4 text-gray-600">Loading dataset...</div>;
+  if (!dataset) return <div className="p-4 text-red-500">Dataset not found.</div>;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold">{dataset.name}</h1>
-        <div className="space-x-2">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">{dataset.name}</h1>
+          <p className="text-sm text-gray-600">
+            {dataset.description || 'No description provided.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
           <button
+            className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-100"
             onClick={() => setShowEdit(true)}
-            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
           >
-            Edit
+            <Pencil size={16} /> Edit
           </button>
-          {dataset.type === 'numeric' && (
-            <button
-              onClick={() => setShowClean(true)}
-              className="px-4 py-2 rounded bg-yellow-500 text-white hover:bg-yellow-600"
-            >
-              Clean Data
-            </button>
-          )}
+          <button
+            className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-100"
+            onClick={() => setShowClean(true)}
+          >
+            <Broom size={16} /> Clean
+          </button>
+          <button
+            className="flex items-center gap-1 px-3 py-1 border text-red-500 hover:bg-red-50 rounded"
+            onClick={deleteDataset}
+          >
+            <Trash2 size={16} /> Delete
+          </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-4 space-y-2">
-        <p>
-          <strong>Description:</strong>{' '}
-          {dataset.description || 'No description'}
-        </p>
-        <p>
+      <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+        <div>
+          <strong>Admin Level:</strong> {dataset.admin_level || '—'}
+        </div>
+        <div>
           <strong>Type:</strong> {dataset.type}
-        </p>
-        <p>
-          <strong>Source:</strong> {dataset.source || 'Unknown'}
-        </p>
-        <p>
-          <strong>License:</strong> {dataset.license || 'Not specified'}
-        </p>
-        <p>
-          <strong>Tags:</strong> {dataset.tags || 'None'}
-        </p>
-        <p>
-          <strong>Visibility:</strong>{' '}
-          {dataset.is_public ? 'Public' : 'Private'}
-        </p>
-        <p className="text-sm text-gray-500">
-          Created at: {dataset.created_at}
-        </p>
-        <p className="text-sm text-gray-500">
-          Updated at: {dataset.updated_at}
-        </p>
+        </div>
+        <div>
+          <strong>Subtype:</strong> {dataset.subtype || '—'}
+        </div>
+        <div>
+          <strong>Abs/Rel/Idx:</strong> {dataset.absolute_relative_index || '—'}
+        </div>
+        <div>
+          <strong>Category:</strong> {dataset.category || '—'}
+        </div>
+        <div>
+          <strong>Baseline:</strong> {dataset.is_baseline ? 'Yes' : 'No'}
+        </div>
+        <div>
+          <strong>Derived:</strong> {dataset.is_derived ? 'Yes' : 'No'}
+        </div>
+        <div>
+          <strong>Cleaned:</strong> {dataset.is_cleaned ? 'Yes' : 'No'}
+        </div>
+        <div>
+          <strong>Source:</strong> {dataset.source || '—'}
+        </div>
       </div>
 
-      <div>
-        <h2 className="text-lg font-semibold mb-2">Sample Data</h2>
-        {values.length > 0 ? (
-          <div className="overflow-auto border rounded-lg">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="bg-gray-100 text-left">
-                  {Object.keys(values[0]).map((key) => (
-                    <th key={key} className="px-3 py-2 border-b">
-                      {key}
-                    </th>
+      <h2 className="text-lg font-semibold mt-6 mb-2">Data Preview</h2>
+      {dataRows.length === 0 ? (
+        <div className="text-gray-500">No data available for this dataset.</div>
+      ) : (
+        <div className="overflow-auto border rounded-md">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-100">
+              <tr>
+                {Object.keys(dataRows[0]).map((col) => (
+                  <th key={col} className="px-3 py-2 text-left font-medium">
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dataRows.map((row, i) => (
+                <tr key={i} className="odd:bg-white even:bg-gray-50">
+                  {Object.keys(row).map((col) => (
+                    <td key={col} className="px-3 py-2 whitespace-nowrap">
+                      {String(row[col] ?? '')}
+                    </td>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
-                {values.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
-                    {Object.values(row).map((val: any, j) => (
-                      <td key={j} className="px-3 py-2 border-b">
-                        {String(val)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-gray-500">No values found.</p>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {showEdit && (
         <EditDatasetModal
@@ -176,12 +182,11 @@ export default function DatasetDetailPage({ params }: { params: { dataset_id: st
           onSaved={loadDataset}
         />
       )}
-
-      {showClean && dataset.type === 'numeric' && (
+      {showClean && (
         <CleanNumericDatasetModal
           dataset={dataset}
           onClose={() => setShowClean(false)}
-          onCleaned={loadDataset}
+          onSaved={loadDataset}
         />
       )}
     </div>
