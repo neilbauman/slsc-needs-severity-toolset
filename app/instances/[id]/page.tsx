@@ -1,182 +1,184 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
 import dynamic from 'next/dynamic';
+import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabaseClient';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
-import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
+import InstanceCategoryConfigModal from '@/components/InstanceCategoryConfigModal';
 import InstanceRecomputePanel from '@/components/InstanceRecomputePanel';
 
+// Dynamically import Leaflet components (to prevent window errors)
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
+const useMap = dynamic(() => import('react-leaflet').then(m => m.useMap), { ssr: false });
 
+// --- Types ---
 interface Instance {
   id: string;
   name: string;
   description: string | null;
   created_at: string | null;
   admin_scope: string[] | null;
-  target_admin_level?: string | null;
+  type: string | null;
 }
 
-export default function InstancePage() {
-  const params = useParams();
+interface AdminBoundary {
+  admin_pcode: string;
+  name: string;
+  admin_level: string;
+  parent_pcode: string | null;
+  geom: any;
+}
+
+// --- Helper for zooming map ---
+function MapAutoZoom({ geojson }: { geojson: any }) {
+  const map = useMap() as any;
+  useEffect(() => {
+    if (!geojson || !map) return;
+    try {
+      const L = require('leaflet');
+      const layer = L.geoJSON(geojson);
+      map.fitBounds(layer.getBounds());
+    } catch (e) {
+      console.warn('fitBounds failed:', e);
+    }
+  }, [geojson, map]);
+  return null;
+}
+
+export default function InstanceDashboardPage() {
   const supabase = createClient();
+  const { id } = useParams();
   const [instance, setInstance] = useState<Instance | null>(null);
-  const [adm3GeoJSON, setAdm3GeoJSON] = useState<any>(null);
+  const [boundaries, setBoundaries] = useState<AdminBoundary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAreaModal, setShowAreaModal] = useState(false);
-  const [showDatasetModal, setShowDatasetModal] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
 
+  // --- Load instance ---
   useEffect(() => {
-    loadInstance();
-  }, [params.id]);
+    if (!id) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from('instances')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (error) console.error(error);
+      else setInstance(data);
+    })();
+  }, [id]);
 
-  const loadInstance = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('instances')
-      .select('*')
-      .eq('id', params.id)
-      .single();
-    if (error) {
-      console.error('Error loading instance:', error);
+  // --- Load ADM3 boundaries within affected ADM1/ADM2 ---
+  useEffect(() => {
+    if (!instance?.admin_scope?.length) return;
+    (async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('admin_boundaries_geojson')
+        .select('admin_pcode,name,admin_level,parent_pcode,geom')
+        .eq('admin_level', 'ADM3')
+        .in('parent_pcode', instance.admin_scope);
+      if (error) {
+        console.error('Boundary load error:', error);
+        setBoundaries([]);
+      } else {
+        setBoundaries(data as AdminBoundary[]);
+      }
       setLoading(false);
-      return;
-    }
-    setInstance(data);
-    await loadAdm3(data.admin_scope);
-    setLoading(false);
-  };
+    })();
+  }, [instance?.admin_scope]);
 
-  const loadAdm3 = async (scope: string[] | null) => {
-    if (!scope || scope.length === 0) {
-      setAdm3GeoJSON(null);
-      return;
-    }
-
-    const { data, error } = await supabase.rpc('get_affected_adm3', { in_scope: scope });
-    if (error) {
-      console.error('ADM3 load error:', error);
-      return;
-    }
-
-    // Wrap features in a valid GeoJSON FeatureCollection
-    setAdm3GeoJSON({
-      type: 'FeatureCollection',
-      features: data.map((row: any) => ({
-        type: 'Feature',
-        properties: {
-          name: row.name,
-          admin_pcode: row.admin_pcode,
-          parent_pcode: row.parent_pcode
-        },
-        geometry: row.geom
-      }))
-    });
-  };
-
-  const handleAreaSaved = async () => {
-    await loadInstance();
-    setShowAreaModal(false);
-  };
-
-  if (loading) return <div className="p-4 text-sm text-gray-600">Loading instance...</div>;
-  if (!instance) return <div className="p-4 text-sm text-gray-600">Instance not found.</div>;
+  // --- Combine all ADM3 GeoJSON features ---
+  const combinedGeoJSON = boundaries.length
+    ? {
+        type: 'FeatureCollection',
+        features: boundaries.map((b) => ({
+          type: 'Feature',
+          properties: { name: b.name, pcode: b.admin_pcode },
+          geometry: typeof b.geom === 'string' ? JSON.parse(b.geom) : b.geom,
+        })),
+      }
+    : null;
 
   return (
     <div className="p-4 space-y-4">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-blue)' }}>
-            {instance.name}
-          </h1>
-          <div className="text-xs text-gray-500">
-            Created at:{' '}
-            {instance.created_at ? new Date(instance.created_at).toLocaleString() : '—'}
-          </div>
-          {instance.description && (
-            <div className="text-sm text-gray-600 mt-1">{instance.description}</div>
-          )}
-        </div>
+      <header className="flex items-center justify-between no-print">
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-blue)' }}>
+          {instance ? instance.name : 'Loading...'}
+        </h1>
         <div className="flex gap-2">
-          <button
-            className="btn btn-secondary"
-            onClick={() => setShowDatasetModal(true)}
-          >
-            Configure Datasets
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowAreaModal(true)}
-          >
+          <button className="btn btn-secondary" onClick={() => setShowAreaModal(true)}>
             Define Affected Area
+          </button>
+          <button className="btn btn-secondary" onClick={() => setShowCategoryModal(true)}>
+            Configure Datasets
           </button>
         </div>
       </header>
 
-      {instance.admin_scope && instance.admin_scope.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm">
-          <strong className="mr-2">🌍 Affected Area:</strong>
-          <span>
-            {instance.admin_scope.join(', ')} (Target Level:{' '}
-            <strong>{instance.target_admin_level || 'ADM3'}</strong>)
-          </span>
-        </div>
-      )}
+      <div className="card p-4">
+        <h2 className="text-base font-semibold mb-2" style={{ color: 'var(--gsc-green)' }}>
+          Affected Area Overview
+        </h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4">
-        <div className="card p-3">
-          <InstanceRecomputePanel instanceId={instance.id} />
+        {loading && <div className="text-sm text-gray-600">Loading boundaries...</div>}
 
-          <div className="mt-3 rounded overflow-hidden" style={{ height: 500 }}>
-            {adm3GeoJSON ? (
+        {!loading && combinedGeoJSON && (
+          <div className="h-[500px] w-full border rounded-md overflow-hidden">
+            <Suspense fallback={<div className="text-sm p-4">Loading map...</div>}>
               <MapContainer
+                center={[12.8797, 121.774]} // Philippines centroid
+                zoom={6}
                 style={{ height: '100%', width: '100%' }}
-                center={[10.3157, 123.8854]}
-                zoom={8}
               >
                 <TileLayer
-                  attribution='&copy; OpenStreetMap contributors'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution="© OpenStreetMap contributors"
                 />
                 <GeoJSON
-                  data={adm3GeoJSON}
-                  style={() => ({
-                    color: '#1d4ed8',
+                  data={combinedGeoJSON as any}
+                  style={{
+                    color: '#2563eb',
                     weight: 1,
-                    fillColor: '#60a5fa',
-                    fillOpacity: 0.5
-                  })}
+                    fillOpacity: 0.2,
+                  }}
                 />
+                <MapAutoZoom geojson={combinedGeoJSON} />
               </MapContainer>
-            ) : (
-              <div className="text-sm text-gray-500 p-3">Loading map...</div>
-            )}
+            </Suspense>
           </div>
-        </div>
+        )}
 
-        <div className="card p-3">
-          <h2 className="text-sm font-semibold mb-2">Top Locations</h2>
-          <div className="text-xs text-gray-500">No data yet</div>
-        </div>
+        {!loading && !combinedGeoJSON && (
+          <div className="text-sm text-gray-500">
+            No boundaries found for selected affected area.
+          </div>
+        )}
       </div>
 
-      {showAreaModal && (
+      {/* Recompute Panel */}
+      {instance && <InstanceRecomputePanel instanceId={instance.id} />}
+
+      {/* Modals */}
+      {showAreaModal && instance && (
         <DefineAffectedAreaModal
           instance={instance}
           onClose={() => setShowAreaModal(false)}
-          onSaved={handleAreaSaved}
+          onSaved={async () => {
+            setShowAreaModal(false);
+            const { data } = await supabase.from('instances').select('*').eq('id', id).single();
+            setInstance(data);
+          }}
         />
       )}
 
-      {showDatasetModal && (
-        <InstanceDatasetConfigModal
+      {showCategoryModal && instance && (
+        <InstanceCategoryConfigModal
           instance={instance}
-          onClose={() => setShowDatasetModal(false)}
-          onSaved={loadInstance}
+          onClose={() => setShowCategoryModal(false)}
         />
       )}
     </div>
