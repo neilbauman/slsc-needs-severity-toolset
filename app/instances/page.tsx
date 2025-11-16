@@ -150,8 +150,10 @@ export default function InstancesPage() {
         )}
       </div>
 
+      {/* Area Modal */}
       {areaModalFor && (
         <DefineAffectedAreaModal
+          open={!!areaModalFor}  // ✅ FIX: add this required prop
           instance={areaModalFor}
           onClose={() => setAreaModalFor(null)}
           onSaved={load}
