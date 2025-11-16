@@ -26,14 +26,13 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
   const [loading, setLoading] = useState(false);
   const mapRef = useRef<any>(null);
 
-  const targetLevel = instance?.target_admin_level || 'ADM3';
-
-  // --- Load boundaries once when opened
+  // --- Load all levels
   useEffect(() => {
     if (!open) return;
     const loadData = async () => {
       setLoading(true);
 
+      // ADM1
       const { data: adm1 } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name')
@@ -41,6 +40,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         .order('name');
       setAdm1List(adm1 || []);
 
+      // ADM2
       const { data: adm2 } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name, parent_pcode')
@@ -48,16 +48,34 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         .order('name');
       setAdm2List(adm2 || []);
 
-      const { data: geo } = await supabase
-        .rpc('get_admin_boundaries_geojson', { level: 'ADM3' });
-      setAdm3Geo(geo as FeatureCollection<Geometry, GeoJsonProperties>);
+      // ADM3
+      const { data: adm3, error: adm3Err } = await supabase
+        .from('admin_boundaries')
+        .select('admin_pcode, name, parent_pcode, geom')
+        .eq('admin_level', 'ADM3');
+      if (adm3Err) console.error('ADM3 load error:', adm3Err);
+
+      const features = (adm3 || []).map((row: any) => ({
+        type: 'Feature',
+        geometry: row.geom,
+        properties: {
+          admin_pcode: row.admin_pcode,
+          name: row.name,
+          parent_pcode: row.parent_pcode,
+        },
+      }));
+
+      setAdm3Geo({
+        type: 'FeatureCollection',
+        features,
+      } as FeatureCollection<Geometry, GeoJsonProperties>);
 
       setLoading(false);
     };
     loadData();
   }, [open]);
 
-  // --- Selections
+  // --- Toggle selections
   const toggleADM1 = (code: string) => {
     setSelectedADM1(prev =>
       prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
@@ -70,10 +88,9 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     );
   };
 
-  // --- Filter ADM3 polygons dynamically (memoized)
+  // --- Filter ADM3 polygons based on selections
   const filteredADM3: FeatureCollection<Geometry, GeoJsonProperties> | null = useMemo(() => {
     if (!adm3Geo) return null;
-
     const adm2Parents = selectedADM2.length
       ? selectedADM2
       : adm2List
@@ -90,18 +107,16 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     } as FeatureCollection<Geometry, GeoJsonProperties>;
   }, [adm3Geo, adm2List, selectedADM1, selectedADM2]);
 
-  // --- Auto zoom to new selection
+  // --- Auto-zoom when selection changes
   useEffect(() => {
     if (!filteredADM3 || !mapRef.current) return;
     const L = (window as any).L;
     const group = L.geoJSON(filteredADM3);
     const bounds = group.getBounds();
-    if (bounds.isValid()) {
-      mapRef.current.fitBounds(bounds);
-    }
+    if (bounds.isValid()) mapRef.current.fitBounds(bounds);
   }, [filteredADM3]);
 
-  // --- Save affected area (ADM1 + ADM2)
+  // --- Save selection
   const handleSave = async () => {
     const finalScope = [...selectedADM1, ...selectedADM2];
     const { error } = await supabase
@@ -121,7 +136,6 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
 
   if (!open) return null;
 
-  // --- Styles
   const getColor = (feature: any) => {
     const parent = feature.properties.parent_pcode;
     return selectedADM2.includes(parent)
@@ -147,7 +161,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
           <div className="text-sm text-gray-500">Loading administrative boundaries…</div>
         ) : (
           <>
-            {/* ADM1 SELECTION */}
+            {/* ADM1 Selection */}
             <div>
               <h3 className="text-sm font-semibold mb-2">Step 1: Select ADM1 Regions</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-1 overflow-y-auto max-h-32">
@@ -164,7 +178,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
               </div>
             </div>
 
-            {/* ADM2 REFINEMENT */}
+            {/* ADM2 Refinement */}
             {selectedADM1.length > 0 && (
               <div>
                 <h3 className="text-sm font-semibold mb-2">Step 2: Refine by ADM2</h3>
@@ -185,7 +199,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
               </div>
             )}
 
-            {/* MAP */}
+            {/* Map */}
             <div className="border rounded-md overflow-hidden h-[400px]">
               {filteredADM3 && (
                 <MapContainer
@@ -206,7 +220,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
           </>
         )}
 
-        {/* FOOTER */}
+        {/* Footer */}
         <div className="flex justify-end items-center pt-2 gap-2">
           <button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
             Cancel
