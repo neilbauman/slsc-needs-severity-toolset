@@ -1,191 +1,80 @@
 'use client';
 
-import { useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
-interface EditDatasetModalProps {
-  dataset: any;
-  onClose: () => void;
-  onSave: () => void;
-}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-export default function EditDatasetModal({
-  dataset,
-  onClose,
-  onSave,
-}: EditDatasetModalProps) {
-  const [name, setName] = useState(dataset.name || '');
-  const [category, setCategory] = useState(dataset.category || '');
-  const [type, setType] = useState(dataset.type || 'numeric');
-  const [adminLevel, setAdminLevel] = useState(dataset.admin_level || '');
-  const [description, setDescription] = useState(dataset.description || '');
-  const [absRelIdx, setAbsRelIdx] = useState(dataset.absolute_relative_index || 'absolute');
+export default function EditDatasetModal({ open, onClose, dataset, onSaved }) {
+  const [name, setName] = useState(dataset?.name || '');
+  const [description, setDescription] = useState(dataset?.description || '');
   const [saving, setSaving] = useState(false);
 
-  const categories = [
-    'Core',
-    'SSC Framework - P1',
-    'SSC Framework - P2',
-    'SSC Framework - P3',
-    'Hazards',
-    'Underlying Vulnerability',
-  ];
-
-  const adminLevels = ['ADM2', 'ADM3', 'ADM4'];
-  const types = ['numeric', 'categorical'];
-  const absRelIdxOptions = ['absolute', 'relative', 'index'];
+  useEffect(() => {
+    if (dataset) {
+      setName(dataset.name || '');
+      setDescription(dataset.description || '');
+    }
+  }, [dataset]);
 
   const handleSave = async () => {
+    if (!dataset?.id) return;
     setSaving(true);
     const { error } = await supabase
       .from('datasets')
-      .update({
-        name,
-        category,
-        type,
-        admin_level: adminLevel,
-        description,
-        absolute_relative_index: absRelIdx,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ name, description }) // no updated_at
       .eq('id', dataset.id);
 
     setSaving(false);
 
-    if (error) {
-      console.error('Error updating dataset:', error);
-      alert('Failed to update dataset.');
-    } else {
-      onSave();
+    if (!error) {
+      onSaved?.();
       onClose();
+    } else {
+      alert(`Failed to save dataset: ${error.message}`);
     }
   };
 
+  if (!open) return null;
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Edit Dataset
-        </h2>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-xl p-6 w-[480px]">
+        <h2 className="text-lg font-semibold mb-4">Edit Dataset</h2>
 
-        <div className="space-y-4">
-          {/* Dataset Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Name
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
-              placeholder="Dataset name"
-            />
-          </div>
+        <label className="block mb-2 text-sm font-medium">Dataset Name</label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="border rounded w-full px-3 py-2 mb-4"
+          placeholder="Enter dataset name"
+        />
 
-          {/* Category */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Category
-            </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
-            >
-              <option value="">Select category</option>
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
-          </div>
+        <label className="block mb-2 text-sm font-medium">Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="border rounded w-full px-3 py-2 mb-4"
+          rows={3}
+          placeholder="Enter dataset description"
+        />
 
-          {/* Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Type
-            </label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
-            >
-              {types.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Admin Level */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Admin Level
-            </label>
-            <select
-              value={adminLevel}
-              onChange={(e) => setAdminLevel(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
-            >
-              <option value="">Select admin level</option>
-              {adminLevels.map((lvl) => (
-                <option key={lvl} value={lvl}>
-                  {lvl}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Abs/Rel/Idx */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Abs / Rel / Idx
-            </label>
-            <select
-              value={absRelIdx}
-              onChange={(e) => setAbsRelIdx(e.target.value)}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
-            >
-              {absRelIdxOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring focus:ring-[var(--ssc-blue)]"
-              placeholder="Describe the dataset..."
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end mt-6 space-x-3">
+        <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-md"
-            disabled={saving}
+            className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 text-sm bg-[var(--ssc-blue)] hover:bg-blue-800 text-white rounded-md"
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </div>
