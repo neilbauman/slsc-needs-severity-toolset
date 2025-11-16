@@ -41,11 +41,11 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
     setLoading(false);
   }, [params.id, supabase]);
 
-  // --- Load ADM3 boundaries (handles fallback and MultiPolygons) ---
+  // --- Load ADM3 boundaries (with safe geometry parsing) ---
   const loadAdm3 = useCallback(
     async (instanceId: string, adminScope?: string[]) => {
       try {
-        // 1️⃣ Try precomputed scores first
+        // 1. Try to fetch scored ADM3 (if RPC exists)
         const { data: scored, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
         if (!error && scored && scored.length > 0) {
           console.log('Loaded scored ADM3 data:', scored.length);
@@ -58,7 +58,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
 
         const adm2 = adminScope[adminScope.length - 1];
 
-        // 2️⃣ Load ADM3 geometries directly from admin_boundaries
+        // 2. Fallback to raw geometry
         const { data: rows, error: e2 } = await supabase
           .from('admin_boundaries')
           .select('name, admin_pcode, parent_pcode, ST_AsGeoJSON(geom) AS geom_json')
@@ -66,7 +66,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
           .or(`parent_pcode.ilike.${adm2}%,admin_pcode.ilike.${adm2}%`);
 
         if (e2) {
-          console.error('Failed to load ADM3 fallback boundaries:', e2);
+          console.error('Failed to load fallback ADM3 boundaries:', e2);
           return;
         }
 
@@ -75,7 +75,6 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
           return;
         }
 
-        // 3️⃣ Convert PostGIS geometries into GeoJSON features
         const features = rows
           .filter(r => r.geom_json)
           .map(r => {
@@ -86,7 +85,6 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
               console.warn('Invalid GeoJSON for', r.admin_pcode);
               return null;
             }
-
             if (!geometry || !geometry.type || !geometry.coordinates) return null;
 
             return {
@@ -124,10 +122,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
       }
 
       const scoreMap: Record<string, number> = {};
-      for (const row of data || []) {
-        scoreMap[row.pcode] = Number(row.score);
-      }
-      console.log(`Loaded ${Object.keys(scoreMap).length} scored ADM3 areas`);
+      for (const row of data || []) scoreMap[row.pcode] = Number(row.score);
       setScores(scoreMap);
     },
     [supabase]
@@ -193,15 +188,12 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
         </div>
       </header>
 
+      {/* Map Section */}
       <div className="card p-4">
         <h2 className="text-base font-semibold mb-2">Geographic Overview</h2>
         {!adm3 && <p className="text-sm text-gray-500">Loading map data…</p>}
         {adm3 && (
-          <MapContainer
-            style={{ height: '70vh', width: '100%' }}
-            zoom={7}
-            center={[10.3, 123.9]} // Central Visayas
-          >
+          <MapContainer style={{ height: '70vh', width: '100%' }} zoom={7} center={[10.3, 123.9]}>
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <GeoJSON data={adm3 as any} style={style} />
           </MapContainer>
