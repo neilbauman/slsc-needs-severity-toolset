@@ -1,114 +1,189 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import supabase from '@/lib/supabaseClient';
 import EditDatasetModal from '@/components/EditDatasetModal';
+import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+interface Dataset {
+  id: string;
+  name: string;
+  description?: string;
+  type: string;
+  source?: string;
+  license?: string;
+  tags?: string;
+  is_public?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
 
-export default function DatasetDetailPage({ params }) {
-  const { dataset_id } = params;
-  const [dataset, setDataset] = useState(null);
-  const [dataPreview, setDataPreview] = useState([]);
+export default function DatasetDetailPage({ params }: { params: { dataset_id: string } }) {
+  const [dataset, setDataset] = useState<Dataset | null>(null);
   const [loading, setLoading] = useState(true);
   const [showEdit, setShowEdit] = useState(false);
+  const [showClean, setShowClean] = useState(false);
+  const [values, setValues] = useState<any[]>([]);
 
-  useEffect(() => {
-    loadDataset();
-  }, [dataset_id]);
+  const datasetId = params.dataset_id;
 
   const loadDataset = async () => {
     setLoading(true);
+
     const { data, error } = await supabase
       .from('datasets')
       .select('*')
-      .eq('id', dataset_id)
+      .eq('id', datasetId)
       .single();
 
-    if (!error && data) {
+    if (error) {
+      console.error('Error loading dataset:', error);
+      setDataset(null);
+    } else {
       setDataset(data);
-      if (data.is_derived || data.is_cleaned) await loadPreview(data.id);
     }
+
     setLoading(false);
   };
 
-  const loadPreview = async (id: string) => {
-    const { data } = await supabase
-      .from('dataset_values_numeric')
-      .select('admin_pcode, admin_name, value')
-      .eq('dataset_id', id)
-      .limit(50);
-    setDataPreview(data || []);
+  const loadValues = async () => {
+    if (!dataset) return;
+    const table =
+      dataset.type === 'numeric'
+        ? 'dataset_values_numeric'
+        : 'dataset_values_categorical';
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('dataset_id', dataset.id)
+      .limit(100);
+
+    if (error) console.error('Error loading values:', error);
+    else setValues(data || []);
   };
 
-  if (loading) return <div className="p-6 text-gray-600">Loading dataset…</div>;
-  if (!dataset) return <div className="p-6 text-red-600">Dataset not found.</div>;
+  useEffect(() => {
+    loadDataset();
+  }, [datasetId]);
+
+  useEffect(() => {
+    if (dataset) loadValues();
+  }, [dataset]);
+
+  if (loading) {
+    return (
+      <div className="p-6 text-gray-600 text-center">
+        Loading dataset details...
+      </div>
+    );
+  }
+
+  if (!dataset) {
+    return (
+      <div className="p-6 text-red-600 text-center">
+        Failed to load dataset.
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
+    <div className="p-6 space-y-6">
+      <div className="flex justify-between items-center">
         <h1 className="text-2xl font-semibold">{dataset.name}</h1>
-        <button
-          onClick={() => setShowEdit(true)}
-          className="bg-gray-100 px-3 py-1 rounded hover:bg-gray-200"
-        >
-          Edit
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div>
-          <p><span className="font-medium">Admin Level:</span> {dataset.admin_level}</p>
-          <p><span className="font-medium">Type:</span> {dataset.type}</p>
-          <p><span className="font-medium">Derived:</span> {dataset.is_derived ? 'Yes' : 'No'}</p>
-          <p><span className="font-medium">Cleaned:</span> {dataset.is_cleaned ? 'Yes' : 'No'}</p>
-        </div>
-        <div>
-          <p><span className="font-medium">Created At:</span> {new Date(dataset.created_at).toLocaleString()}</p>
-          <p><span className="font-medium">Description:</span> {dataset.description || '—'}</p>
+        <div className="space-x-2">
+          <button
+            onClick={() => setShowEdit(true)}
+            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Edit
+          </button>
+          {dataset.type === 'numeric' && (
+            <button
+              onClick={() => setShowClean(true)}
+              className="px-4 py-2 rounded bg-yellow-500 text-white hover:bg-yellow-600"
+            >
+              Clean Data
+            </button>
+          )}
         </div>
       </div>
 
-      {(dataset.is_derived || dataset.is_cleaned) && (
-        <div>
-          <h2 className="text-lg font-semibold mb-2">Data Preview</h2>
-          <table className="w-full border text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="border px-3 py-2 text-left">Admin Pcode</th>
-                <th className="border px-3 py-2 text-left">Admin Name</th>
-                <th className="border px-3 py-2 text-right">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dataPreview.map((r) => (
-                <tr key={r.admin_pcode}>
-                  <td className="border px-3 py-2">{r.admin_pcode}</td>
-                  <td className="border px-3 py-2">{r.admin_name}</td>
-                  <td className="border px-3 py-2 text-right">{r.value?.toLocaleString()}</td>
+      <div className="bg-white rounded-lg shadow p-4 space-y-2">
+        <p>
+          <strong>Description:</strong>{' '}
+          {dataset.description || 'No description'}
+        </p>
+        <p>
+          <strong>Type:</strong> {dataset.type}
+        </p>
+        <p>
+          <strong>Source:</strong> {dataset.source || 'Unknown'}
+        </p>
+        <p>
+          <strong>License:</strong> {dataset.license || 'Not specified'}
+        </p>
+        <p>
+          <strong>Tags:</strong> {dataset.tags || 'None'}
+        </p>
+        <p>
+          <strong>Visibility:</strong>{' '}
+          {dataset.is_public ? 'Public' : 'Private'}
+        </p>
+        <p className="text-sm text-gray-500">
+          Created at: {dataset.created_at}
+        </p>
+        <p className="text-sm text-gray-500">
+          Updated at: {dataset.updated_at}
+        </p>
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-2">Sample Data</h2>
+        {values.length > 0 ? (
+          <div className="overflow-auto border rounded-lg">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left">
+                  {Object.keys(values[0]).map((key) => (
+                    <th key={key} className="px-3 py-2 border-b">
+                      {key}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-              {dataPreview.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="text-center py-4 text-gray-500">
-                    No preview data found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {values.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    {Object.values(row).map((val: any, j) => (
+                      <td key={j} className="px-3 py-2 border-b">
+                        {String(val)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-gray-500">No values found.</p>
+        )}
+      </div>
+
+      {showEdit && (
+        <EditDatasetModal
+          dataset={dataset}
+          onClose={() => setShowEdit(false)}
+          onSaved={loadDataset}
+        />
       )}
 
-      <EditDatasetModal
-        open={showEdit}
-        onClose={() => setShowEdit(false)}
-        dataset={dataset}
-        onSaved={loadDataset}
-      />
+      {showClean && dataset.type === 'numeric' && (
+        <CleanNumericDatasetModal
+          dataset={dataset}
+          onClose={() => setShowClean(false)}
+          onCleaned={loadDataset}
+        />
+      )}
     </div>
   );
 }
