@@ -41,7 +41,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
     setLoading(false);
   }, [params.id, supabase]);
 
-  // --- Load ADM3 boundaries (with safe geometry parsing) ---
+  // --- Load ADM3 boundaries (safe + typed) ---
   const loadAdm3 = useCallback(
     async (instanceId: string, adminScope?: string[]) => {
       try {
@@ -58,10 +58,10 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
 
         const adm2 = adminScope[adminScope.length - 1];
 
-        // 2. Fallback to raw geometry
+        // 2. Fallback: direct geometry fetch
         const { data: rows, error: e2 } = await supabase
           .from('admin_boundaries')
-          .select('name, admin_pcode, parent_pcode, ST_AsGeoJSON(geom) AS geom_json')
+          .select('name, admin_pcode, parent_pcode, geom')
           .eq('admin_level', 'ADM3')
           .or(`parent_pcode.ilike.${adm2}%,admin_pcode.ilike.${adm2}%`);
 
@@ -75,16 +75,11 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
           return;
         }
 
+        // 3. Parse geometry safely
         const features = rows
-          .filter(r => r.geom_json)
           .map(r => {
-            let geometry;
-            try {
-              geometry = JSON.parse(r.geom_json);
-            } catch {
-              console.warn('Invalid GeoJSON for', r.admin_pcode);
-              return null;
-            }
+            if (!r.geom) return null;
+            const geometry = typeof r.geom === 'string' ? JSON.parse(r.geom) : r.geom;
             if (!geometry || !geometry.type || !geometry.coordinates) return null;
 
             return {
