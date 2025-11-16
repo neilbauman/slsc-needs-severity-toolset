@@ -1,21 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
-import EditDatasetModal from '@/components/EditDatasetModal';
-import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
-import { Pencil, Trash2, Brush } from 'lucide-react';
 
 export default function DatasetDetailPage() {
   const { dataset_id } = useParams();
-  const router = useRouter();
-
   const [dataset, setDataset] = useState<any>(null);
   const [dataRows, setDataRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showEdit, setShowEdit] = useState(false);
-  const [showClean, setShowClean] = useState(false);
 
   async function loadDataset() {
     setLoading(true);
@@ -70,13 +63,6 @@ export default function DatasetDetailPage() {
     setDataRows(raw || []);
   }
 
-  async function deleteDataset() {
-    if (!confirm('Are you sure you want to delete this dataset?')) return;
-    const { error } = await supabase.from('datasets').delete().eq('id', dataset_id);
-    if (error) alert('Delete failed: ' + error.message);
-    else router.push('/datasets');
-  }
-
   useEffect(() => {
     loadDataset();
   }, [dataset_id]);
@@ -86,33 +72,11 @@ export default function DatasetDetailPage() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">{dataset.name}</h1>
-          <p className="text-sm text-gray-600">
-            {dataset.description || 'No description provided.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-100"
-            onClick={() => setShowEdit(true)}
-          >
-            <Pencil size={16} /> Edit
-          </button>
-          <button
-            className="flex items-center gap-1 px-3 py-1 border rounded hover:bg-gray-100"
-            onClick={() => setShowClean(true)}
-          >
-            <Brush size={16} /> Clean
-          </button>
-          <button
-            className="flex items-center gap-1 px-3 py-1 border text-red-500 hover:bg-red-50 rounded"
-            onClick={deleteDataset}
-          >
-            <Trash2 size={16} /> Delete
-          </button>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold mb-1">{dataset.name}</h1>
+        <p className="text-sm text-gray-600">
+          {dataset.description || 'No description provided.'}
+        </p>
       </div>
 
       <div className="mb-4 grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
@@ -173,21 +137,6 @@ export default function DatasetDetailPage() {
             </tbody>
           </table>
         </div>
-      )}
-
-      {showEdit && (
-        <EditDatasetModal
-          dataset={dataset}
-          onClose={() => setShowEdit(false)}
-          onSaved={loadDataset}
-        />
-      )}
-      {showClean && (
-        <CleanNumericDatasetModal
-          dataset={dataset}
-          onClose={() => setShowClean(false)}
-          onSaved={loadDataset}
-        />
       )}
     </div>
   );
