@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 interface DeriveDatasetModalProps {
@@ -14,20 +14,37 @@ export default function DeriveDatasetModal({
   onOpenChange,
   onCreated,
 }: DeriveDatasetModalProps) {
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [baseA, setBaseA] = useState("");
   const [baseB, setBaseB] = useState("");
-  const [method, setMethod] = useState<"ratio" | "difference" | "sum">("ratio");
+  const [method, setMethod] = useState("ratio");
+  const [targetAdminLevel, setTargetAdminLevel] = useState("ADM4");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [preview, setPreview] = useState<any[]>([]);
   const [summary, setSummary] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load datasets for dropdowns
+  useEffect(() => {
+    const loadDatasets = async () => {
+      const { data, error } = await supabase
+        .from("datasets")
+        .select("id, name, admin_level, is_cleaned")
+        .order("created_at", { ascending: false });
+      if (error) console.error(error);
+      else setDatasets(data || []);
+    };
+    if (open) loadDatasets();
+  }, [open]);
 
   if (!open) return null;
 
   const handlePreview = async () => {
     if (!baseA || !baseB) {
-      setError("Please provide both dataset UUIDs.");
+      setError("Please select both base datasets.");
       return;
     }
 
@@ -41,7 +58,7 @@ export default function DeriveDatasetModal({
         base_a: baseA,
         base_b: baseB,
         method,
-        target_admin_level: "ADM4",
+        target_admin_level: targetAdminLevel,
       });
 
       if (error) throw error;
@@ -52,7 +69,6 @@ export default function DeriveDatasetModal({
       setPreview(normalRows);
       setSummary(summaryRow?.summary || null);
     } catch (err: any) {
-      console.error(err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -60,8 +76,8 @@ export default function DeriveDatasetModal({
   };
 
   const handleSave = async () => {
-    if (!baseA || !baseB) {
-      setError("Please provide both dataset UUIDs before saving.");
+    if (!name.trim()) {
+      setError("Please provide a dataset name.");
       return;
     }
 
@@ -69,10 +85,13 @@ export default function DeriveDatasetModal({
     setError(null);
 
     try {
-      const { data, error } = await supabase.rpc("materialize_derived_dataset_v2", {
+      const { error } = await supabase.rpc("materialize_derived_dataset_v2", {
         base_a: baseA,
         base_b: baseB,
         method,
+        name,
+        description,
+        target_admin_level: targetAdminLevel,
       });
 
       if (error) throw error;
@@ -80,7 +99,6 @@ export default function DeriveDatasetModal({
       if (onCreated) await onCreated();
       onOpenChange(false);
     } catch (err: any) {
-      console.error(err);
       setError(err.message);
     } finally {
       setSaving(false);
@@ -89,45 +107,71 @@ export default function DeriveDatasetModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-      <div className="bg-white w-[90%] max-w-5xl rounded-lg shadow-lg p-6 flex flex-col max-h-[90vh] overflow-hidden">
-        <h2 className="text-xl font-bold mb-4">Derive New Dataset</h2>
+      <div className="bg-white w-[95%] max-w-6xl rounded-lg shadow-lg p-6 flex flex-col max-h-[95vh] overflow-hidden">
+        <h2 className="text-xl font-bold mb-4">🧮 Derive New Dataset</h2>
 
-        {/* Inputs */}
+        {/* Dataset selection */}
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Base Dataset A (UUID)</label>
-            <input
-              type="text"
+            <label className="block text-sm font-medium mb-1">Base Dataset A</label>
+            <select
               value={baseA}
               onChange={(e) => setBaseA(e.target.value)}
-              placeholder="Enter Dataset A UUID"
               className="w-full border rounded p-2 text-sm"
-            />
+            >
+              <option value="">Select Dataset</option>
+              {datasets.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.admin_level})
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Base Dataset B (UUID)</label>
-            <input
-              type="text"
+            <label className="block text-sm font-medium mb-1">Base Dataset B</label>
+            <select
               value={baseB}
               onChange={(e) => setBaseB(e.target.value)}
-              placeholder="Enter Dataset B UUID"
               className="w-full border rounded p-2 text-sm"
-            />
+            >
+              <option value="">Select Dataset</option>
+              {datasets.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.admin_level})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 mb-4">
-          <label className="text-sm font-medium">Method:</label>
-          <select
-            value={method}
-            onChange={(e) => setMethod(e.target.value as "ratio" | "difference" | "sum")}
-            className="border rounded p-2 text-sm"
-          >
-            <option value="ratio">Ratio (A ÷ B)</option>
-            <option value="difference">Difference (A - B)</option>
-            <option value="sum">Sum (A + B)</option>
-          </select>
+        {/* Method and target level */}
+        <div className="flex flex-wrap gap-3 mb-4 items-end">
+          <div>
+            <label className="block text-sm font-medium mb-1">Derivation Method</label>
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="border rounded p-2 text-sm"
+            >
+              <option value="ratio">Ratio (A ÷ B)</option>
+              <option value="difference">Difference (A - B)</option>
+              <option value="sum">Sum (A + B)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Target Admin Level</label>
+            <select
+              value={targetAdminLevel}
+              onChange={(e) => setTargetAdminLevel(e.target.value)}
+              className="border rounded p-2 text-sm"
+            >
+              <option value="ADM4">ADM4</option>
+              <option value="ADM3">ADM3</option>
+              <option value="ADM2">ADM2</option>
+            </select>
+          </div>
 
           <button
             onClick={handlePreview}
@@ -140,9 +184,34 @@ export default function DeriveDatasetModal({
           </button>
         </div>
 
+        {/* Metadata fields */}
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Dataset Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full border rounded p-2 text-sm"
+              placeholder="Derived dataset name"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Description</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full border rounded p-2 text-sm"
+              placeholder="Short description of the dataset"
+            />
+          </div>
+        </div>
+
         {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-        {/* Preview Table */}
+        {/* Preview */}
         {preview.length > 0 && (
           <div className="border rounded overflow-y-auto flex-grow mb-4">
             <table className="w-full text-sm border-collapse">
@@ -168,7 +237,6 @@ export default function DeriveDatasetModal({
           </div>
         )}
 
-        {/* Summary */}
         {summary && (
           <div className="border rounded bg-gray-50 p-3 text-sm mb-4">
             <h3 className="font-semibold mb-1">Summary</h3>
@@ -184,10 +252,7 @@ export default function DeriveDatasetModal({
         {/* Footer buttons */}
         <div className="flex justify-end gap-2">
           <button
-            onClick={() => {
-              onOpenChange(false);
-              if (onCreated) onCreated();
-            }}
+            onClick={() => onOpenChange(false)}
             className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm"
           >
             Close
