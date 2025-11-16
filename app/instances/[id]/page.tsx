@@ -13,11 +13,12 @@ const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ss
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
   const [scores, setScores] = useState<any[]>([]);
+  const [features, setFeatures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
 
-  // Load instance metadata
+  // Load instance
   useEffect(() => {
     const loadInstance = async () => {
       const { data, error } = await supabase
@@ -31,7 +32,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [params.id]);
 
-  // Load scored data
+  // Load scores
   useEffect(() => {
     if (!instance) return;
     const loadScores = async () => {
@@ -40,18 +41,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .from("scored_instance_values")
         .select("pcode, score")
         .eq("instance_id", instance.id);
-      if (error) {
-        console.error("Error loading scores:", error);
-        setLoading(false);
-        return;
-      }
+      if (error) console.error("Error loading scores:", error);
       setScores(data || []);
       setLoading(false);
     };
     loadScores();
   }, [instance]);
 
-  const colorForScore = (score: number) => {
+  const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return "#ccc";
     if (score <= 1) return "#00b050";
     if (score <= 2) return "#92d050";
@@ -60,25 +57,22 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return "#ff0000";
   };
 
-  // Render polygons
-  const [features, setFeatures] = useState<any[]>([]);
-
+  // Load geometry
   useEffect(() => {
     const loadGeoms = async () => {
-      if (!instance?.admin_scope) return;
+      if (!instance?.admin_scope?.length) return;
+      const admScope = instance.admin_scope[instance.admin_scope.length - 1];
 
-      const adm2Or3 = instance.admin_scope[instance.admin_scope.length - 1];
-      const { data, error } = await supabase
-        .from("admin_boundaries")
-        .select("admin_pcode, name, geom_json")
-        .eq("parent_pcode", adm2Or3);
+      const { data, error } = await supabase.rpc("get_admin_geoms", {
+        parent_pcode: admScope,
+      });
 
       if (error) {
         console.error("Error loading geoms:", error);
         return;
       }
 
-      const joined = data.map((d: any) => ({
+      const joined = (data || []).map((d: any) => ({
         ...d,
         score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
       }));
@@ -87,6 +81,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     };
     loadGeoms();
   }, [instance, scores]);
+
+  // Recompute scores
+  const recomputeScores = async () => {
+    await supabase.rpc("score_instance_overall", { in_instance: instance.id });
+    const { data, error } = await supabase
+      .from("scored_instance_values")
+      .select("pcode, score")
+      .eq("instance_id", instance.id);
+    if (!error) setScores(data || []);
+  };
 
   return (
     <div className="p-6 space-y-4">
@@ -112,14 +116,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               </button>
               <button
                 className="px-4 py-2 border rounded bg-blue-600 text-white hover:bg-blue-700"
-                onClick={async () => {
-                  await supabase.rpc("score_instance_overall", { in_instance: instance.id });
-                  const { data, error } = await supabase
-                    .from("scored_instance_values")
-                    .select("pcode, score")
-                    .eq("instance_id", instance.id);
-                  if (!error) setScores(data || []);
-                }}
+                onClick={recomputeScores}
               >
                 Recompute Scores
               </button>
@@ -146,7 +143,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {features.map((f, i) => {
                   let geom;
                   try {
-                    geom = JSON.parse(f.geom_json);
+                    geom = f.geom_json;
                   } catch {
                     return null;
                   }
@@ -173,13 +170,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <InstanceDatasetConfigModal
           instance={instance}
           onClose={() => setShowConfig(false)}
-          onSaved={async () => {
-            const { data, error } = await supabase
-              .from("scored_instance_values")
-              .select("pcode, score")
-              .eq("instance_id", instance.id);
-            if (!error) setScores(data || []);
-          }}
+          onSaved={recomputeScores}
         />
       )}
 
@@ -187,14 +178,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <DefineAffectedAreaModal
           instance={instance}
           onClose={() => setShowAreaModal(false)}
-          onSaved={async () => {
-            // reload geometry and scores after area change
-            const { data, error } = await supabase
-              .from("scored_instance_values")
-              .select("pcode, score")
-              .eq("instance_id", instance.id);
-            if (!error) setScores(data || []);
-          }}
+          onSaved={recomputeScores}
         />
       )}
     </div>
