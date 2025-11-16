@@ -1,85 +1,159 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import supabase from '@/lib/supabaseClient';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 interface Props {
-  open: boolean;
-  onClose: () => void;
-  onSaved: () => void;
   instance: any;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  open: boolean;
 }
 
-export default function DefineAffectedAreaModal({ open, onClose, onSaved, instance }: Props) {
-  const [name, setName] = useState(instance?.name || '');
-  const [description, setDescription] = useState(instance?.description || '');
-  const [saving, setSaving] = useState(false);
+interface Adm1 {
+  adm1_pcode: string;
+  adm1_name: string;
+}
 
+interface Adm2 {
+  adm2_pcode: string;
+  adm2_name: string;
+  adm1_pcode: string;
+}
+
+export default function DefineAffectedAreaModal({ instance, onClose, onSaved, open }: Props) {
+  const [adm1List, setAdm1List] = useState<Adm1[]>([]);
+  const [adm2List, setAdm2List] = useState<Adm2[]>([]);
+  const [selectedAdm1, setSelectedAdm1] = useState<string[]>([]);
+  const [excludedAdm2, setExcludedAdm2] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Load ADM1 + ADM2 list
   useEffect(() => {
-    if (instance) {
-      setName(instance.name || '');
-      setDescription(instance.description || '');
+    if (!open) return;
+    const load = async () => {
+      setLoading(true);
+      const { data: a1, error: e1 } = await supabase
+        .from('ph_adm1')
+        .select('adm1_pcode, adm1_name')
+        .order('adm1_name');
+      if (e1) console.error(e1);
+      else setAdm1List(a1 || []);
+
+      const { data: a2, error: e2 } = await supabase
+        .from('ph_adm2')
+        .select('adm2_pcode, adm2_name, adm1_pcode')
+        .order('adm2_name');
+      if (e2) console.error(e2);
+      else setAdm2List(a2 || []);
+
+      setSelectedAdm1(instance?.admin_scope || []);
+      setLoading(false);
+    };
+    load();
+  }, [instance, open]);
+
+  const toggleAdm1 = (pcode: string) => {
+    setSelectedAdm1((prev) =>
+      prev.includes(pcode) ? prev.filter((c) => c !== pcode) : [...prev, pcode]
+    );
+  };
+
+  const toggleAdm2 = (pcode: string) => {
+    setExcludedAdm2((prev) =>
+      prev.includes(pcode) ? prev.filter((c) => c !== pcode) : [...prev, pcode]
+    );
+  };
+
+  const handleSave = async () => {
+    setLoading(true);
+    const { error } = await supabase
+      .from('instances')
+      .update({
+        admin_scope: selectedAdm1,
+      })
+      .eq('id', instance.id);
+    setLoading(false);
+    if (error) {
+      alert('Failed to save affected area: ' + error.message);
+      return;
     }
-  }, [instance]);
+    await onSaved();
+    onClose();
+  };
 
   if (!open) return null;
 
-  async function handleSave() {
-    setSaving(true);
-    const payload = { name, description };
-
-    const { error } = instance.id
-      ? await supabase.from('instances').update(payload).eq('id', instance.id)
-      : await supabase.from('instances').insert([{ ...payload }]);
-
-    if (error) console.error(error);
-    else {
-      onSaved();
-      onClose();
-    }
-    setSaving(false);
-  }
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg">
-        <h2 className="text-lg font-semibold mb-4">
-          {instance?.id ? 'Edit Affected Area' : 'Define Affected Area'}
-        </h2>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl p-6">
+        <h2 className="text-lg font-semibold mb-4">Define Affected Area</h2>
 
-        <label className="block mb-3">
-          <span className="text-sm font-medium text-gray-700">Name</span>
-          <input
-            type="text"
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
+        {loading ? (
+          <div className="text-sm text-gray-500">Loading administrative areas…</div>
+        ) : (
+          <div className="space-y-6 overflow-y-auto max-h-[70vh]">
+            <div>
+              <h3 className="text-sm font-semibold mb-2">Step 1: Select ADM1 Regions</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
+                {adm1List.map((a1) => (
+                  <label key={a1.adm1_pcode} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedAdm1.includes(a1.adm1_pcode)}
+                      onChange={() => toggleAdm1(a1.adm1_pcode)}
+                    />
+                    {a1.adm1_name}
+                  </label>
+                ))}
+              </div>
+            </div>
 
-        <label className="block mb-4">
-          <span className="text-sm font-medium text-gray-700">Description</span>
-          <textarea
-            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
+            {/* Step 2: refine ADM2s */}
+            {selectedAdm1.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold mb-2">Step 2: Refine ADM2 (Optional)</h3>
+                {selectedAdm1.map((pcode) => {
+                  const a1 = adm1List.find((a) => a.adm1_pcode === pcode);
+                  const a2s = adm2List.filter((a) => a.adm1_pcode === pcode);
+                  return (
+                    <div key={pcode} className="mb-4">
+                      <div className="font-medium text-gray-700 mb-1">{a1?.adm1_name}</div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
+                        {a2s.map((a2) => (
+                          <label key={a2.adm2_pcode} className="flex items-center gap-2 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={!excludedAdm2.includes(a2.adm2_pcode)}
+                              onChange={() => toggleAdm2(a2.adm2_pcode)}
+                            />
+                            {a2.adm2_name}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
-        <div className="flex justify-end space-x-2">
+        <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-100"
-            disabled={saving}
+            className="px-3 py-1.5 text-sm bg-gray-200 rounded-md hover:bg-gray-300"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            disabled={saving}
+            disabled={loading}
+            className={`px-3 py-1.5 text-sm rounded-md text-white ${
+              loading ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+            }`}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {loading ? 'Saving…' : 'Save Affected Area'}
           </button>
         </div>
       </div>
