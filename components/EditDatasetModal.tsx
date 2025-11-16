@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import supabase from '@/lib/supabaseClient';
 
 interface EditDatasetModalProps {
@@ -15,14 +15,27 @@ export default function EditDatasetModal({
   onSaved,
 }: EditDatasetModalProps) {
   const [form, setForm] = useState({
-    name: dataset.name || '',
-    description: dataset.description || '',
-    type: dataset.type || 'numeric',
-    admin_level: dataset.admin_level || '',
-    absolute_relative_index: dataset.absolute_relative_index || '',
+    name: '',
+    description: '',
+    type: '',
+    admin_level: '',
+    absolute_relative_index: '',
   });
 
   const [saving, setSaving] = useState(false);
+
+  // ✅ Always update the form when a new dataset is passed in
+  useEffect(() => {
+    if (dataset) {
+      setForm({
+        name: dataset.name || '',
+        description: dataset.description || '',
+        type: dataset.type || 'numeric',
+        admin_level: dataset.admin_level || '',
+        absolute_relative_index: dataset.absolute_relative_index || '',
+      });
+    }
+  }, [dataset]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
