@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
@@ -24,6 +24,7 @@ interface Instance {
 export default function InstancePage() {
   const { id } = useParams();
   const supabase = createClient();
+
   const [instance, setInstance] = useState<Instance | null>(null);
   const [adm3Geojson, setAdm3Geojson] = useState<any>(null);
   const [affectedNames, setAffectedNames] = useState<string[]>([]);
@@ -31,10 +32,10 @@ export default function InstancePage() {
   const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<L.Map | null>(null);
 
-  // Load instance and its geographic scope
   const loadInstance = useCallback(async () => {
     setLoading(true);
 
+    // Load instance metadata
     const { data: inst, error } = await supabase
       .from('instances')
       .select('*')
@@ -47,40 +48,66 @@ export default function InstancePage() {
     }
     setInstance(inst);
 
+    const scope = inst?.admin_scope ?? [];
+    if (!scope.length) {
+      console.warn('No admin_scope defined for instance');
+      setLoading(false);
+      return;
+    }
+
+    const adm1Codes = scope.filter((p) => p.length === 4);
+    const adm2Codes = scope.filter((p) => p.length === 6);
+
+    // Load all ADM3 boundaries
     const { data: allAdm3, error: admErr } = await supabase
       .from('admin_boundaries')
       .select('admin_pcode, name, parent_pcode, admin_level, geom')
       .eq('admin_level', 'ADM3');
+
     if (admErr) {
       console.error('ADM3 load error:', admErr);
       setLoading(false);
       return;
     }
 
-    const scope = inst?.admin_scope ?? [];
-    const adm1Codes = scope.filter((p) => p.length === 4); // e.g. "PH07"
-    const adm2Codes = scope.filter((p) => p.length === 6); // e.g. "PH0702"
-
-    // Filter ADM3s precisely by selected ADM2s or ADM1s
+    // 🧭 Improved filter: include ADM3s under selected ADM2s, or under ADM1 prefix
     const filtered = (allAdm3 || []).filter((r: any) => {
       if (adm2Codes.length && adm2Codes.includes(r.parent_pcode)) return true;
       if (adm1Codes.length && adm1Codes.includes(r.admin_pcode?.substring(0, 4))) return true;
       return false;
     });
 
+    console.log(`Filtering ${filtered.length}/${allAdm3.length} ADM3 features for scope:`, scope);
+
+    // 🧱 Normalize geometries
     const features = filtered
       .map((r: any) => {
+        if (!r.geom) return null;
         let geometry = null;
-        if (typeof r.geom === 'string') {
-          try {
-            geometry = JSON.parse(r.geom);
-          } catch {
-            console.warn('Invalid geometry JSON for', r.admin_pcode);
-          }
-        } else if (typeof r.geom === 'object') {
-          geometry = r.geom;
+
+        try {
+          geometry =
+            typeof r.geom === 'string'
+              ? JSON.parse(r.geom)
+              : typeof r.geom === 'object'
+              ? r.geom
+              : null;
+        } catch {
+          console.warn(`Invalid GeoJSON for ${r.admin_pcode}`);
+          return null;
         }
-        if (!geometry) return null;
+
+        // Some DBs return { coordinates, type }, others { geom: { ... } }
+        if (!geometry?.type && geometry?.geom) geometry = geometry.geom;
+
+        if (
+          geometry?.type !== 'Polygon' &&
+          geometry?.type !== 'MultiPolygon'
+        ) {
+          console.warn(`Skipping non-polygon geometry for ${r.admin_pcode}`);
+          return null;
+        }
+
         return {
           type: 'Feature',
           geometry,
@@ -95,14 +122,12 @@ export default function InstancePage() {
 
     setAdm3Geojson({ type: 'FeatureCollection', features });
 
-    // Load readable names for display
-    if (scope.length) {
-      const { data: names } = await supabase
-        .from('admin_boundaries')
-        .select('name')
-        .in('admin_pcode', scope);
-      setAffectedNames(names?.map((d) => d.name) ?? []);
-    }
+    // Load affected names for display
+    const { data: names } = await supabase
+      .from('admin_boundaries')
+      .select('name')
+      .in('admin_pcode', scope);
+    setAffectedNames(names?.map((n) => n.name) ?? []);
 
     setLoading(false);
   }, [id, supabase]);
@@ -111,32 +136,29 @@ export default function InstancePage() {
     loadInstance();
   }, [loadInstance]);
 
-  // Fit map to loaded bounds
   useEffect(() => {
     if (!mapRef.current || !adm3Geojson?.features?.length) return;
     const geoLayer = L.geoJSON(adm3Geojson);
     mapRef.current.fitBounds(geoLayer.getBounds());
   }, [adm3Geojson, mapReady]);
 
-  // Style logic — deselected ADM2 children appear lighter
   const style = (feature: any) => {
-    const parent = feature.properties?.parent_pcode;
     const scope = instance?.admin_scope ?? [];
+    const parent = feature.properties?.parent_pcode;
     const isActive =
       scope.includes(parent) ||
       scope.includes(feature.properties?.admin_pcode?.substring(0, 4));
     return {
-      color: '#555',
-      weight: 0.6,
-      fillColor: isActive ? '#8bb7f0' : '#e0e0e0',
+      color: '#444',
+      weight: 0.8,
+      fillColor: isActive ? '#6495ED' : '#d9d9d9',
       fillOpacity: isActive ? 0.6 : 0.25,
     };
   };
 
   const onEachFeature = (feature: any, layer: any) => {
-    layer.bindTooltip(feature.properties?.name ?? feature.properties?.admin_pcode, {
-      sticky: true,
-    });
+    const name = feature.properties?.name ?? feature.properties?.admin_pcode;
+    layer.bindTooltip(name, { sticky: true });
   };
 
   return (
