@@ -2,14 +2,14 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
-import Link from 'next/link';
+import 'leaflet/dist/leaflet.css';
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
-import 'leaflet/dist/leaflet.css';
 
 interface Instance {
   id: string;
@@ -42,34 +42,71 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
   }, [params.id, supabase]);
 
   // --- Load ADM3 geometry and metadata ---
-  const loadAdm3 = useCallback(async (instanceId: string) => {
-    const { data, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
-    if (error) {
-      console.error('Failed to fetch ADM3 data', error);
-      return;
-    }
-    setAdm3(data);
-  }, [supabase]);
+  const loadAdm3 = useCallback(
+    async (instanceId: string, adminScope?: string[]) => {
+      // 1. Try scores first
+      const { data, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
+
+      if (!error && data) {
+        setAdm3(data);
+        return;
+      }
+
+      console.warn('No ADM3 scores found — loading fallback ADM3 boundaries');
+      if (!adminScope || adminScope.length === 0) return;
+
+      // 2. Fallback: use admin_boundaries for the affected ADM2 (ADM3 level only)
+      const adm2 = adminScope[adminScope.length - 1];
+      const { data: fallback, error: e2 } = await supabase
+        .from('admin_boundaries')
+        .select('name, admin_pcode, geom')
+        .eq('admin_level', 'ADM3')
+        .like('parent_pcode', adm2 + '%');
+
+      if (e2) {
+        console.error('Failed to load fallback ADM3 boundaries:', e2);
+        return;
+      }
+
+      // Transform PostGIS to GeoJSON FeatureCollection
+      const fc = {
+        type: 'FeatureCollection',
+        features: (fallback || []).map((row: any) => ({
+          type: 'Feature',
+          geometry: row.geom,
+          properties: {
+            name: row.name,
+            pcode: row.admin_pcode,
+          },
+        })),
+      };
+      setAdm3(fc);
+    },
+    [supabase]
+  );
 
   // --- Load scores ---
-  const loadScores = useCallback(async (instanceId: string) => {
-    const { data, error } = await supabase
-      .from('scored_instance_values')
-      .select('pcode, score')
-      .eq('instance_id', instanceId);
+  const loadScores = useCallback(
+    async (instanceId: string) => {
+      const { data, error } = await supabase
+        .from('scored_instance_values')
+        .select('pcode, score')
+        .eq('instance_id', instanceId);
 
-    if (error) {
-      console.error('Error loading scores', error);
-      return;
-    }
-    const scoreMap: Record<string, number> = {};
-    for (const row of data || []) {
-      scoreMap[row.pcode] = Number(row.score);
-    }
-    setScores(scoreMap);
-  }, [supabase]);
+      if (error) {
+        console.error('Error loading scores', error);
+        return;
+      }
+      const scoreMap: Record<string, number> = {};
+      for (const row of data || []) {
+        scoreMap[row.pcode] = Number(row.score);
+      }
+      setScores(scoreMap);
+    },
+    [supabase]
+  );
 
-  // --- Recompute ---
+  // --- Recompute scores ---
   const recomputeScores = async () => {
     setRefreshing(true);
     const { error: e1 } = await supabase.rpc('score_framework_aggregate', { p_instance_id: params.id });
@@ -86,7 +123,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
 
   useEffect(() => {
     if (instance) {
-      loadAdm3(instance.id);
+      loadAdm3(instance.id, instance.admin_scope || []);
       loadScores(instance.id);
     }
   }, [instance, loadAdm3, loadScores]);
@@ -120,11 +157,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
           <button onClick={() => setShowAreaModal(true)} className="btn btn-secondary">
             Define Affected Area
           </button>
-          <button
-            onClick={recomputeScores}
-            disabled={refreshing}
-            className="btn btn-primary"
-          >
+          <button onClick={recomputeScores} disabled={refreshing} className="btn btn-primary">
             {refreshing ? 'Recomputing…' : 'Recompute Scores'}
           </button>
           <Link href="/instances" className="btn btn-secondary">
@@ -141,7 +174,7 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
           <MapContainer
             style={{ height: '70vh', width: '100%' }}
             zoom={7}
-            center={[10.3, 123.9]} // Visayas center
+            center={[10.3, 123.9]} // Central Visayas
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <GeoJSON data={adm3 as any} style={style} />
