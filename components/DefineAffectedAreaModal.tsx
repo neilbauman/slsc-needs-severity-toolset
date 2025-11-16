@@ -26,7 +26,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
   const [loading, setLoading] = useState(false);
   const mapRef = useRef<any>(null);
 
-  // --- Load all levels
+  // --- Load data once modal is opened
   useEffect(() => {
     if (!open) return;
     const loadData = async () => {
@@ -48,16 +48,16 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         .order('name');
       setAdm2List(adm2 || []);
 
-      // ADM3
+      // ADM3 (convert geometry to JSON)
       const { data: adm3, error: adm3Err } = await supabase
         .from('admin_boundaries')
-        .select('admin_pcode, name, parent_pcode, geom')
+        .select('admin_pcode, name, parent_pcode, ST_AsGeoJSON(geom) as geom')
         .eq('admin_level', 'ADM3');
       if (adm3Err) console.error('ADM3 load error:', adm3Err);
 
       const features = (adm3 || []).map((row: any) => ({
         type: 'Feature',
-        geometry: row.geom,
+        geometry: JSON.parse(row.geom),
         properties: {
           admin_pcode: row.admin_pcode,
           name: row.name,
@@ -75,39 +75,40 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     loadData();
   }, [open]);
 
-  // --- Toggle selections
+  // --- When ADM1 is toggled, auto-select all ADM2 under it
   const toggleADM1 = (code: string) => {
-    setSelectedADM1(prev =>
-      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
-    );
+    setSelectedADM1(prev => {
+      const newSel = prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code];
+      // Auto-manage ADM2 based on ADM1 changes
+      const childADM2 = adm2List.filter(a => newSel.includes(a.parent_pcode)).map(a => a.admin_pcode);
+      setSelectedADM2(childADM2);
+      return newSel;
+    });
   };
 
+  // --- Manual toggle for ADM2
   const toggleADM2 = (code: string) => {
     setSelectedADM2(prev =>
       prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
     );
   };
 
-  // --- Filter ADM3 polygons based on selections
+  // --- Filter ADM3 polygons reactively
   const filteredADM3: FeatureCollection<Geometry, GeoJsonProperties> | null = useMemo(() => {
     if (!adm3Geo) return null;
-    const adm2Parents = selectedADM2.length
-      ? selectedADM2
-      : adm2List
-          .filter(a => selectedADM1.includes(a.parent_pcode))
-          .map(a => a.admin_pcode);
+    if (selectedADM2.length === 0) return adm3Geo;
 
     const filtered = adm3Geo.features.filter((f: any) =>
-      adm2Parents.includes(f.properties.parent_pcode)
+      selectedADM2.includes(f.properties.parent_pcode)
     );
 
     return {
       type: 'FeatureCollection',
       features: filtered,
     } as FeatureCollection<Geometry, GeoJsonProperties>;
-  }, [adm3Geo, adm2List, selectedADM1, selectedADM2]);
+  }, [adm3Geo, selectedADM2]);
 
-  // --- Auto-zoom when selection changes
+  // --- Auto zoom
   useEffect(() => {
     if (!filteredADM3 || !mapRef.current) return;
     const L = (window as any).L;
@@ -116,7 +117,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     if (bounds.isValid()) mapRef.current.fitBounds(bounds);
   }, [filteredADM3]);
 
-  // --- Save selection
+  // --- Save to instance
   const handleSave = async () => {
     const finalScope = [...selectedADM1, ...selectedADM2];
     const { error } = await supabase
@@ -140,8 +141,6 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     const parent = feature.properties.parent_pcode;
     return selectedADM2.includes(parent)
       ? '#2563eb'
-      : adm2List.some(a => selectedADM1.includes(a.parent_pcode) && a.admin_pcode === parent)
-      ? '#60a5fa'
       : '#ccc';
   };
 
