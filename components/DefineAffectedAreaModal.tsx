@@ -35,10 +35,11 @@ export default function DefineAffectedAreaModal({
     const load = async () => {
       setLoading(true);
 
+      // ✅ Use correct level strings
       const { data: adm1, error: e1 } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name, admin_level')
-        .eq('admin_level', '1')
+        .eq('admin_level', 'ADM1')
         .order('name');
       if (e1) console.error('ADM1 load error:', e1);
       else setAdm1List(adm1 || []);
@@ -46,7 +47,7 @@ export default function DefineAffectedAreaModal({
       const { data: adm2, error: e2 } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name, admin_level, parent_pcode')
-        .eq('admin_level', '2')
+        .eq('admin_level', 'ADM2')
         .order('name');
       if (e2) console.error('ADM2 load error:', e2);
       else setAdm2List(adm2 || []);
