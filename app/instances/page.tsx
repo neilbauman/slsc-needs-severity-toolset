@@ -1,156 +1,161 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
+import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 
-// Dynamic imports for react-leaflet
-const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
-
-interface Instance {
+type Instance = {
   id: string;
   name: string;
+  description: string | null;
+  created_at: string | null;
   admin_scope: string[] | null;
-}
+  active: boolean | null;
+  type: string | null;
+};
 
-export default function InstancePage() {
-  const { id } = useParams();
+export default function InstancesPage() {
   const supabase = createClient();
+  const [instances, setInstances] = useState<Instance[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+  const [areaModalFor, setAreaModalFor] = useState<Instance | null>(null);
 
-  const [instance, setInstance] = useState<Instance | null>(null);
-  const [geojson, setGeojson] = useState<any>(null);
-  const [metrics, setMetrics] = useState<any>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-
-  const loadInstance = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
-    const { data: inst, error } = await supabase.from('instances').select('*').eq('id', id).single();
-    if (error) {
-      console.error('Error loading instance:', error);
-      setLoading(false);
-      return;
-    }
-    setInstance(inst);
-
-    // Load summary metrics
-    const { data: m } = await supabase.rpc('get_instance_summary', { in_instance: id });
-    setMetrics(m?.[0] ?? null);
-
-    // Load ADM3 boundaries based on admin_scope (affected area)
-    if (inst?.admin_scope && inst.admin_scope.length > 0) {
-      const { data: adm3, error: geoErr } = await supabase
-        .from('admin_boundaries_geojson')
-        .select('admin_pcode, name, geom')
-        .eq('admin_level', 'ADM3')
-        .in('parent_pcode', inst.admin_scope);
-
-      if (geoErr) {
-        console.error('Error loading ADM3 boundaries:', geoErr);
-      } else {
-        const features = (adm3 || [])
-          .map((row: any) => ({
-            type: 'Feature',
-            geometry: row.geom,
-            properties: {
-              admin_pcode: row.admin_pcode,
-              name: row.name,
-            },
-          }));
-
-        setGeojson({
-          type: 'FeatureCollection',
-          features,
-        });
-      }
-    } else {
-      setGeojson(null);
-    }
-
+    const { data, error } = await supabase
+      .from('instances')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) console.error(error);
+    setInstances(data || []);
     setLoading(false);
-  }, [id, supabase]);
-
-  useEffect(() => {
-    loadInstance();
-  }, [loadInstance]);
-
-  const getColor = () => '#004b87'; // Solid blue fill for affected areas
-
-  const onEachFeature = (feature: any, layer: any) => {
-    const name = feature.properties?.name || feature.properties?.admin_pcode;
-    layer.bindTooltip(`${name}`, { sticky: true });
   };
 
-  const style = () => ({
-    color: '#004b87',
-    weight: 0.7,
-    fillColor: '#1d9bf0',
-    fillOpacity: 0.5,
-  });
+  useEffect(() => {
+    load();
+  }, []);
+
+  const createInstance = async () => {
+    if (!newName.trim()) return alert('Instance name required');
+    setCreating(true);
+    const { data, error } = await supabase
+      .from('instances')
+      .insert({
+        name: newName.trim(),
+        description: newDesc || null,
+        type: 'baseline',
+        active: true,
+        admin_scope: null,
+      })
+      .select()
+      .single();
+    setCreating(false);
+    if (error) return alert(error.message);
+    setNewName('');
+    setNewDesc('');
+    await load();
+    setAreaModalFor(data);
+  };
 
   return (
-    <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen">
-      <h1 className="text-xl font-semibold text-[var(--gsc-blue,#004b87)] mb-4">
-        {instance?.name ?? 'Instance'}
-      </h1>
+    <div className="p-6 space-y-4">
+      <header className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-[var(--gsc-blue)]">Instances</h1>
+        <Link href="/" className="text-sm text-blue-600 hover:underline">
+          Home
+        </Link>
+      </header>
 
-      {loading && <div className="text-sm text-gray-500">Loading...</div>}
+      {/* Create form */}
+      <div className="p-4 bg-white rounded shadow">
+        <h2 className="font-semibold text-[var(--gsc-green)] mb-2">Create New Instance</h2>
+        <div className="grid grid-cols-3 gap-3">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            className="border rounded px-2 py-1"
+            placeholder="Instance name"
+          />
+          <input
+            value={newDesc}
+            onChange={(e) => setNewDesc(e.target.value)}
+            className="border rounded px-2 py-1 col-span-2"
+            placeholder="Description"
+          />
+        </div>
+        <div className="flex justify-end mt-3">
+          <button
+            onClick={createInstance}
+            disabled={creating}
+            className="bg-blue-600 text-white px-4 py-1.5 rounded hover:bg-blue-700"
+          >
+            {creating ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </div>
 
-      {!loading && (
-        <>
-          {/* --- Summary --- */}
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="p-4 bg-white border rounded text-center shadow-sm">
-              <div className="text-xs text-gray-600">Framework Avg</div>
-              <div className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
-                {metrics?.framework_avg?.toFixed(3) ?? '-'}
-              </div>
-            </div>
-            <div className="p-4 bg-white border rounded text-center shadow-sm">
-              <div className="text-xs text-gray-600">Final Avg</div>
-              <div className="text-xl font-semibold text-[var(--gsc-red,#630710)]">
-                {metrics?.final_avg?.toFixed(3) ?? '-'}
-              </div>
-            </div>
-            <div className="p-4 bg-white border rounded text-center shadow-sm">
-              <div className="text-xs text-gray-600">People Affected</div>
-              <div className="text-lg font-semibold text-gray-800">
-                {metrics?.people_affected?.toLocaleString() ?? '-'}
-              </div>
-            </div>
-            <div className="p-4 bg-white border rounded text-center shadow-sm">
-              <div className="text-xs text-gray-600">People in Need</div>
-              <div className="text-lg font-semibold text-gray-800">
-                {metrics?.people_in_need?.toLocaleString() ?? '-'}
-              </div>
-            </div>
-          </div>
+      {/* Table */}
+      <div className="bg-white rounded shadow p-4">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="font-semibold">Your Instances</h2>
+          <span className="text-xs text-gray-500">{instances.length} total</span>
+        </div>
 
-          {/* --- Map --- */}
-          <div className="h-[600px] w-full border rounded shadow overflow-hidden relative">
-            <MapContainer
-              center={[12.8797, 121.774]}
-              zoom={6}
-              scrollWheelZoom={true}
-              className="h-full w-full"
-            >
-              <TileLayer
-                attribution="&copy; OpenStreetMap contributors"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {geojson && (
-                <GeoJSON
-                  key={instance?.id}
-                  data={geojson}
-                  style={style}
-                  onEachFeature={onEachFeature}
-                />
-              )}
-            </MapContainer>
-          </div>
-        </>
+        {loading ? (
+          <p className="text-sm text-gray-500">Loading…</p>
+        ) : instances.length === 0 ? (
+          <p className="text-sm text-gray-500">No instances yet.</p>
+        ) : (
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-gray-500">
+                <th className="text-left py-2">Name</th>
+                <th>Created</th>
+                <th>Type</th>
+                <th>Affected ADM1</th>
+                <th className="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {instances.map((inst) => (
+                <tr key={inst.id} className="border-t">
+                  <td className="py-2">{inst.name}</td>
+                  <td>{inst.created_at ? new Date(inst.created_at).toLocaleString() : '—'}</td>
+                  <td>{inst.type ?? '—'}</td>
+                  <td>{inst.admin_scope?.length ?? 0}</td>
+                  <td className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => setAreaModalFor(inst)}
+                        className="text-sm px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
+                      >
+                        Define Area
+                      </button>
+                      <Link
+                        href={`/instances/${inst.id}`}
+                        className="text-sm px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Open
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {areaModalFor && (
+        <DefineAffectedAreaModal
+          instance={areaModalFor}
+          onClose={() => setAreaModalFor(null)}
+          onSaved={load}
+        />
       )}
     </div>
   );
