@@ -51,15 +51,11 @@ export default function CleanNumericDatasetModal({
         const cleanedCount = data ?? 0;
         totalCleaned += cleanedCount;
 
-        if (cleanedCount === 0) {
-          // No more data to process
-          break;
-        }
+        if (cleanedCount === 0) break; // stop when done
 
         offset += BATCH_SIZE;
         iteration++;
 
-        // Simulate smooth progress bar update
         setProgress(Math.min(100, (iteration * 100) / MAX_ITERATIONS));
         setStatusMessage(`Processed ${totalCleaned.toLocaleString()} records...`);
       }
@@ -67,32 +63,27 @@ export default function CleanNumericDatasetModal({
       setProgress(100);
       setStatusMessage(`Cleaning complete. ${totalCleaned.toLocaleString()} records processed.`);
 
-      // Mark dataset as cleaned in Supabase (update flag)
-      await supabase
-        .from("datasets")
-        .update({ is_cleaned: true })
-        .eq("id", datasetId);
-
-      // Wait briefly for visual confirmation
+      await supabase.from("datasets").update({ is_cleaned: true }).eq("id", datasetId);
       await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Trigger parent refresh
       await onCleaned();
-
-      // Close modal
       onClose();
     } catch (err: any) {
       console.error(err);
-      setErrorMessage(err.message || "An unexpected error occurred during cleaning.");
+      setErrorMessage(err.message || "An unexpected error occurred.");
     } finally {
       setIsCleaning(false);
     }
   };
 
   useEffect(() => {
-    // Automatically start cleaning when modal opens
-    cleanDataset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let started = false;
+    if (!started) {
+      started = true;
+      cleanDataset();
+    }
+    return () => {
+      started = true; // prevent re-run under StrictMode
+    };
   }, []);
 
   return (
@@ -102,9 +93,7 @@ export default function CleanNumericDatasetModal({
           Cleaning Dataset: <span className="text-blue-600">{datasetName}</span>
         </h2>
 
-        {statusMessage && (
-          <p className="text-gray-700 text-sm mb-4">{statusMessage}</p>
-        )}
+        {statusMessage && <p className="text-gray-700 text-sm mb-4">{statusMessage}</p>}
 
         <div className="w-full bg-gray-200 rounded-full h-4 mb-4 overflow-hidden">
           <div
@@ -114,9 +103,7 @@ export default function CleanNumericDatasetModal({
         </div>
 
         {errorMessage && (
-          <div className="bg-red-100 text-red-700 p-3 rounded-md mb-4">
-            {errorMessage}
-          </div>
+          <div className="bg-red-100 text-red-700 p-3 rounded-md mb-4">{errorMessage}</div>
         )}
 
         {!isCleaning && !errorMessage && (
