@@ -1,203 +1,157 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
-import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 
-type Instance = {
+// Dynamic imports for react-leaflet
+const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
+
+interface Instance {
   id: string;
   name: string;
-  description: string | null;
-  created_at: string | null;
   admin_scope: string[] | null;
-  active: boolean | null;
-  type: string | null;
-};
+}
 
-export default function InstancesPage() {
+export default function InstancePage() {
+  const { id } = useParams();
   const supabase = createClient();
-  const [instances, setInstances] = useState<Instance[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [areaModalFor, setAreaModalFor] = useState<Instance | null>(null);
 
-  const load = async () => {
+  const [instance, setInstance] = useState<Instance | null>(null);
+  const [geojson, setGeojson] = useState<any>(null);
+  const [metrics, setMetrics] = useState<any>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const loadInstance = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('instances')
-      .select('id, name, description, created_at, admin_scope, active, type')
-      .order('created_at', { ascending: false });
-
+    const { data: inst, error } = await supabase.from('instances').select('*').eq('id', id).single();
     if (error) {
-      console.error('Error loading instances:', error);
-      setInstances([]);
-    } else {
-      setInstances(data as Instance[]);
+      console.error('Error loading instance:', error);
+      setLoading(false);
+      return;
     }
+    setInstance(inst);
+
+    // Load summary metrics
+    const { data: m } = await supabase.rpc('get_instance_summary', { in_instance: id });
+    setMetrics(m?.[0] ?? null);
+
+    // Load ADM3 boundaries based on admin_scope (affected area)
+    if (inst?.admin_scope && inst.admin_scope.length > 0) {
+      const { data: adm3, error: geoErr } = await supabase
+        .from('admin_boundaries_geojson')
+        .select('admin_pcode, name, geom')
+        .eq('admin_level', 'ADM3')
+        .in('parent_pcode', inst.admin_scope);
+
+      if (geoErr) {
+        console.error('Error loading ADM3 boundaries:', geoErr);
+      } else {
+        const features = (adm3 || [])
+          .map((row: any) => ({
+            type: 'Feature',
+            geometry: row.geom,
+            properties: {
+              admin_pcode: row.admin_pcode,
+              name: row.name,
+            },
+          }));
+
+        setGeojson({
+          type: 'FeatureCollection',
+          features,
+        });
+      }
+    } else {
+      setGeojson(null);
+    }
+
     setLoading(false);
-  };
+  }, [id, supabase]);
 
   useEffect(() => {
-    load();
-  }, []);
+    loadInstance();
+  }, [loadInstance]);
 
-  const createInstance = async () => {
-    if (!newName.trim()) {
-      alert('Instance name is required.');
-      return;
-    }
+  const getColor = () => '#004b87'; // Solid blue fill for affected areas
 
-    setCreating(true);
-    const { data, error } = await supabase
-      .from('instances')
-      .insert({
-        name: newName.trim(),
-        description: newDesc || null,
-        type: 'baseline',
-        active: true,
-        admin_scope: null,
-      })
-      .select()
-      .single();
-
-    setCreating(false);
-
-    if (error) {
-      alert(`Create failed: ${error.message}`);
-      return;
-    }
-
-    setNewName('');
-    setNewDesc('');
-    await load();
-    setAreaModalFor(data as Instance);
+  const onEachFeature = (feature: any, layer: any) => {
+    const name = feature.properties?.name || feature.properties?.admin_pcode;
+    layer.bindTooltip(`${name}`, { sticky: true });
   };
 
+  const style = () => ({
+    color: '#004b87',
+    weight: 0.7,
+    fillColor: '#1d9bf0',
+    fillOpacity: 0.5,
+  });
+
   return (
-    <div className="p-4 space-y-4">
-      <header className="flex items-center justify-between no-print">
-        <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-blue)' }}>
-          Instances
-        </h1>
-        <div className="flex gap-2">
-          <Link href="/" className="btn btn-secondary">
-            Home
-          </Link>
-        </div>
-      </header>
+    <div className="p-6 bg-[var(--gsc-beige,#f5f2ee)] min-h-screen">
+      <h1 className="text-xl font-semibold text-[var(--gsc-blue,#004b87)] mb-4">
+        {instance?.name ?? 'Instance'}
+      </h1>
 
-      <div className="card p-4 no-print">
-        <h2
-          className="text-base font-semibold mb-2"
-          style={{ color: 'var(--gsc-green)' }}
-        >
-          Create New Instance
-        </h2>
+      {loading && <div className="text-sm text-gray-500">Loading...</div>}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input
-            className="border rounded-md px-3 py-2 text-sm"
-            placeholder="Instance name (e.g., Baseline - Nov 2025)"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <input
-            className="border rounded-md px-3 py-2 text-sm md:col-span-2"
-            placeholder="Description (optional)"
-            value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
-          />
-        </div>
-
-        <div className="flex justify-end mt-3">
-          <button
-            className="btn btn-primary"
-            onClick={createInstance}
-            disabled={creating}
-          >
-            {creating ? 'Creating…' : 'Create'}
-          </button>
-        </div>
-      </div>
-
-      <div className="card p-4 print-safe">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-semibold">Your Instances</h2>
-          <div className="text-xs text-gray-500">{instances.length} total</div>
-        </div>
-
-        {loading && <div className="text-sm">Loading…</div>}
-        {!loading && instances.length === 0 && (
-          <div className="text-sm text-gray-600">
-            No instances yet. Create one above.
+      {!loading && (
+        <>
+          {/* --- Summary --- */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="p-4 bg-white border rounded text-center shadow-sm">
+              <div className="text-xs text-gray-600">Framework Avg</div>
+              <div className="text-xl font-semibold text-[var(--gsc-blue,#004b87)]">
+                {metrics?.framework_avg?.toFixed(3) ?? '-'}
+              </div>
+            </div>
+            <div className="p-4 bg-white border rounded text-center shadow-sm">
+              <div className="text-xs text-gray-600">Final Avg</div>
+              <div className="text-xl font-semibold text-[var(--gsc-red,#630710)]">
+                {metrics?.final_avg?.toFixed(3) ?? '-'}
+              </div>
+            </div>
+            <div className="p-4 bg-white border rounded text-center shadow-sm">
+              <div className="text-xs text-gray-600">People Affected</div>
+              <div className="text-lg font-semibold text-gray-800">
+                {metrics?.people_affected?.toLocaleString() ?? '-'}
+              </div>
+            </div>
+            <div className="p-4 bg-white border rounded text-center shadow-sm">
+              <div className="text-xs text-gray-600">People in Need</div>
+              <div className="text-lg font-semibold text-gray-800">
+                {metrics?.people_in_need?.toLocaleString() ?? '-'}
+              </div>
+            </div>
           </div>
-        )}
 
-        {!loading && instances.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500">
-                  <th className="py-2 pr-3">Name</th>
-                  <th className="py-2 pr-3">Created</th>
-                  <th className="py-2 pr-3">Type</th>
-                  <th className="py-2 pr-3">Affected ADM1</th>
-                  <th className="py-2 pr-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {instances.map((inst) => (
-                  <tr key={inst.id} className="border-t">
-                    <td className="py-2 pr-3">
-                      <div className="font-medium">{inst.name}</div>
-                      {inst.description && (
-                        <div className="text-xs text-gray-500">
-                          {inst.description}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-2 pr-3">
-                      {inst.created_at
-                        ? new Date(inst.created_at).toLocaleString()
-                        : '—'}
-                    </td>
-                    <td className="py-2 pr-3">{inst.type ?? '—'}</td>
-                    <td className="py-2 pr-3">{inst.admin_scope?.length ?? 0}</td>
-                    <td className="py-2 pr-0">
-                      <div className="flex items-center gap-2 justify-end">
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => setAreaModalFor(inst)}
-                        >
-                          Define Affected Area
-                        </button>
-                        <Link
-                          href={`/instances/${inst.id}`}
-                          className="btn btn-primary"
-                        >
-                          Open Dashboard
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* --- Map --- */}
+          <div className="h-[600px] w-full border rounded shadow overflow-hidden relative">
+            <MapContainer
+              center={[12.8797, 121.774]}
+              zoom={6}
+              scrollWheelZoom={true}
+              className="h-full w-full"
+            >
+              <TileLayer
+                attribution="&copy; OpenStreetMap contributors"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {geojson && (
+                <GeoJSON
+                  key={instance?.id}
+                  data={geojson}
+                  style={style}
+                  onEachFeature={onEachFeature}
+                />
+              )}
+            </MapContainer>
           </div>
-        )}
-      </div>
-
-      {areaModalFor && (
-  <DefineAffectedAreaModal
-    open={!!areaModalFor}
-    instance={areaModalFor}
-    onClose={() => setAreaModalFor(null)}
-    onSaved={load}
-  />
-)}
+        </>
+      )}
     </div>
   );
 }
