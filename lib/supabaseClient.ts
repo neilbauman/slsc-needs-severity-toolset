@@ -1,20 +1,22 @@
 'use client';
 
-import { createClient as createSBClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient as createSBClient } from '@supabase/supabase-js';
 
-let cached: SupabaseClient | null = null;
+// Singleton Supabase instance (browser-safe)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-/** Preferred: create a (cached) browser Supabase client */
-export function createClient(): SupabaseClient {
-  if (cached) return cached;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  cached = createSBClient(url, anon, { auth: { persistSession: true } });
-  return cached;
+let supabaseInstance: ReturnType<typeof createSBClient> | null = null;
+
+export function getSupabaseClient() {
+  if (!supabaseInstance) {
+    supabaseInstance = createSBClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: true },
+    });
+  }
+  return supabaseInstance;
 }
 
-/** Back-compat export for places importing { supabase } */
-export const supabase = createClient();
-
-/** Optional default export for places doing `import supabase from '@/lib/supabaseClient'` */
+// Named + default exports for compatibility
+export const supabase = getSupabaseClient();
 export default supabase;
