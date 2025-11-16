@@ -1,15 +1,14 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useRef } from 'react'
-import { supabase } from '@/lib/supabaseClient'
-import { Loader2 } from 'lucide-react'
+import React, { useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
-type CleanNumericDatasetModalProps = {
-  datasetId: string
-  datasetName: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCleaned: () => Promise<void>
+interface CleanNumericDatasetModalProps {
+  datasetId: string;
+  datasetName: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCleaned: () => Promise<void>;
 }
 
 export default function CleanNumericDatasetModal({
@@ -17,169 +16,130 @@ export default function CleanNumericDatasetModal({
   datasetName,
   open,
   onOpenChange,
-  onCleaned
+  onCleaned,
 }: CleanNumericDatasetModalProps) {
-  const [cleaning, setCleaning] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  const [complete, setComplete] = useState(false)
-  const [currentBatch, setCurrentBatch] = useState(0)
-  const [totalBatches, setTotalBatches] = useState<number | null>(null)
-  const [adaptiveBatchSize, setAdaptiveBatchSize] = useState(2000)
-  const cleaningRef = useRef(false)
-
-  useEffect(() => {
-    if (!open) {
-      setProgress(0)
-      setError(null)
-      setComplete(false)
-      setCleaning(false)
-      setCurrentBatch(0)
-      setTotalBatches(null)
-    }
-  }, [open])
-
-  async function estimateTotalRows() {
-    const { count, error } = await supabase
-      .from('dataset_values_numeric_raw')
-      .select('*', { count: 'exact', head: true })
-      .eq('dataset_id', datasetId)
-
-    if (error) {
-      console.warn('Could not estimate total rows:', error.message)
-      return 40000 // fallback guess
-    }
-    return count || 40000
-  }
+  const supabase = createClientComponentClient();
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [batchSize] = useState(5000);
+  const [totalCleaned, setTotalCleaned] = useState(0);
+  const [log, setLog] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleClean() {
-    if (cleaningRef.current) return // prevent double start
-    cleaningRef.current = true
-    setCleaning(true)
-    setError(null)
-    setComplete(false)
-    setProgress(0)
+    setIsCleaning(true);
+    setDone(false);
+    setError(null);
+    setLog([]);
+    setTotalCleaned(0);
+    setProgress(0);
+
+    let offset = 0;
+    const maxIterations = 2000; // safety limit
+    let iteration = 0;
 
     try {
-      const totalRows = await estimateTotalRows()
-      const batches = Math.ceil(totalRows / adaptiveBatchSize)
-      setTotalBatches(batches)
+      while (iteration < maxIterations) {
+        iteration++;
+        setLog((prev) => [...prev, `Batch ${iteration}: offset ${offset}`]);
 
-      // wipe any previously cleaned data
-      await supabase.rpc('delete_existing_numeric', { in_dataset_id: datasetId })
-
-      for (let batch = 0; batch < batches; batch++) {
-        setCurrentBatch(batch + 1)
-        const offset = batch * adaptiveBatchSize
-
-        const startTime = performance.now()
-        const { error: rpcError } = await supabase.rpc('clean_numeric_dataset_v2', {
+        const { data, error } = await supabase.rpc("clean_numeric_dataset_v5", {
           in_dataset_id: datasetId,
           in_offset: offset,
-          in_limit: adaptiveBatchSize
-        })
-        const endTime = performance.now()
+          in_limit: batchSize,
+        });
 
-        if (rpcError) {
-          // adaptive handling of timeout
-          if (rpcError.code === '57014' || rpcError.message.includes('timeout')) {
-            const newSize = Math.max(250, Math.floor(adaptiveBatchSize / 2))
-            console.warn(`Batch timeout — reducing batch size to ${newSize}`)
-            setAdaptiveBatchSize(newSize)
-            batch-- // retry the same batch
-            continue
-          } else {
-            throw rpcError
-          }
+        if (error) throw error;
+        const cleanedCount = data || 0;
+
+        if (cleanedCount === 0) {
+          setLog((prev) => [...prev, "✅ Cleaning complete."]);
+          break;
         }
 
-        // adaptive speed increase if very fast
-        const elapsed = endTime - startTime
-        if (elapsed < 2000 && adaptiveBatchSize < 4000) {
-          const newSize = Math.min(4000, Math.floor(adaptiveBatchSize * 1.5))
-          setAdaptiveBatchSize(newSize)
-        }
+        setTotalCleaned((prev) => prev + cleanedCount);
+        offset += batchSize;
 
-        const pct = Math.min(100, ((batch + 1) / batches) * 100)
-        setProgress(pct)
+        // crude progress: assume 100k as approximate max
+        const newProgress = Math.min(100, Math.round((offset / 100000) * 100));
+        setProgress(newProgress);
       }
 
-      await supabase
-        .from('datasets')
-        .update({ is_cleaned: true })
-        .eq('id', datasetId)
-
-      setProgress(100)
-      setComplete(true)
-      await onCleaned()
+      setDone(true);
+      setIsCleaning(false);
+      await onCleaned();
+      setProgress(100);
+      setLog((prev) => [...prev, `🎯 Total cleaned: ${totalCleaned.toLocaleString()}`]);
     } catch (err: any) {
-      console.error('Cleaning error:', err)
-      setError(err.message || 'An unknown error occurred')
-    } finally {
-      setCleaning(false)
-      cleaningRef.current = false
+      console.error("Cleaning failed", err);
+      setError(err.message || "Unknown error");
+      setIsCleaning(false);
     }
   }
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md text-center relative">
-        <h2 className="text-2xl font-bold mb-3">Clean Dataset</h2>
-        <p className="text-gray-600 mb-6">
-          Dataset: <span className="font-semibold">{datasetName}</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
+        <h2 className="text-xl font-semibold mb-2">
+          Clean Numeric Dataset
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Dataset: <span className="font-medium">{datasetName}</span>
         </p>
 
-        {error ? (
-          <p className="text-red-600 mb-6">{error}</p>
-        ) : complete ? (
-          <p className="text-green-600 mb-6">✅ Cleaning complete!</p>
-        ) : cleaning ? (
+        {!done && (
           <>
-            <p className="text-gray-700 mb-4">
-              Cleaning batch {currentBatch}/{totalBatches ?? '?'} (Batch size: {adaptiveBatchSize})
-            </p>
-            <div className="w-full bg-gray-200 rounded-full h-3 mb-4 overflow-hidden">
+            <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
               <div
-                className="bg-blue-600 h-3 transition-all duration-300"
+                className="bg-green-600 h-4 rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-sm text-gray-600">{Math.floor(progress)}%</p>
-          </>
-        ) : (
-          <p className="text-gray-700 mb-6">
-            This will clean and standardize numeric data for this dataset.
-          </p>
-        )}
 
-        <div className="mt-6 flex justify-center gap-4">
-          {!cleaning && !complete && (
             <button
               onClick={handleClean}
-              className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition"
+              disabled={isCleaning}
+              className={`w-full py-2 rounded-md text-white font-medium ${
+                isCleaning
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700"
+              }`}
             >
-              Start Cleaning
+              {isCleaning ? "Cleaning..." : "Start Cleaning"}
             </button>
-          )}
-          {cleaning && (
-            <button
-              disabled
-              className="px-6 py-2 bg-blue-400 text-white font-medium rounded-lg flex items-center justify-center gap-2 cursor-not-allowed"
-            >
-              <Loader2 className="animate-spin h-4 w-4" />
-              Cleaning…
-            </button>
-          )}
+          </>
+        )}
+
+        {done && (
+          <div className="text-green-700 bg-green-100 p-3 rounded-md mt-3 text-sm">
+            ✅ Cleaning complete! {totalCleaned.toLocaleString()} records processed.
+          </div>
+        )}
+
+        {error && (
+          <div className="text-red-700 bg-red-100 p-3 rounded-md mt-3 text-sm">
+            ⚠️ {error}
+          </div>
+        )}
+
+        <div className="mt-4 max-h-40 overflow-y-auto bg-gray-50 p-2 text-xs font-mono rounded">
+          {log.map((entry, i) => (
+            <div key={i}>{entry}</div>
+          ))}
+        </div>
+
+        <div className="flex justify-end mt-4 space-x-2">
           <button
             onClick={() => onOpenChange(false)}
-            className="px-6 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition"
+            className="px-3 py-1.5 rounded-md bg-gray-200 hover:bg-gray-300 text-gray-800"
           >
-            {complete ? 'Close' : 'Cancel'}
+            Close
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }
