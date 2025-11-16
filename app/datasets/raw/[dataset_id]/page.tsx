@@ -154,14 +154,14 @@ export default function DatasetRawPage() {
 
       {/* Cleaning Modal */}
       {showNumericModal && (
-        <CleanNumericDatasetModal
-          datasetId={datasetId}
-          datasetName={dataset.name}
-          onClose={() => setShowNumericModal(false)}
-          onCleaned={handleCleaned}
-        />
-      )}
-
+  <CleanNumericDatasetModal
+    datasetId={datasetId}
+    datasetName={dataset?.name || ''}
+    open={showNumericModal}
+    onOpenChange={setShowNumericModal}
+    onCleaned={handleCleaned}
+  />
+)}
       {/* Data Preview */}
       <div className="border rounded-lg overflow-x-auto">
         <table className="min-w-full text-sm border-collapse">
