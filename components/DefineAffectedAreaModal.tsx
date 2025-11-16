@@ -11,9 +11,9 @@ interface Props {
 }
 
 interface AdminBoundary {
-  adm_pcode: string;
-  adm_name: string;
-  adm_level: number;
+  admin_pcode: string;
+  name: string;
+  admin_level: string;
   parent_pcode?: string;
 }
 
@@ -37,17 +37,17 @@ export default function DefineAffectedAreaModal({
 
       const { data: adm1, error: e1 } = await supabase
         .from('admin_boundaries')
-        .select('adm_pcode, adm_name, adm_level')
-        .eq('adm_level', 1)
-        .order('adm_name');
+        .select('admin_pcode, name, admin_level')
+        .eq('admin_level', '1')
+        .order('name');
       if (e1) console.error('ADM1 load error:', e1);
       else setAdm1List(adm1 || []);
 
       const { data: adm2, error: e2 } = await supabase
         .from('admin_boundaries')
-        .select('adm_pcode, adm_name, adm_level, parent_pcode')
-        .eq('adm_level', 2)
-        .order('adm_name');
+        .select('admin_pcode, name, admin_level, parent_pcode')
+        .eq('admin_level', '2')
+        .order('name');
       if (e2) console.error('ADM2 load error:', e2);
       else setAdm2List(adm2 || []);
 
@@ -102,13 +102,13 @@ export default function DefineAffectedAreaModal({
               <h3 className="text-sm font-semibold mb-2">Step 1: Select ADM1 Regions</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
                 {adm1List.map((a1) => (
-                  <label key={a1.adm_pcode} className="flex items-center gap-2 text-sm">
+                  <label key={a1.admin_pcode} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={selectedAdm1.includes(a1.adm_pcode)}
-                      onChange={() => toggleAdm1(a1.adm_pcode)}
+                      checked={selectedAdm1.includes(a1.admin_pcode)}
+                      onChange={() => toggleAdm1(a1.admin_pcode)}
                     />
-                    {a1.adm_name}
+                    {a1.name}
                   </label>
                 ))}
               </div>
@@ -120,27 +120,27 @@ export default function DefineAffectedAreaModal({
                   Step 2: Refine ADM2 (Optional)
                 </h3>
                 {selectedAdm1.map((adm1Code) => {
-                  const a1 = adm1List.find((a) => a.adm_pcode === adm1Code);
+                  const a1 = adm1List.find((a) => a.admin_pcode === adm1Code);
                   const a2s = adm2List.filter(
                     (a) => a.parent_pcode === adm1Code
                   );
                   return (
                     <div key={adm1Code} className="mb-4">
                       <div className="font-medium text-gray-700 mb-1">
-                        {a1?.adm_name}
+                        {a1?.name}
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-1">
                         {a2s.map((a2) => (
                           <label
-                            key={a2.adm_pcode}
+                            key={a2.admin_pcode}
                             className="flex items-center gap-2 text-xs"
                           >
                             <input
                               type="checkbox"
-                              checked={!excludedAdm2.includes(a2.adm_pcode)}
-                              onChange={() => toggleAdm2(a2.adm_pcode)}
+                              checked={!excludedAdm2.includes(a2.admin_pcode)}
+                              onChange={() => toggleAdm2(a2.admin_pcode)}
                             />
-                            {a2.adm_name}
+                            {a2.name}
                           </label>
                         ))}
                       </div>
