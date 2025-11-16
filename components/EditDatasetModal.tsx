@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import supabase from '@/lib/supabaseClient';
 
 interface EditDatasetModalProps {
@@ -9,179 +9,153 @@ interface EditDatasetModalProps {
   onSaved: () => Promise<void>;
 }
 
-export default function EditDatasetModal({ dataset, onClose, onSaved }: EditDatasetModalProps) {
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    source: '',
-    license: '',
-    tags: '',
-    is_public: false,
+export default function EditDatasetModal({
+  dataset,
+  onClose,
+  onSaved,
+}: EditDatasetModalProps) {
+  const [form, setForm] = useState({
+    name: dataset.name || '',
+    description: dataset.description || '',
+    type: dataset.type || 'numeric',
+    admin_level: dataset.admin_level || '',
+    absolute_relative_index: dataset.absolute_relative_index || '',
   });
-  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (dataset) {
-      setFormData({
-        name: dataset.name || '',
-        description: dataset.description || '',
-        source: dataset.source || '',
-        license: dataset.license || '',
-        tags: dataset.tags || '',
-        is_public: dataset.is_public || false,
-      });
-    }
-  }, [dataset]);
+  const [saving, setSaving] = useState(false);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const target = e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-    const { name, value, type } = target;
-    const checked = (target as HTMLInputElement).checked ?? false;
-
-    setFormData({
-      ...formData,
-      [name]: type === 'checkbox' ? checked : value,
-    });
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSaving(true);
 
     const { error } = await supabase
       .from('datasets')
       .update({
-        name: formData.name,
-        description: formData.description,
-        source: formData.source,
-        license: formData.license,
-        tags: formData.tags,
-        is_public: formData.is_public,
-        updated_at: new Date().toISOString(),
+        name: form.name.trim(),
+        description: form.description.trim(),
+        type: form.type,
+        admin_level: form.admin_level,
+        absolute_relative_index: form.absolute_relative_index,
       })
       .eq('id', dataset.id);
 
-    setLoading(false);
+    setSaving(false);
 
     if (error) {
-      console.error(error);
-      alert('Failed to update dataset.');
+      console.error('Error updating dataset:', error);
+      alert('Failed to save changes.');
     } else {
       await onSaved();
       onClose();
     }
   };
 
-  if (!dataset) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg p-6 w-full max-w-md shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold mb-4">Edit Dataset</h2>
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6">
+        <h2 className="text-lg font-semibold mb-4 text-gray-800">Edit Dataset</h2>
+
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Name */}
           <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="name">
-              Name
-            </label>
+            <label className="block text-sm font-medium text-gray-700">Name</label>
             <input
-              id="name"
-              name="name"
               type="text"
-              value={formData.name}
+              name="name"
+              value={form.name}
               onChange={handleChange}
               required
-              className="w-full border rounded px-3 py-2"
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
+          {/* Description */}
           <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="description">
-              Description
-            </label>
+            <label className="block text-sm font-medium text-gray-700">Description</label>
             <textarea
-              id="description"
               name="description"
-              value={formData.description}
+              value={form.description}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2"
+              rows={3}
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
+          {/* Type */}
           <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="source">
-              Source
-            </label>
-            <input
-              id="source"
-              name="source"
-              value={formData.source}
+            <label className="block text-sm font-medium text-gray-700">Type</label>
+            <select
+              name="type"
+              value={form.type}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2"
-            />
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="numeric">Numeric</option>
+              <option value="categorical">Categorical</option>
+            </select>
           </div>
 
+          {/* Admin Level */}
           <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="license">
-              License
-            </label>
-            <input
-              id="license"
-              name="license"
-              value={formData.license}
+            <label className="block text-sm font-medium text-gray-700">Admin Level</label>
+            <select
+              name="admin_level"
+              value={form.admin_level}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2"
-            />
+              required
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Select Level</option>
+              <option value="adm1">ADM1</option>
+              <option value="adm2">ADM2</option>
+              <option value="adm3">ADM3</option>
+              <option value="adm4">ADM4</option>
+              <option value="adm5">ADM5</option>
+            </select>
           </div>
 
+          {/* Absolute / Relative / Index */}
           <div>
-            <label className="block text-sm font-medium mb-1" htmlFor="tags">
-              Tags
+            <label className="block text-sm font-medium text-gray-700">
+              Value Type
             </label>
-            <input
-              id="tags"
-              name="tags"
-              value={formData.tags}
+            <select
+              name="absolute_relative_index"
+              value={form.absolute_relative_index}
               onChange={handleChange}
-              className="w-full border rounded px-3 py-2"
-            />
+              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Select Type</option>
+              <option value="absolute">Absolute</option>
+              <option value="relative">Relative</option>
+              <option value="index">Index</option>
+            </select>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <input
-              id="is_public"
-              name="is_public"
-              type="checkbox"
-              checked={formData.is_public}
-              onChange={handleChange}
-            />
-            <label htmlFor="is_public" className="text-sm">
-              Publicly Visible
-            </label>
-          </div>
-
-          <div className="flex justify-end space-x-2 pt-4">
+          {/* Actions */}
+          <div className="flex justify-end space-x-3 pt-4">
             <button
               type="button"
               onClick={onClose}
-              disabled={loading}
-              className="px-4 py-2 rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+              className="px-4 py-2 text-gray-600 hover:text-gray-800"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={loading}
-              className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+              disabled={saving}
+              className={`px-4 py-2 rounded text-white ${
+                saving ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
-              {loading ? 'Saving...' : 'Save Changes'}
+              {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>
