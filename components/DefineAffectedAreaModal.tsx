@@ -26,13 +26,13 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
   const [loading, setLoading] = useState(false);
   const mapRef = useRef<any>(null);
 
-  // --- Load data once modal is opened
+  // Load ADM data when modal opens
   useEffect(() => {
     if (!open) return;
-    const loadData = async () => {
+
+    const load = async () => {
       setLoading(true);
 
-      // ADM1
       const { data: adm1 } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name')
@@ -40,7 +40,6 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         .order('name');
       setAdm1List(adm1 || []);
 
-      // ADM2
       const { data: adm2 } = await supabase
         .from('admin_boundaries')
         .select('admin_pcode, name, parent_pcode')
@@ -48,16 +47,20 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
         .order('name');
       setAdm2List(adm2 || []);
 
-      // ADM3 (convert geometry to JSON)
       const { data: adm3, error: adm3Err } = await supabase
-        .from('admin_boundaries')
-        .select('admin_pcode, name, parent_pcode, ST_AsGeoJSON(geom) as geom')
+        .from('admin_boundaries_geojson')
+        .select('admin_pcode, name, parent_pcode, geom')
         .eq('admin_level', 'ADM3');
-      if (adm3Err) console.error('ADM3 load error:', adm3Err);
+
+      if (adm3Err) {
+        console.error('ADM3 load error:', adm3Err);
+        setLoading(false);
+        return;
+      }
 
       const features = (adm3 || []).map((row: any) => ({
         type: 'Feature',
-        geometry: JSON.parse(row.geom),
+        geometry: row.geom,
         properties: {
           admin_pcode: row.admin_pcode,
           name: row.name,
@@ -72,28 +75,28 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
 
       setLoading(false);
     };
-    loadData();
+
+    load();
   }, [open]);
 
-  // --- When ADM1 is toggled, auto-select all ADM2 under it
+  // Toggle ADM1 (auto select/deselect child ADM2)
   const toggleADM1 = (code: string) => {
     setSelectedADM1(prev => {
       const newSel = prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code];
-      // Auto-manage ADM2 based on ADM1 changes
-      const childADM2 = adm2List.filter(a => newSel.includes(a.parent_pcode)).map(a => a.admin_pcode);
-      setSelectedADM2(childADM2);
+      const children = adm2List.filter(a => newSel.includes(a.parent_pcode)).map(a => a.admin_pcode);
+      setSelectedADM2(children);
       return newSel;
     });
   };
 
-  // --- Manual toggle for ADM2
+  // Toggle ADM2 manually
   const toggleADM2 = (code: string) => {
     setSelectedADM2(prev =>
       prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
     );
   };
 
-  // --- Filter ADM3 polygons reactively
+  // Filter ADM3 polygons dynamically
   const filteredADM3: FeatureCollection<Geometry, GeoJsonProperties> | null = useMemo(() => {
     if (!adm3Geo) return null;
     if (selectedADM2.length === 0) return adm3Geo;
@@ -108,7 +111,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     } as FeatureCollection<Geometry, GeoJsonProperties>;
   }, [adm3Geo, selectedADM2]);
 
-  // --- Auto zoom
+  // Fit map to selection
   useEffect(() => {
     if (!filteredADM3 || !mapRef.current) return;
     const L = (window as any).L;
@@ -117,7 +120,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
     if (bounds.isValid()) mapRef.current.fitBounds(bounds);
   }, [filteredADM3]);
 
-  // --- Save to instance
+  // Save selected regions to instance
   const handleSave = async () => {
     const finalScope = [...selectedADM1, ...selectedADM2];
     const { error } = await supabase
@@ -137,18 +140,19 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
 
   if (!open) return null;
 
-  const getColor = (feature: any) => {
-    const parent = feature.properties.parent_pcode;
-    return selectedADM2.includes(parent)
-      ? '#2563eb'
-      : '#ccc';
+  // Generate color per ADM2 for map clarity
+  const colorForADM2 = (pcode: string) => {
+    const index = selectedADM2.indexOf(pcode);
+    if (index === -1) return '#cccccc';
+    const palette = ['#4f46e5', '#2563eb', '#0891b2', '#16a34a', '#ca8a04', '#dc2626'];
+    return palette[index % palette.length];
   };
 
   const style = (feature: any) => ({
     color: '#555',
     weight: 0.3,
-    fillColor: getColor(feature),
-    fillOpacity: 0.7,
+    fillColor: colorForADM2(feature.properties.parent_pcode),
+    fillOpacity: 0.6,
   });
 
   return (
@@ -198,7 +202,7 @@ export default function DefineAffectedAreaModal({ instance, open, onClose, onSav
               </div>
             )}
 
-            {/* Map */}
+            {/* Map Display */}
             <div className="border rounded-md overflow-hidden h-[400px]">
               {filteredADM3 && (
                 <MapContainer
