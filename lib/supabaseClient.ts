@@ -16,8 +16,5 @@ export function createClient(): SupabaseClient {
 /** Back-compat export for places importing { supabase } */
 export const supabase = createClient();
 
-/** Default export (kept identical) */
+/** Default export — do not re-export createClient to avoid duplicate bindings */
 export default supabase;
-
-/** 👇 Added this single line to preserve named + default imports in all environments */
-export { createClient };
