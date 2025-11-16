@@ -1,18 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import React, { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
-interface DerivedDatasetModalProps {
+interface DeriveDatasetModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export default function DerivedDatasetModal({ open, onOpenChange }: DerivedDatasetModalProps) {
+export default function DeriveDatasetModal({ open, onOpenChange }: DeriveDatasetModalProps) {
   const [baseA, setBaseA] = useState("");
   const [baseB, setBaseB] = useState("");
   const [method, setMethod] = useState<"ratio" | "difference" | "sum">("ratio");
@@ -23,12 +19,14 @@ export default function DerivedDatasetModal({ open, onOpenChange }: DerivedDatas
 
   const handlePreview = async () => {
     if (!baseA || !baseB) {
-      setError("Please select both base datasets.");
+      setError("Please provide both base dataset UUIDs.");
       return;
     }
 
     setLoading(true);
     setError(null);
+    setPreview([]);
+    setSummary(null);
 
     try {
       const { data, error } = await supabase.rpc("preview_derived_dataset_v2", {
@@ -40,7 +38,6 @@ export default function DerivedDatasetModal({ open, onOpenChange }: DerivedDatas
 
       if (error) throw error;
 
-      // Separate data rows and summary
       const normalRows = data.filter((row: any) => row.admin_name !== "SUMMARY");
       const summaryRow = data.find((row: any) => row.admin_name === "SUMMARY");
 
@@ -54,87 +51,112 @@ export default function DerivedDatasetModal({ open, onOpenChange }: DerivedDatas
     }
   };
 
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>Derive New Dataset</DialogTitle>
-        </DialogHeader>
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+      <div className="bg-white w-[90%] max-w-5xl rounded-lg shadow-lg p-6 relative flex flex-col max-h-[90vh]">
+        <h2 className="text-xl font-bold mb-4">Derive New Dataset</h2>
 
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Base Dataset A (UUID)</Label>
-              <Input value={baseA} onChange={(e) => setBaseA(e.target.value)} placeholder="Dataset A UUID" />
-            </div>
-            <div>
-              <Label>Base Dataset B (UUID)</Label>
-              <Input value={baseB} onChange={(e) => setBaseB(e.target.value)} placeholder="Dataset B UUID" />
-            </div>
+        {/* Inputs */}
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Base Dataset A (UUID)</label>
+            <input
+              type="text"
+              value={baseA}
+              onChange={(e) => setBaseA(e.target.value)}
+              placeholder="Enter Dataset A UUID"
+              className="w-full border rounded p-2 text-sm"
+            />
           </div>
 
-          <div className="flex gap-3 items-center">
-            <Label>Method:</Label>
-            <select
-              value={method}
-              onChange={(e) => setMethod(e.target.value as "ratio" | "difference" | "sum")}
-              className="border p-2 rounded"
-            >
-              <option value="ratio">Ratio (A ÷ B)</option>
-              <option value="difference">Difference (A - B)</option>
-              <option value="sum">Sum (A + B)</option>
-            </select>
-            <Button onClick={handlePreview} disabled={loading}>
-              {loading ? "Loading..." : "Preview"}
-            </Button>
-          </div>
-
-          {error && <p className="text-red-600 text-sm">{error}</p>}
-
-          {preview.length > 0 && (
-            <div className="border rounded-md mt-4 overflow-y-auto max-h-[50vh]">
-              <table className="w-full text-sm border-collapse">
-                <thead className="bg-gray-100 sticky top-0">
-                  <tr>
-                    <th className="border px-3 py-2 text-left">Admin PCode</th>
-                    <th className="border px-3 py-2 text-left">Admin Name</th>
-                    <th className="border px-3 py-2 text-right">Derived Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((row, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="border px-3 py-1">{row.admin_pcode}</td>
-                      <td className="border px-3 py-1">{row.admin_name}</td>
-                      <td className="border px-3 py-1 text-right">
-                        {row.result_value !== null ? row.result_value.toLocaleString() : "-"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {summary && (
-            <div className="mt-4 p-3 border rounded-md bg-gray-50 text-sm">
-              <h4 className="font-semibold mb-1">Preview Summary</h4>
-              <div className="flex flex-wrap gap-6">
-                <span>Min: <strong>{summary.min}</strong></span>
-                <span>Max: <strong>{summary.max}</strong></span>
-                <span>Avg: <strong>{summary.avg}</strong></span>
-                <span>Count: <strong>{summary.count}</strong></span>
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-end mt-6">
-            <Button variant="secondary" onClick={() => onOpenChange(false)}>
-              Close
-            </Button>
+          <div>
+            <label className="block text-sm font-medium mb-1">Base Dataset B (UUID)</label>
+            <input
+              type="text"
+              value={baseB}
+              onChange={(e) => setBaseB(e.target.value)}
+              placeholder="Enter Dataset B UUID"
+              className="w-full border rounded p-2 text-sm"
+            />
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <div className="flex items-center gap-3 mb-4">
+          <label className="text-sm font-medium">Method:</label>
+          <select
+            value={method}
+            onChange={(e) => setMethod(e.target.value as "ratio" | "difference" | "sum")}
+            className="border rounded p-2 text-sm"
+          >
+            <option value="ratio">Ratio (A ÷ B)</option>
+            <option value="difference">Difference (A - B)</option>
+            <option value="sum">Sum (A + B)</option>
+          </select>
+
+          <button
+            onClick={handlePreview}
+            disabled={loading}
+            className={`px-4 py-2 rounded text-white text-sm ${
+              loading ? "bg-gray-400" : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {loading ? "Loading..." : "Preview"}
+          </button>
+        </div>
+
+        {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+
+        {/* Preview Table */}
+        {preview.length > 0 && (
+          <div className="border rounded overflow-y-auto flex-grow mb-4">
+            <table className="w-full text-sm border-collapse">
+              <thead className="sticky top-0 bg-gray-100">
+                <tr>
+                  <th className="border px-3 py-2 text-left">Admin PCode</th>
+                  <th className="border px-3 py-2 text-left">Admin Name</th>
+                  <th className="border px-3 py-2 text-right">Derived Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.map((row, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="border px-3 py-1">{row.admin_pcode}</td>
+                    <td className="border px-3 py-1">{row.admin_name}</td>
+                    <td className="border px-3 py-1 text-right">
+                      {row.result_value !== null ? row.result_value.toLocaleString() : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Summary Section */}
+        {summary && (
+          <div className="border rounded bg-gray-50 p-3 text-sm mb-4">
+            <h3 className="font-semibold mb-1">Preview Summary</h3>
+            <div className="flex flex-wrap gap-6">
+              <span>Min: <strong>{summary.min}</strong></span>
+              <span>Max: <strong>{summary.max}</strong></span>
+              <span>Avg: <strong>{summary.avg}</strong></span>
+              <span>Count: <strong>{summary.count}</strong></span>
+            </div>
+          </div>
+        )}
+
+        {/* Buttons */}
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded text-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
