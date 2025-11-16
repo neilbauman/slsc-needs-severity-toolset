@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { Edit, Brush } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import EditDatasetModal from '@/components/EditDatasetModal';
 import CleanNumericDatasetModal from '@/components/CleanNumericDatasetModal';
@@ -45,8 +46,9 @@ export default function DatasetsPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-semibold">Datasets</h1>
+        <h1 className="text-2xl font-semibold text-gray-800">Datasets</h1>
         <button
           className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
           onClick={() =>
@@ -62,62 +64,73 @@ export default function DatasetsPage() {
         </button>
       </div>
 
+      {/* Table */}
       {datasets.length === 0 ? (
         <p className="text-gray-500 text-center mt-10">
           No datasets found.
         </p>
       ) : (
-        <table className="w-full border rounded-lg overflow-hidden text-sm">
-          <thead className="bg-gray-100 text-left">
-            <tr>
-              <th className="px-3 py-2 border-b">Name</th>
-              <th className="px-3 py-2 border-b">Type</th>
-              <th className="px-3 py-2 border-b">Description</th>
-              <th className="px-3 py-2 border-b">Created</th>
-              <th className="px-3 py-2 border-b text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {datasets.map((dataset) => (
-              <tr key={dataset.id} className="hover:bg-gray-50">
-                <td className="px-3 py-2 border-b font-medium text-blue-700">
-                  <Link href={`/datasets/${dataset.id}`}>
-                    {dataset.name}
-                  </Link>
-                </td>
-                <td className="px-3 py-2 border-b capitalize">
-                  {dataset.type}
-                </td>
-                <td className="px-3 py-2 border-b">
-                  {dataset.description || '—'}
-                </td>
-                <td className="px-3 py-2 border-b text-gray-500 text-xs">
-                  {dataset.created_at
-                    ? new Date(dataset.created_at).toLocaleString()
-                    : ''}
-                </td>
-                <td className="px-3 py-2 border-b text-right space-x-2">
-                  <button
-                    onClick={() => setEditDataset(dataset)}
-                    className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-                  >
-                    Edit
-                  </button>
-                  {dataset.type === 'numeric' && (
-                    <button
-                      onClick={() => setCleanDataset(dataset)}
-                      className="px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600"
-                    >
-                      Clean
-                    </button>
-                  )}
-                </td>
+        <div className="overflow-x-auto border rounded-lg bg-white shadow-sm">
+          <table className="w-full text-sm border-collapse">
+            <thead className="bg-gray-50 text-left text-gray-600">
+              <tr>
+                <th className="px-3 py-2 border-b">Name</th>
+                <th className="px-3 py-2 border-b">Type</th>
+                <th className="px-3 py-2 border-b">Description</th>
+                <th className="px-3 py-2 border-b">Created</th>
+                <th className="px-3 py-2 border-b text-right">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {datasets.map((dataset) => (
+                <tr key={dataset.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 border-b font-medium text-blue-700">
+                    <Link
+                      href={`/datasets/${dataset.id}`}
+                      className="hover:underline"
+                    >
+                      {dataset.name}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 border-b capitalize text-gray-700">
+                    {dataset.type}
+                  </td>
+                  <td className="px-3 py-2 border-b text-gray-600">
+                    {dataset.description || '—'}
+                  </td>
+                  <td className="px-3 py-2 border-b text-gray-500 text-xs">
+                    {dataset.created_at
+                      ? new Date(dataset.created_at).toLocaleString()
+                      : ''}
+                  </td>
+                  <td className="px-3 py-2 border-b text-right">
+                    <div className="flex justify-end space-x-2">
+                      <button
+                        title="Edit dataset"
+                        onClick={() => setEditDataset(dataset)}
+                        className="p-1.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        <Edit size={16} />
+                      </button>
+                      {dataset.type === 'numeric' && (
+                        <button
+                          title="Clean dataset"
+                          onClick={() => setCleanDataset(dataset)}
+                          className="p-1.5 rounded bg-yellow-500 text-white hover:bg-yellow-600"
+                        >
+                          <Brush size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
+      {/* Modals */}
       {editDataset && (
         <EditDatasetModal
           dataset={editDataset}
