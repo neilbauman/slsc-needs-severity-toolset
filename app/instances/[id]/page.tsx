@@ -6,13 +6,11 @@ import { createClient } from '@/lib/supabaseClient';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import Link from 'next/link';
 
-// --- Dynamic imports for Leaflet ---
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
 import 'leaflet/dist/leaflet.css';
 
-// --- Types ---
 interface Instance {
   id: string;
   name: string;
@@ -21,21 +19,16 @@ interface Instance {
   created_at?: string | null;
 }
 
-interface Adm3Feature {
-  type: string;
-  features: any[];
-}
-
 export default function InstanceDashboard({ params }: { params: { id: string } }) {
   const supabase = createClient();
   const [instance, setInstance] = useState<Instance | null>(null);
-  const [adm3, setAdm3] = useState<Adm3Feature | null>(null);
+  const [adm3, setAdm3] = useState<any | null>(null);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // --- Load Instance ---
+  // --- Load instance ---
   const loadInstance = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -44,16 +37,13 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
       .eq('id', params.id)
       .single();
     if (error) console.error(error);
-    setInstance(data as Instance);
+    setInstance(data);
     setLoading(false);
   }, [params.id, supabase]);
 
-  // --- Load ADM3 Boundaries (filtered by admin_scope) ---
-  const loadAdm3 = useCallback(async (scope: string[]) => {
-    if (!scope || scope.length === 0) return;
-    const { data, error } = await supabase.rpc('get_adm3_scores', {
-      p_admin_scope: scope,
-    });
+  // --- Load ADM3 geometry and metadata ---
+  const loadAdm3 = useCallback(async (instanceId: string) => {
+    const { data, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
     if (error) {
       console.error('Failed to fetch ADM3 data', error);
       return;
@@ -61,28 +51,31 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
     setAdm3(data);
   }, [supabase]);
 
-  // --- Load Scores ---
-  const loadScores = useCallback(async () => {
+  // --- Load scores ---
+  const loadScores = useCallback(async (instanceId: string) => {
     const { data, error } = await supabase
       .from('scored_instance_values')
-      .select('admin_pcode, score')
-      .eq('instance_id', params.id);
+      .select('pcode, score')
+      .eq('instance_id', instanceId);
+
     if (error) {
       console.error('Error loading scores', error);
       return;
     }
-    const map: Record<string, number> = {};
-    for (const row of data || []) map[row.admin_pcode] = row.score;
-    setScores(map);
-  }, [params.id, supabase]);
+    const scoreMap: Record<string, number> = {};
+    for (const row of data || []) {
+      scoreMap[row.pcode] = Number(row.score);
+    }
+    setScores(scoreMap);
+  }, [supabase]);
 
-  // --- Recompute Scores ---
+  // --- Recompute ---
   const recomputeScores = async () => {
     setRefreshing(true);
-    const { error: err1 } = await supabase.rpc('score_framework_aggregate', { p_instance_id: params.id });
-    const { error: err2 } = await supabase.rpc('score_instance_overall', { p_instance_id: params.id });
-    if (err1 || err2) console.error('Scoring error', err1 || err2);
-    await loadScores();
+    const { error: e1 } = await supabase.rpc('score_framework_aggregate', { p_instance_id: params.id });
+    const { error: e2 } = await supabase.rpc('score_instance_overall', { p_instance_id: params.id });
+    if (e1 || e2) console.error('Scoring recompute failed', e1 || e2);
+    await loadScores(params.id);
     setRefreshing(false);
   };
 
@@ -92,60 +85,63 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
   }, [loadInstance]);
 
   useEffect(() => {
-    if (instance?.admin_scope) {
-      loadAdm3(instance.admin_scope);
-      loadScores();
+    if (instance) {
+      loadAdm3(instance.id);
+      loadScores(instance.id);
     }
   }, [instance, loadAdm3, loadScores]);
 
-  // --- Coloring by score (1→green → 5→red) ---
+  // --- Color scale (1–5: green → red) ---
   const getColor = (score: number) => {
-    if (!score) return '#ccc';
+    if (!score) return '#cccccc';
     const colors = ['#2ecc71', '#a2d96d', '#f9d057', '#f29e2e', '#d7191c'];
     return colors[Math.min(4, Math.max(0, Math.round(score - 1)))];
   };
 
   const style = (feature: any) => {
-    const code = feature.properties.admin_pcode;
-    const score = scores[code] || 0;
+    const code = feature.properties.pcode;
+    const score = scores[code];
     return {
-      color: '#999',
+      color: '#555',
       weight: 1,
       fillColor: getColor(score),
-      fillOpacity: 0.7,
+      fillOpacity: 0.75,
     };
   };
 
-  // --- Render ---
   return (
     <div className="p-4 space-y-4">
-      <header className="flex items-center justify-between no-print">
+      <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-blue)' }}>
-            {instance ? instance.name : 'Loading...'}
-          </h1>
-          {instance?.description && <p className="text-sm text-gray-500">{instance.description}</p>}
+          <h1 className="text-xl font-semibold text-blue-900">{instance?.name || 'Loading...'}</h1>
+          {instance?.description && <p className="text-gray-500 text-sm">{instance.description}</p>}
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={() => setShowAreaModal(true)}>
+          <button onClick={() => setShowAreaModal(true)} className="btn btn-secondary">
             Define Affected Area
           </button>
-          <button className="btn btn-primary" onClick={recomputeScores} disabled={refreshing}>
+          <button
+            onClick={recomputeScores}
+            disabled={refreshing}
+            className="btn btn-primary"
+          >
             {refreshing ? 'Recomputing…' : 'Recompute Scores'}
           </button>
-          <Link href="/instances" className="btn btn-secondary">Back</Link>
+          <Link href="/instances" className="btn btn-secondary">
+            Back
+          </Link>
         </div>
       </header>
 
       {/* Map Section */}
       <div className="card p-4">
         <h2 className="text-base font-semibold mb-2">Geographic Overview</h2>
-        {!adm3 && <div className="text-sm text-gray-600">Loading map data…</div>}
+        {!adm3 && <p className="text-sm text-gray-500">Loading map data…</p>}
         {adm3 && (
           <MapContainer
             style={{ height: '70vh', width: '100%' }}
             zoom={7}
-            center={[12.8797, 121.7740]} // Philippines center
+            center={[10.3, 123.9]} // Visayas center
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             <GeoJSON data={adm3 as any} style={style} />
