@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
@@ -17,8 +17,6 @@ interface Instance {
   description: string | null;
   created_at: string | null;
   admin_scope: string[] | null;
-  active: boolean | null;
-  type: string | null;
 }
 
 export default function InstancePage() {
@@ -35,56 +33,71 @@ export default function InstancePage() {
   const loadInstance = useCallback(async () => {
     setLoading(true);
 
-    // Load instance metadata
+    // 1️⃣ Load instance info
     const { data: inst, error } = await supabase
       .from('instances')
       .select('*')
       .eq('id', id)
       .single();
-    if (error) {
+
+    if (error || !inst) {
       console.error('Instance load error:', error);
       setLoading(false);
       return;
     }
+
     setInstance(inst);
+    const scope = inst.admin_scope ?? [];
 
-    const scope = inst?.admin_scope ?? [];
     if (!scope.length) {
-      console.warn('No admin_scope defined for instance');
+      console.warn('No admin_scope defined');
       setLoading(false);
       return;
     }
 
-    const adm1Codes = scope.filter((p) => p.length === 4);
-    const adm2Codes = scope.filter((p) => p.length === 6);
+    // 2️⃣ Try the RPC first
+    let adm3data: any[] | null = null;
+    let admErr = null;
 
-    // Load all ADM3 boundaries
-    const { data: allAdm3, error: admErr } = await supabase
-      .from('admin_boundaries')
-      .select('admin_pcode, name, parent_pcode, admin_level, geom')
-      .eq('admin_level', 'ADM3');
-
-    if (admErr) {
-      console.error('ADM3 load error:', admErr);
-      setLoading(false);
-      return;
+    try {
+      const { data, error: rpcError } = await supabase.rpc('get_affected_adm3', {
+        in_scope: scope,
+      });
+      adm3data = data;
+      admErr = rpcError;
+    } catch (e) {
+      admErr = e;
     }
 
-    // 🧭 Improved filter: include ADM3s under selected ADM2s, or under ADM1 prefix
-    const filtered = (allAdm3 || []).filter((r: any) => {
-      if (adm2Codes.length && adm2Codes.includes(r.parent_pcode)) return true;
-      if (adm1Codes.length && adm1Codes.includes(r.admin_pcode?.substring(0, 4))) return true;
-      return false;
-    });
+    // 3️⃣ If RPC fails, fall back to full ADM3 fetch + client filter
+    if (admErr || !adm3data) {
+      console.warn('Falling back to client-side ADM3 filter', admErr);
+      const { data: allAdm3, error: fullErr } = await supabase
+        .from('admin_boundaries')
+        .select('admin_pcode, name, parent_pcode, admin_level, geom')
+        .eq('admin_level', 'ADM3');
 
-    console.log(`Filtering ${filtered.length}/${allAdm3.length} ADM3 features for scope:`, scope);
+      if (fullErr) {
+        console.error('ADM3 load error:', fullErr);
+        setLoading(false);
+        return;
+      }
 
-    // 🧱 Normalize geometries
-    const features = filtered
+      const adm1Codes = scope.filter((p) => p.length === 4);
+      const adm2Codes = scope.filter((p) => p.length === 6);
+
+      adm3data = (allAdm3 || []).filter((r: any) => {
+        if (adm2Codes.length && adm2Codes.includes(r.parent_pcode)) return true;
+        if (adm1Codes.length && adm1Codes.includes(r.admin_pcode?.substring(0, 4))) return true;
+        return false;
+      });
+    }
+
+    // 4️⃣ Convert to valid GeoJSON
+    const features = adm3data
       .map((r: any) => {
         if (!r.geom) return null;
         let geometry = null;
-
         try {
           geometry =
             typeof r.geom === 'string'
@@ -93,18 +106,13 @@ export default function InstancePage() {
               ? r.geom
               : null;
         } catch {
-          console.warn(`Invalid GeoJSON for ${r.admin_pcode}`);
+          console.warn(`Invalid geometry JSON for ${r.admin_pcode}`);
           return null;
         }
 
-        // Some DBs return { coordinates, type }, others { geom: { ... } }
-        if (!geometry?.type && geometry?.geom) geometry = geometry.geom;
-
-        if (
-          geometry?.type !== 'Polygon' &&
-          geometry?.type !== 'MultiPolygon'
-        ) {
-          console.warn(`Skipping non-polygon geometry for ${r.admin_pcode}`);
+        if (!geometry?.type) geometry = geometry?.geom;
+        if (!geometry?.type || !['Polygon', 'MultiPolygon'].includes(geometry.type)) {
+          console.warn(`Skipping non-polygon ${r.admin_pcode}`);
           return null;
         }
 
@@ -122,7 +130,7 @@ export default function InstancePage() {
 
     setAdm3Geojson({ type: 'FeatureCollection', features });
 
-    // Load affected names for display
+    // 5️⃣ Load human-readable area names
     const { data: names } = await supabase
       .from('admin_boundaries')
       .select('name')
@@ -136,6 +144,7 @@ export default function InstancePage() {
     loadInstance();
   }, [loadInstance]);
 
+  // Auto-fit to bounds once map and data are ready
   useEffect(() => {
     if (!mapRef.current || !adm3Geojson?.features?.length) return;
     const geoLayer = L.geoJSON(adm3Geojson);
