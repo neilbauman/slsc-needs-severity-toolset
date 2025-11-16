@@ -1,160 +1,143 @@
-'use client';
+'use client'
 
-import React, { useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabaseClient'
+import { Loader2 } from 'lucide-react'
 
 type CleanNumericDatasetModalProps = {
-  datasetId: string;
-  datasetName: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCleaned: () => Promise<void>;
-};
+  datasetId: string
+  datasetName: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCleaned: () => Promise<void>
+}
 
 export default function CleanNumericDatasetModal({
   datasetId,
   datasetName,
   open,
   onOpenChange,
-  onCleaned,
+  onCleaned
 }: CleanNumericDatasetModalProps) {
-  const supabase = createClientComponentClient();
-  const [status, setStatus] = useState<'idle' | 'running' | 'success' | 'error' | 'reverting'>('idle');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [progress, setProgress] = useState<number>(0);
+  const [cleaning, setCleaning] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [complete, setComplete] = useState(false)
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open) {
+      setProgress(0)
+      setError(null)
+      setComplete(false)
+    }
+  }, [open])
 
-  const handleClose = () => {
-    onOpenChange(false);
-    setStatus('idle');
-    setErrorMessage(null);
-    setProgress(0);
-  };
-
-  const handleClean = async () => {
-    setStatus('running');
-    setErrorMessage(null);
-    setProgress(0);
+  async function handleClean() {
+    setCleaning(true)
+    setError(null)
+    setProgress(0)
+    setComplete(false)
 
     try {
-      let offset = 0;
-      const limit = 1000;
-      let more = true;
-      let batch = 0;
+      let batch = 0
+      const batchSize = 2000
 
-      while (more) {
-        const { data, error } = await supabase.rpc('clean_numeric_dataset_v2', {
+      // 1️⃣ Step 1 - clear existing numeric values
+      await supabase.rpc('delete_existing_numeric', { in_dataset_id: datasetId })
+
+      // 2️⃣ Step 2 - begin cleaning in batches
+      while (true) {
+        const { error: rpcError } = await supabase.rpc('clean_numeric_dataset_v2', {
           in_dataset_id: datasetId,
-          in_offset: offset,
-          in_limit: limit,
-        });
+          in_offset: batch * batchSize,
+          in_limit: batchSize
+        })
 
-        if (error) {
-          console.error('Cleaning error:', error);
-          throw error;
+        if (rpcError) {
+          if (rpcError.code === 'PGRST204') break // no more batches
+          throw rpcError
         }
 
-        batch++;
-        offset += limit;
-        setProgress((offset / 41984) * 100); // approximate progress
+        batch += 1
+        setProgress(Math.min(100, (batch * batchSize) / 42000 * 100))
 
-        more = data === true;
+        if (progress >= 99) break
       }
 
-      setStatus('success');
-      await onCleaned();
-    } catch (err: any) {
-      console.error('Cleaning failed:', err);
-      setErrorMessage(err.message || 'Cleaning failed. See console for details.');
-      setStatus('error');
-    }
-  };
-
-  const handleRevert = async () => {
-    setStatus('reverting');
-    setErrorMessage(null);
-
-    try {
-      const { error: delError } = await supabase
-        .from('dataset_values_numeric')
-        .delete()
-        .eq('dataset_id', datasetId);
-
-      if (delError) throw delError;
-
-      const { error: updError } = await supabase
+      // 3️⃣ Step 3 - mark dataset as cleaned
+      await supabase
         .from('datasets')
-        .update({ is_cleaned: false })
-        .eq('id', datasetId);
+        .update({ is_cleaned: true })
+        .eq('id', datasetId)
 
-      if (updError) throw updError;
-
-      setStatus('idle');
-      alert('Dataset reverted to raw successfully.');
-      await onCleaned();
+      setProgress(100)
+      setComplete(true)
+      await onCleaned()
     } catch (err: any) {
-      console.error('Revert failed:', err);
-      setErrorMessage(err.message || 'Failed to revert dataset.');
-      setStatus('error');
+      console.error('Cleaning error:', err)
+      setError(err.message || 'An unknown error occurred')
+    } finally {
+      setCleaning(false)
     }
-  };
+  }
+
+  if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
-        <h2 className="text-2xl font-semibold mb-2">Clean Dataset</h2>
-        <p className="text-gray-600 mb-4">Dataset: <strong>{datasetName}</strong></p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md text-center relative">
+        <h2 className="text-2xl font-bold mb-3">Clean Dataset</h2>
+        <p className="text-gray-600 mb-6">
+          Dataset: <span className="font-semibold">{datasetName}</span>
+        </p>
 
-        {status === 'running' && (
-          <div className="mb-4">
-            <p className="text-center mb-2">Cleaning in progress...</p>
-            <div className="w-full bg-gray-200 rounded-full h-3">
+        {error ? (
+          <p className="text-red-600 mb-6">{error}</p>
+        ) : complete ? (
+          <p className="text-green-600 mb-6">✅ Cleaning complete!</p>
+        ) : cleaning ? (
+          <>
+            <p className="text-gray-700 mb-4">Cleaning in progress…</p>
+            <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
               <div
-                className="bg-blue-500 h-3 rounded-full transition-all"
-                style={{ width: `${Math.min(progress, 100)}%` }}
-              ></div>
+                className="bg-blue-600 h-3 rounded-full transition-all"
+                style={{ width: `${progress}%` }}
+              />
             </div>
-            <p className="text-sm text-center mt-2">{Math.min(progress, 100).toFixed(0)}%</p>
-          </div>
+            <p className="text-sm text-gray-600">{Math.floor(progress)}%</p>
+          </>
+        ) : (
+          <p className="text-gray-700 mb-6">
+            This will clean and standardize numeric data for this dataset.
+          </p>
         )}
 
-        {status === 'error' && (
-          <div className="text-red-600 mb-4 text-center whitespace-pre-line">
-            {errorMessage || 'Cleaning failed. See console for details.'}
-          </div>
-        )}
-
-        {status === 'success' && (
-          <div className="text-green-600 mb-4 text-center">✅ Cleaning completed successfully!</div>
-        )}
-
-        <div className="flex justify-end space-x-3 mt-6">
-          {status !== 'running' && (
+        <div className="mt-6 flex justify-center gap-4">
+          {!cleaning && !complete && (
             <button
-              className="px-4 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-800"
-              onClick={handleRevert}
-              disabled={status === 'reverting'}
+              onClick={handleClean}
+              className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition"
             >
-              {status === 'reverting' ? 'Reverting...' : 'Revert to Raw'}
+              Start Cleaning
+            </button>
+          )}
+          {cleaning && (
+            <button
+              disabled
+              className="px-6 py-2 bg-blue-400 text-white font-medium rounded-lg flex items-center justify-center gap-2 cursor-not-allowed"
+            >
+              <Loader2 className="animate-spin h-4 w-4" />
+              Cleaning…
             </button>
           )}
           <button
-            className="px-4 py-2 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-800"
-            onClick={handleClose}
+            onClick={() => onOpenChange(false)}
+            className="px-6 py-2 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition"
           >
-            Cancel
+            {complete ? 'Close' : 'Cancel'}
           </button>
-          {status !== 'running' && (
-            <button
-              className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={handleClean}
-            >
-              {status === 'success' ? 'Re-run Cleaning' : 'Start Cleaning'}
-            </button>
-          )}
         </div>
       </div>
     </div>
-  );
+  )
 }
