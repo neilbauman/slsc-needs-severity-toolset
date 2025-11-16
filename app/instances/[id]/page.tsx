@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
+import * as L from 'leaflet';
 
 // Dynamic imports for Leaflet
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
@@ -30,6 +31,9 @@ export default function InstancePage() {
   const [adm3Geojson, setAdm3Geojson] = useState<any>(null);
   const [affectedNames, setAffectedNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
+
+  const mapRef = useRef<L.Map | null>(null);
 
   const loadInstance = useCallback(async () => {
     setLoading(true);
@@ -44,7 +48,6 @@ export default function InstancePage() {
     const { data: m } = await supabase.rpc('get_instance_summary', { in_instance: id });
     setMetrics(m?.[0] ?? null);
 
-    // Load all ADM3 geometries once, filter locally
     const { data: allAdm3, error: admErr } = await supabase
       .from('admin_boundaries')
       .select('admin_pcode, name, parent_pcode, admin_level, geom')
@@ -63,15 +66,36 @@ export default function InstancePage() {
       return scope.includes(r.parent_pcode) || scope.includes(prefix);
     });
 
-    const features = filtered.map((r: any) => ({
-      type: 'Feature',
-      geometry: JSON.parse(r.geom),
-      properties: { admin_pcode: r.admin_pcode, name: r.name },
-    }));
+    // ✅ Fix: geom may already be a parsed object
+    const features = filtered
+      .map((r: any) => {
+        let geometry = null;
+        if (!r.geom) return null;
+        if (typeof r.geom === 'string') {
+          try {
+            geometry = JSON.parse(r.geom);
+          } catch {
+            console.warn('Invalid geometry JSON for', r.admin_pcode);
+          }
+        } else if (typeof r.geom === 'object') {
+          geometry = r.geom;
+        }
+
+        if (!geometry) return null;
+        return {
+          type: 'Feature',
+          geometry,
+          properties: { admin_pcode: r.admin_pcode, name: r.name },
+        };
+      })
+      .filter(Boolean);
+
+    if (features.length === 0) {
+      console.warn('No ADM3 geometries found for scope', scope);
+    }
 
     setAdm3Geojson({ type: 'FeatureCollection', features });
 
-    // Load readable names
     if (scope.length) {
       const { data: namesData } = await supabase
         .from('admin_boundaries')
@@ -86,6 +110,17 @@ export default function InstancePage() {
   useEffect(() => {
     loadInstance();
   }, [loadInstance]);
+
+  // Auto-fit bounds once map and data are ready
+  useEffect(() => {
+    if (!mapRef.current || !adm3Geojson || !adm3Geojson.features?.length) return;
+    try {
+      const geoLayer = L.geoJSON(adm3Geojson);
+      mapRef.current.fitBounds(geoLayer.getBounds());
+    } catch (err) {
+      console.warn('Failed to fit map bounds:', err);
+    }
+  }, [adm3Geojson, mapReady]);
 
   const style = () => ({
     color: '#555',
@@ -156,26 +191,31 @@ export default function InstancePage() {
               <div className="flex items-center justify-center h-full text-gray-500">
                 Loading map…
               </div>
-            ) : (
+            ) : adm3Geojson?.features?.length > 0 ? (
               <MapContainer
+                ref={(m) => {
+                  mapRef.current = m;
+                  setMapReady(!!m);
+                }}
                 center={[12.8797, 121.774]}
                 zoom={6}
-                scrollWheelZoom={true}
+                scrollWheelZoom
                 className="h-full w-full"
               >
                 <TileLayer
                   attribution="&copy; OpenStreetMap contributors"
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                {adm3Geojson && (
-                  <GeoJSON data={adm3Geojson as any} style={style} onEachFeature={onEachFeature} />
-                )}
+                <GeoJSON data={adm3Geojson} style={style} onEachFeature={onEachFeature} />
               </MapContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                No geometry data found for this affected area.
+              </div>
             )}
           </div>
         </div>
 
-        {/* Side table placeholder */}
         <div className="col-span-3 bg-white border rounded-lg shadow-sm p-3">
           <div className="text-sm font-semibold mb-2 text-gray-700">Top Locations</div>
           <p className="text-xs text-gray-500">No data yet</p>
