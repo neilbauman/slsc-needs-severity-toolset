@@ -41,45 +41,71 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
     setLoading(false);
   }, [params.id, supabase]);
 
-  // --- Load ADM3 geometry and metadata ---
+  // --- Load ADM3 boundaries (handles fallback and MultiPolygons) ---
   const loadAdm3 = useCallback(
     async (instanceId: string, adminScope?: string[]) => {
-      // 1. Try scores first
-      const { data, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
-      if (!error && data) {
-        setAdm3(data);
-        return;
+      try {
+        // 1️⃣ Try precomputed scores first
+        const { data: scored, error } = await supabase.rpc('get_adm3_scores', { in_instance: instanceId });
+        if (!error && scored && scored.length > 0) {
+          console.log('Loaded scored ADM3 data:', scored.length);
+          setAdm3(scored);
+          return;
+        }
+
+        console.warn('No ADM3 scores found — using fallback admin_boundaries');
+        if (!adminScope || adminScope.length === 0) return;
+
+        const adm2 = adminScope[adminScope.length - 1];
+
+        // 2️⃣ Load ADM3 geometries directly from admin_boundaries
+        const { data: rows, error: e2 } = await supabase
+          .from('admin_boundaries')
+          .select('name, admin_pcode, parent_pcode, ST_AsGeoJSON(geom) AS geom_json')
+          .eq('admin_level', 'ADM3')
+          .or(`parent_pcode.ilike.${adm2}%,admin_pcode.ilike.${adm2}%`);
+
+        if (e2) {
+          console.error('Failed to load ADM3 fallback boundaries:', e2);
+          return;
+        }
+
+        if (!rows || rows.length === 0) {
+          console.warn('No ADM3 boundaries matched the affected area');
+          return;
+        }
+
+        // 3️⃣ Convert PostGIS geometries into GeoJSON features
+        const features = rows
+          .filter(r => r.geom_json)
+          .map(r => {
+            let geometry;
+            try {
+              geometry = JSON.parse(r.geom_json);
+            } catch {
+              console.warn('Invalid GeoJSON for', r.admin_pcode);
+              return null;
+            }
+
+            if (!geometry || !geometry.type || !geometry.coordinates) return null;
+
+            return {
+              type: 'Feature',
+              geometry,
+              properties: {
+                name: r.name,
+                pcode: r.admin_pcode,
+              },
+            };
+          })
+          .filter(Boolean);
+
+        const fc = { type: 'FeatureCollection', features };
+        console.log(`Loaded ${features.length} ADM3 polygons for fallback`);
+        setAdm3(fc);
+      } catch (err) {
+        console.error('Unexpected error loading ADM3:', err);
       }
-
-      console.warn('No ADM3 scores found — loading fallback ADM3 boundaries');
-      if (!adminScope || adminScope.length === 0) return;
-
-      // 2. Fallback: use admin_boundaries for the affected ADM2 (ADM3 level only)
-      const adm2 = adminScope[adminScope.length - 1];
-      const { data: rows, error: e2 } = await supabase
-        .from('admin_boundaries')
-        .select('name, admin_pcode, parent_pcode, ST_AsGeoJSON(geom) AS geom_json')
-        .eq('admin_level', 'ADM3')
-        .or(`parent_pcode.ilike.${adm2}%,admin_pcode.ilike.${adm2}%`);
-
-      if (e2) {
-        console.error('Failed to load fallback ADM3 boundaries:', e2);
-        return;
-      }
-
-      // Transform PostGIS to GeoJSON FeatureCollection
-      const fc = {
-        type: 'FeatureCollection',
-        features: (rows || []).map((row: any) => ({
-          type: 'Feature',
-          geometry: JSON.parse(row.geom_json),
-          properties: {
-            name: row.name,
-            pcode: row.admin_pcode,
-          },
-        })),
-      };
-      setAdm3(fc);
     },
     [supabase]
   );
@@ -96,10 +122,12 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
         console.error('Error loading scores', error);
         return;
       }
+
       const scoreMap: Record<string, number> = {};
       for (const row of data || []) {
         scoreMap[row.pcode] = Number(row.score);
       }
+      console.log(`Loaded ${Object.keys(scoreMap).length} scored ADM3 areas`);
       setScores(scoreMap);
     },
     [supabase]
@@ -165,7 +193,6 @@ export default function InstanceDashboard({ params }: { params: { id: string } }
         </div>
       </header>
 
-      {/* Map Section */}
       <div className="card p-4">
         <h2 className="text-base font-semibold mb-2">Geographic Overview</h2>
         {!adm3 && <p className="text-sm text-gray-500">Loading map data…</p>}
