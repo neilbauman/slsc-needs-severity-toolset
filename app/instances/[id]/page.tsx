@@ -112,43 +112,49 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   }, [instance, scores, affected]);
 
   useEffect(() => {
-    if (!instance || !affected.length) return;
-    supabase
-      .from("scored_instance_values")
-      .select("score,pcode,dataset_id,datasets(id,name,category)")
-      .eq("instance_id", instance.id)
-      .in("pcode", affected)
-      .then(({ data }) => {
-        if (!data) return;
-        const grouped: any = {};
-        for (const r of data) {
-          const cat = r.datasets?.category || "Uncategorized";
-          const ds = r.datasets?.name || "Unnamed";
-          grouped[cat] ??= {};
-          grouped[cat][ds] ??= [];
-          grouped[cat][ds].push(r.score || 0);
-        }
-        const order = [
-          "SSC Framework - P1",
-          "SSC Framework - P2",
-          "SSC Framework - P3",
-          "Hazard",
-          "Underlying Vulnerability",
-          "Uncategorized",
-        ];
-        const result = Object.entries(grouped).map(([cat, d]: any) => ({
-          category: cat,
-          datasets: Object.entries(d).map(([n, s]: any) => ({
-            name: n,
-            avg: s.reduce((a: any, b: any) => a + b, 0) / s.length,
-            min: Math.min(...s),
-            max: Math.max(...s),
-          })),
-        }));
-        result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
-        setCategories(result);
-      });
-  }, [instance, scores, affected]);
+  if (!instance || !affected.length) return;
+  supabase
+    .from("scored_instance_values")
+    .select("score,pcode,dataset_id,datasets(id,name,category)")
+    .eq("instance_id", instance.id)
+    .in("pcode", affected)
+    .then(({ data }) => {
+      if (!data) return;
+      const grouped: Record<string, Record<string, number[]>> = {};
+
+      for (const r of data) {
+        const dataset = (r as any).datasets; // ✅ cast fixes the TS type
+        const cat = dataset?.category || "Uncategorized";
+        const ds = dataset?.name || "Unnamed Dataset";
+
+        grouped[cat] ??= {};
+        grouped[cat][ds] ??= [];
+        grouped[cat][ds].push(r.score || 0);
+      }
+
+      const order = [
+        "SSC Framework - P1",
+        "SSC Framework - P2",
+        "SSC Framework - P3",
+        "Hazard",
+        "Underlying Vulnerability",
+        "Uncategorized",
+      ];
+
+      const result = Object.entries(grouped).map(([cat, d]) => ({
+        category: cat,
+        datasets: Object.entries(d).map(([n, s]: any) => ({
+          name: n,
+          avg: s.reduce((a: number, b: number) => a + b, 0) / s.length,
+          min: Math.min(...s),
+          max: Math.max(...s),
+        })),
+      }));
+
+      result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
+      setCategories(result);
+    });
+}, [instance, scores, affected]);
 
   const recompute = async () => {
     await supabase.rpc("score_instance_overall", { in_instance: instance.id });
