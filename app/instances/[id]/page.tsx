@@ -1,10 +1,10 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseClient";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
+import { Lock, Unlock } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
@@ -14,246 +14,120 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
   const [scores, setScores] = useState<any[]>([]);
   const [features, setFeatures] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showConfig, setShowConfig] = useState(false);
-  const [showAreaModal, setShowAreaModal] = useState(false);
+  const [affected, setAffected] = useState<string[]>([]);
   const [summary, setSummary] = useState<any>(null);
-  const [topAreas, setTopAreas] = useState<any[]>([]);
-  const [showAllAreas, setShowAllAreas] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [affectedPcodes, setAffectedPcodes] = useState<string[]>([]);
+  const [topAreas, setTopAreas] = useState<any[]>([]);
+  const [showAll, setShowAll] = useState(false);
+  const [zoomLocked, setZoomLocked] = useState(true);
+  const [showConfig, setShowConfig] = useState(false);
+  const [showArea, setShowArea] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Load instance metadata
+  const colorFor = (s: number | null) =>
+    s == null ? "#ccc" : s <= 1 ? "#00b050" : s <= 2 ? "#92d050" : s <= 3 ? "#ffff00" : s <= 4 ? "#ffc000" : "#ff0000";
+
   useEffect(() => {
-    const loadInstance = async () => {
-      const { data, error } = await supabase
-        .from("instances")
-        .select("*")
-        .eq("id", params.id)
-        .single();
-      if (error) console.error("Error loading instance:", error);
+    (async () => {
+      const { data } = await supabase.from("instances").select("*").eq("id", params.id).single();
       setInstance(data);
-    };
-    loadInstance();
+    })();
   }, [params.id]);
 
-  // Load affected area (ADM3s under lowest admin_scope)
   useEffect(() => {
-    const loadAffectedPcodes = async () => {
-      if (!instance?.admin_scope?.length) return;
-      const lowest = instance.admin_scope[instance.admin_scope.length - 1];
-
-      const { data, error } = await supabase
-        .from("admin_boundaries")
-        .select("admin_pcode")
-        .eq("parent_pcode", lowest);
-
-      if (error) console.error("Error fetching affected areas:", error);
-      else setAffectedPcodes(data.map((d: any) => d.admin_pcode));
-    };
-    loadAffectedPcodes();
+    if (!instance?.admin_scope?.length) return;
+    const lowest = instance.admin_scope.at(-1);
+    supabase.from("admin_boundaries").select("admin_pcode").eq("parent_pcode", lowest).then(({ data }) =>
+      setAffected(data?.map((d: any) => d.admin_pcode) || [])
+    );
   }, [instance]);
 
-  // Load scores
   useEffect(() => {
-    if (!instance || !affectedPcodes.length) return;
-    const loadScores = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
+    if (!instance || !affected.length) return;
+    supabase
+      .from("scored_instance_values")
+      .select("pcode,score")
+      .eq("instance_id", instance.id)
+      .in("pcode", affected)
+      .then(({ data }) => setScores(data || []));
+  }, [instance, affected]);
+
+  useEffect(() => {
+    if (!instance?.admin_scope?.length) return;
+    const lowest = instance.admin_scope.at(-1);
+    supabase
+      .rpc("get_admin_geoms", { in_parent_pcode: lowest })
+      .then(({ data }) =>
+        setFeatures(
+          (data || [])
+            .filter((d: any) => affected.includes(d.admin_pcode))
+            .map((d: any) => ({ ...d, score: scores.find(s => s.pcode === d.admin_pcode)?.score ?? null }))
+        )
+      );
+  }, [instance, scores, affected]);
+
+  useEffect(() => {
+    if (!instance || !affected.length) return;
+    (async () => {
+      const { data: pop } = await supabase.from("datasets").select("id").ilike("name", "%population%").limit(1).maybeSingle();
+      let total = 0;
+      if (pop?.id) {
+        const { data } = await supabase.from("dataset_values_numeric").select("value").eq("dataset_id", pop.id).in("admin_pcode", affected);
+        total = data?.reduce((a, b) => a + (b.value || 0), 0) || 0;
+      }
+      const { data: scored } = await supabase
         .from("scored_instance_values")
-        .select("pcode, score")
+        .select("pcode,score")
         .eq("instance_id", instance.id)
-        .in("pcode", affectedPcodes);
-      if (error) console.error("Error loading scores:", error);
-      setScores(data || []);
-      setLoading(false);
-    };
-    loadScores();
-  }, [instance, affectedPcodes]);
-
-  const colorForScore = (score: number | null) => {
-    if (score === null || score === undefined) return "#ccc";
-    if (score <= 1) return "#00b050";
-    if (score <= 2) return "#92d050";
-    if (score <= 3) return "#ffff00";
-    if (score <= 4) return "#ffc000";
-    return "#ff0000";
-  };
-
-  // Load geometries (filtered)
-  useEffect(() => {
-    const loadGeoms = async () => {
-      if (!instance?.admin_scope?.length) return;
-      const lowest = instance.admin_scope[instance.admin_scope.length - 1];
-
-      const { data, error } = await supabase.rpc("get_admin_geoms", {
-        in_parent_pcode: lowest,
+        .in("pcode", affected);
+      const avg = scored?.reduce((a, b) => a + (b.score || 0), 0) / (scored?.length || 1);
+      setSummary({
+        population: total,
+        concern: Math.round(total * (avg / 5) * 0.5),
+        need: Math.round(total * (avg / 5)),
+        avg,
       });
 
-      if (error) {
-        console.error("Error loading geoms:", error);
-        return;
-      }
-
-      const joined = (data || [])
-        .filter((d: any) => affectedPcodes.includes(d.admin_pcode))
-        .map((d: any) => ({
-          ...d,
-          score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
-        }));
-
-      setFeatures(joined);
-    };
-    loadGeoms();
-  }, [instance, scores, affectedPcodes]);
-
-  // Recompute scores
-  const recomputeScores = async () => {
-    const { error } = await supabase.rpc("score_instance_overall", { in_instance: instance.id });
-    if (error) console.error("Error recomputing scores:", error);
-    else {
-      const { data } = await supabase
+      const { data: top } = await supabase
         .from("scored_instance_values")
-        .select("pcode, score")
+        .select("pcode,score")
         .eq("instance_id", instance.id)
-        .in("pcode", affectedPcodes);
-      setScores(data || []);
-    }
-  };
+        .in("pcode", affected)
+        .order("score", { ascending: false });
+      const { data: bounds } = await supabase
+        .from("admin_boundaries")
+        .select("admin_pcode,name,parent_pcode,admin_level");
 
-  // Load summary + top affected areas
+      const map = new Map(bounds.map((b: any) => [b.admin_pcode, b]));
+      const resolve = (c: string) => {
+        const a3 = map.get(c);
+        if (!a3 || a3.admin_level === "ADM0") return { adm1: "—", adm2: "—", adm3: c };
+        const a2 = map.get(a3.parent_pcode);
+        const a1 = map.get(a2?.parent_pcode);
+        if (a1?.admin_level === "ADM0") return { adm1: "—", adm2: a2?.name || "—", adm3: a3?.name || c };
+        return { adm1: a1?.name || "—", adm2: a2?.name || "—", adm3: a3?.name || c };
+      };
+      setTopAreas(top.map((r: any) => ({ ...r, ...resolve(r.pcode) })));
+    })();
+  }, [instance, scores, affected]);
+
   useEffect(() => {
-    if (!instance || !affectedPcodes.length) return;
-
-    const loadSummaryAndTopAreas = async () => {
-      try {
-        const { data: popDataset } = await supabase
-          .from("datasets")
-          .select("id")
-          .ilike("name", "%population%")
-          .limit(1)
-          .maybeSingle();
-
-        let population_total = 0;
-        if (popDataset?.id) {
-          const { data: popVals } = await supabase
-            .from("dataset_values_numeric")
-            .select("value, admin_pcode")
-            .eq("dataset_id", popDataset.id)
-            .in("admin_pcode", affectedPcodes);
-          population_total = popVals?.reduce((sum, d) => sum + (d.value || 0), 0) || 0;
+    if (!instance || !affected.length) return;
+    supabase
+      .from("scored_instance_values")
+      .select("score,pcode,dataset_id,datasets(id,name,category)")
+      .eq("instance_id", instance.id)
+      .in("pcode", affected)
+      .then(({ data }) => {
+        if (!data) return;
+        const grouped: any = {};
+        for (const r of data) {
+          const cat = r.datasets?.category || "Uncategorized";
+          const ds = r.datasets?.name || "Unnamed";
+          grouped[cat] ??= {};
+          grouped[cat][ds] ??= [];
+          grouped[cat][ds].push(r.score || 0);
         }
-
-        const { data: scored } = await supabase
-          .from("scored_instance_values")
-          .select("pcode, score")
-          .eq("instance_id", instance.id)
-          .in("pcode", affectedPcodes);
-
-        const avg_score =
-          scored && scored.length
-            ? scored.reduce((a, b) => a + (b.score || 0), 0) / scored.length
-            : 0;
-
-        const people_concern = Math.round(population_total * (avg_score / 5) * 0.5);
-        const people_need = Math.round(population_total * (avg_score / 5));
-
-        setSummary({
-          population_total,
-          avg_score,
-          people_concern,
-          people_need,
-        });
-
-        const { data: topRaw } = await supabase
-          .from("scored_instance_values")
-          .select("pcode, score")
-          .eq("instance_id", instance.id)
-          .in("pcode", affectedPcodes)
-          .order("score", { ascending: false });
-
-        if (topRaw?.length) {
-          const { data: boundaries } = await supabase
-            .from("admin_boundaries")
-            .select("admin_pcode, name, parent_pcode, admin_level");
-
-          // Map for fast lookup
-          const boundaryMap = new Map(boundaries.map((b: any) => [b.admin_pcode, b]));
-
-          // Recursive resolver with prefix fallback
-          const resolveHierarchy = (admCode: string) => {
-            const adm3 = boundaryMap.get(admCode);
-            if (!adm3) {
-              const fallback = boundaries.find((b) => admCode.startsWith(b.admin_pcode));
-              if (!fallback) return { adm1: "—", adm2: "—", adm3: admCode };
-              return resolveHierarchy(fallback.admin_pcode);
-            }
-            const adm2 = boundaryMap.get(adm3.parent_pcode);
-            const adm1 = boundaryMap.get(adm2?.parent_pcode);
-            return {
-              adm1: adm1?.name || "—",
-              adm2: adm2?.name || "—",
-              adm3: adm3?.name || admCode,
-            };
-          };
-
-          const enriched = topRaw.map((r) => ({
-            ...r,
-            ...resolveHierarchy(r.pcode),
-          }));
-
-          setTopAreas(enriched);
-        }
-      } catch (err) {
-        console.error("Error loading summary/top areas:", err);
-      }
-    };
-
-    loadSummaryAndTopAreas();
-  }, [instance, scores, affectedPcodes]);
-
-  // Category breakdown
-  useEffect(() => {
-    if (!instance || !affectedPcodes.length) return;
-    const loadCategoryBreakdown = async () => {
-      const { data } = await supabase
-        .from("scored_instance_values")
-        .select(`
-          score,
-          pcode,
-          dataset_id,
-          datasets(id, name, category, type)
-        `)
-        .eq("instance_id", instance.id)
-        .in("pcode", affectedPcodes);
-
-      if (data?.length) {
-        const grouped = data.reduce((acc: any, row: any) => {
-          const cat = row.datasets?.category || "Uncategorized";
-          if (!acc[cat]) acc[cat] = {};
-          const ds = row.datasets?.name || "Unnamed Dataset";
-          if (!acc[cat][ds]) acc[cat][ds] = [];
-          acc[cat][ds].push(row.score || 0);
-          return acc;
-        }, {});
-
-        const result = Object.keys(grouped).map((cat) => ({
-          category: cat,
-          datasets: Object.keys(grouped[cat]).map((ds) => {
-            const scores = grouped[cat][ds];
-            const valid = scores.filter((s: any) => s !== null);
-            const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
-            return {
-              name: ds,
-              avg,
-              min: valid.length ? Math.min(...valid) : null,
-              max: valid.length ? Math.max(...valid) : null,
-              count: valid.length,
-            };
-          }),
-        }));
-
         const order = [
           "SSC Framework - P1",
           "SSC Framework - P2",
@@ -262,171 +136,166 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           "Underlying Vulnerability",
           "Uncategorized",
         ];
-
+        const result = Object.entries(grouped).map(([cat, d]: any) => ({
+          category: cat,
+          datasets: Object.entries(d).map(([n, s]: any) => ({
+            name: n,
+            avg: s.reduce((a: any, b: any) => a + b, 0) / s.length,
+            min: Math.min(...s),
+            max: Math.max(...s),
+          })),
+        }));
         result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
         setCategories(result);
-      }
-    };
-    loadCategoryBreakdown();
-  }, [instance, scores, affectedPcodes]);
+      });
+  }, [instance, scores, affected]);
+
+  const recompute = async () => {
+    await supabase.rpc("score_instance_overall", { in_instance: instance.id });
+    const { data } = await supabase
+      .from("scored_instance_values")
+      .select("pcode,score")
+      .eq("instance_id", instance.id)
+      .in("pcode", affected);
+    setScores(data || []);
+  };
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 text-sm space-y-3">
       {instance && (
         <>
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-xl font-semibold">{instance.name}</h1>
-              <p className="text-gray-600 text-sm">{instance.description || "description"}</p>
+              <h1 className="text-lg font-semibold">{instance.name}</h1>
+              <p className="text-gray-500 text-xs">{instance.description || "description"}</p>
             </div>
             <div className="flex gap-2">
-              <button className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowAreaModal(true)}>Define Affected Area</button>
-              <button className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowConfig(true)}>Configure Datasets</button>
-              <button className="px-4 py-2 border rounded bg-blue-600 text-white hover:bg-blue-700" onClick={recomputeScores}>Recompute Scores</button>
-              <button className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200" onClick={() => history.back()}>Back</button>
+              <button onClick={() => setShowArea(true)} className="px-2 py-1 border rounded bg-gray-100 text-xs">Define Area</button>
+              <button onClick={() => setShowConfig(true)} className="px-2 py-1 border rounded bg-gray-100 text-xs">Datasets</button>
+              <button onClick={recompute} className="px-2 py-1 border rounded bg-blue-600 text-white text-xs">Recompute</button>
             </div>
           </div>
 
-          <div className="bg-white border rounded-lg shadow-sm p-4">
-            <h2 className="font-semibold mb-2">Geographic Overview</h2>
-            {loading ? (
-              <p>Loading map data...</p>
-            ) : (
-              <MapContainer center={[10.3, 123.9]} zoom={8} style={{ height: "600px", width: "100%" }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {features.map((f, i) => {
-                  let geom;
-                  try { geom = f.geom_json; } catch { return null; }
-                  return (
-                    <GeoJSON
-                      key={i}
-                      data={geom}
-                      style={{
-                        color: "#333",
-                        weight: 0.5,
-                        fillOpacity: 0.8,
-                        fillColor: colorForScore(f.score),
-                      }}
-                    />
-                  );
-                })}
-              </MapContainer>
-            )}
+          {/* Summary above map */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <Summary title="Population" val={summary?.population} />
+            <Summary title="Concern" val={summary?.concern} color="text-red-600" />
+            <Summary title="Need" val={summary?.need} color="text-orange-600" />
+            <Summary title="Severity" val={summary?.avg?.toFixed(2)} color="text-blue-600" />
           </div>
 
-          <div className="bg-white border rounded-lg shadow-sm p-4 mt-6">
-            <h2 className="font-semibold mb-2">Summary Analytics</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <SummaryCard title="Total Population" value={summary?.population_total} />
-              <SummaryCard title="People of Concern" value={summary?.people_concern} color="text-red-600" />
-              <SummaryCard title="People in Need" value={summary?.people_need} color="text-orange-600" />
-              <SummaryCard title="Average Severity" value={summary?.avg_score?.toFixed(2)} color="text-blue-600" />
+          {/* Map */}
+          <div className="bg-white border rounded shadow-sm p-2">
+            <div className="flex justify-between items-center mb-1">
+              <h2 className="font-medium">Map Overview</h2>
+              <button onClick={() => setZoomLocked(!zoomLocked)} className="text-xs flex items-center gap-1 text-gray-500">
+                {zoomLocked ? <Lock size={12} /> : <Unlock size={12} />} {zoomLocked ? "Locked" : "Unlocked"}
+              </button>
             </div>
+            <MapContainer
+              center={[10.3, 123.9]}
+              zoom={8}
+              scrollWheelZoom={!zoomLocked}
+              dragging={!zoomLocked}
+              style={{ height: "400px", width: "100%" }}
+            >
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              {features.map((f, i) => (
+                <GeoJSON
+                  key={i}
+                  data={f.geom_json}
+                  style={{ color: "#333", weight: 0.4, fillOpacity: 0.8, fillColor: colorFor(f.score) }}
+                />
+              ))}
+            </MapContainer>
+          </div>
 
-            <h3 className="font-medium mb-2">Most Affected Areas</h3>
-            <table className="w-full text-sm border mb-2">
-              <thead className="bg-gray-100 text-left">
+          {/* Category Breakdown */}
+          <div className="bg-white border rounded shadow-sm p-2">
+            <h3 className="font-medium mb-1">Category Breakdown</h3>
+            {categories.map((c, i) => (
+              <div key={i} className="border rounded mb-1">
+                <div
+                  onClick={() => setExpanded(expanded === c.category ? null : c.category)}
+                  className="flex justify-between bg-gray-100 px-2 py-1 cursor-pointer hover:bg-gray-200"
+                >
+                  <span>{c.category}</span>
+                  <span className="text-blue-600 text-xs">
+                    {(c.datasets.reduce((a, d) => a + d.avg, 0) / c.datasets.length).toFixed(2)}
+                  </span>
+                </div>
+                {expanded === c.category && (
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-1 text-left">Dataset</th>
+                        <th className="p-1 text-right">Min</th>
+                        <th className="p-1 text-right">Avg</th>
+                        <th className="p-1 text-right">Max</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {c.datasets.map((d, j) => (
+                        <tr key={j} className="border-t hover:bg-gray-50">
+                          <td className="p-1">{d.name}</td>
+                          <td className="p-1 text-right">{d.min.toFixed(2)}</td>
+                          <td className="p-1 text-right text-blue-600">{d.avg.toFixed(2)}</td>
+                          <td className="p-1 text-right">{d.max.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Most Affected Areas */}
+          <div className="bg-white border rounded shadow-sm p-2">
+            <h3 className="font-medium mb-1">Most Affected Areas</h3>
+            <table className="w-full text-xs">
+              <thead className="bg-gray-100">
                 <tr>
-                  <th className="p-2">Region (ADM1)</th>
-                  <th className="p-2">Province (ADM2)</th>
-                  <th className="p-2">Municipality (ADM3)</th>
-                  <th className="p-2 text-right">Score</th>
+                  <th className="p-1">ADM1</th>
+                  <th className="p-1">ADM2</th>
+                  <th className="p-1">ADM3</th>
+                  <th className="p-1 text-right">Score</th>
                 </tr>
               </thead>
               <tbody>
-                {(showAllAreas ? topAreas : topAreas.slice(0, 5))?.map((a, i) => (
+                {(showAll ? topAreas : topAreas.slice(0, 5)).map((a, i) => (
                   <tr key={i} className="border-t hover:bg-gray-50">
-                    <td className="p-2">{a.adm1}</td>
-                    <td className="p-2">{a.adm2}</td>
-                    <td className="p-2">{a.adm3}</td>
-                    <td className="p-2 text-right font-medium text-red-600">
-                      {a.score?.toFixed(2)}
-                    </td>
+                    <td className="p-1">{a.adm1}</td>
+                    <td className="p-1">{a.adm2}</td>
+                    <td className="p-1">{a.adm3}</td>
+                    <td className="p-1 text-right text-red-600">{a.score.toFixed(2)}</td>
                   </tr>
                 ))}
                 {topAreas.length > 5 && (
                   <tr>
-                    <td colSpan={4} className="text-center py-2">
-                      <button className="text-blue-600 text-sm hover:underline" onClick={() => setShowAllAreas(!showAllAreas)}>
-                        {showAllAreas ? "Show Less" : "Show More"}
+                    <td colSpan={4} className="text-center py-1">
+                      <button className="text-blue-600 text-xs hover:underline" onClick={() => setShowAll(!showAll)}>
+                        {showAll ? "Show Less" : "Show More"}
                       </button>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-
-            <h3 className="font-medium mb-2 mt-4">Category Breakdown</h3>
-            <div className="space-y-3">
-              {categories.map((cat, i) => (
-                <div key={i} className="border rounded-md">
-                  <div
-                    className="flex justify-between items-center bg-gray-100 px-3 py-2 cursor-pointer hover:bg-gray-200"
-                    onClick={() => setExpandedCategory(expandedCategory === cat.category ? null : cat.category)}
-                  >
-                    <span className="font-semibold">{cat.category}</span>
-                    <span className="text-sm text-blue-600">
-                      {(
-                        cat.datasets.reduce((a, d) => a + (d.avg || 0), 0) /
-                        (cat.datasets.length || 1)
-                      ).toFixed(2)}
-                    </span>
-                  </div>
-                  {expandedCategory === cat.category && (
-                    <table className="w-full text-sm border-t">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="p-2 text-left">Dataset</th>
-                          <th className="p-2 text-right">Min</th>
-                          <th className="p-2 text-right">Avg</th>
-                          <th className="p-2 text-right">Max</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {cat.datasets.map((ds, j) => (
-                          <tr key={j} className="border-t hover:bg-gray-50">
-                            <td className="p-2">{ds.name}</td>
-                            <td className="p-2 text-right">{ds.min?.toFixed(2) ?? "—"}</td>
-                            <td className="p-2 text-right text-blue-600">{ds.avg?.toFixed(2) ?? "—"}</td>
-                            <td className="p-2 text-right">{ds.max?.toFixed(2) ?? "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         </>
       )}
-
-      {showConfig && (
-        <InstanceDatasetConfigModal
-          instance={instance}
-          onClose={() => setShowConfig(false)}
-          onSaved={recomputeScores}
-        />
-      )}
-
-      {showAreaModal && (
-        <DefineAffectedAreaModal
-          instance={instance}
-          onClose={() => setShowAreaModal(false)}
-          onSaved={recomputeScores}
-        />
-      )}
+      {showConfig && <InstanceDatasetConfigModal instance={instance} onClose={() => setShowConfig(false)} onSaved={recompute} />}
+      {showArea && <DefineAffectedAreaModal instance={instance} onClose={() => setShowArea(false)} onSaved={recompute} />}
     </div>
   );
 }
 
-function SummaryCard({ title, value, color }: { title: string; value: any; color?: string }) {
+function Summary({ title, val, color }: { title: string; val: any; color?: string }) {
   return (
-    <div className="p-3 bg-gray-50 rounded text-center">
-      <p className="text-xs text-gray-500 uppercase">{title}</p>
-      <p className={`text-lg font-semibold ${color || ""}`}>
-        {value ? value.toLocaleString() : "—"}
-      </p>
+    <div className="p-2 bg-gray-50 rounded text-center">
+      <p className="text-xs text-gray-500">{title}</p>
+      <p className={`font-semibold ${color || ""}`}>{val ? val.toLocaleString() : "—"}</p>
     </div>
   );
 }
