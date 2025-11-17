@@ -18,7 +18,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
 
-  // Load instance
+  // Load instance details
   useEffect(() => {
     const loadInstance = async () => {
       const { data, error } = await supabase
@@ -32,7 +32,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [params.id]);
 
-  // Load scores
+  // Load scores table
   useEffect(() => {
     if (!instance) return;
     const loadScores = async () => {
@@ -48,6 +48,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadScores();
   }, [instance]);
 
+  // Map color scheme
   const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return "#ccc";
     if (score <= 1) return "#00b050";
@@ -57,35 +58,32 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return "#ff0000";
   };
 
-  // Load geometry (ADM3/ADM4)
-useEffect(() => {
-  const loadGeoms = async () => {
-    if (!instance?.admin_scope?.length) return;
-    const admScope = instance.admin_scope[instance.admin_scope.length - 1];
+  // Load geometries via RPC
+  useEffect(() => {
+    const loadGeoms = async () => {
+      if (!instance?.admin_scope?.length) return;
+      const admScope = instance.admin_scope[instance.admin_scope.length - 1];
 
-    // ✅ Updated RPC name — must match actual Postgres function
-    const { data, error } = await supabase.rpc("get_adm3_scores", {
-      p_admin_scope: admScope,
-    });
+      const { data, error } = await supabase.rpc("get_admin_geoms", {
+        p_parent_pcode: admScope,
+      });
 
-    if (error) {
-      console.error("Error loading geoms:", error);
-      return;
-    }
+      if (error) {
+        console.error("Error loading geoms:", error);
+        return;
+      }
 
-    // ✅ Safe join between geometry and current scores
-    const joined = (data || []).map((d: any) => ({
-      ...d,
-      geom_json: typeof d.geom_json === "string" ? JSON.parse(d.geom_json) : d.geom_json,
-      score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
-    }));
+      const joined = (data || []).map((d: any) => ({
+        ...d,
+        score: d.score ?? scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
+      }));
 
-    setFeatures(joined);
-  };
-  loadGeoms();
-}, [instance, scores]);
+      setFeatures(joined);
+    };
+    loadGeoms();
+  }, [instance, scores]);
 
-  // Recompute scores
+  // Recompute scores RPC
   const recomputeScores = async () => {
     await supabase.rpc("score_instance_overall", { in_instance: instance.id });
     const { data, error } = await supabase
@@ -144,24 +142,23 @@ useEffect(() => {
               >
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 {features.map((f, i) => {
-                  let geom;
                   try {
-                    geom = f.geom_json;
-                  } catch {
+                    return (
+                      <GeoJSON
+                        key={i}
+                        data={f.geom_json}
+                        style={{
+                          color: "#333",
+                          weight: 0.5,
+                          fillOpacity: 0.8,
+                          fillColor: colorForScore(f.score),
+                        }}
+                      />
+                    );
+                  } catch (err) {
+                    console.error("Invalid geometry:", err);
                     return null;
                   }
-                  return (
-                    <GeoJSON
-                      key={i}
-                      data={geom}
-                      style={{
-                        color: "#333",
-                        weight: 0.5,
-                        fillOpacity: 0.8,
-                        fillColor: colorForScore(f.score),
-                      }}
-                    />
-                  );
                 })}
               </MapContainer>
             )}
