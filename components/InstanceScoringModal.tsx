@@ -32,12 +32,83 @@ export default function InstanceScoringModal({
     'Underlying Vulnerability',
   ];
 
-  // Load datasets + weights
+  // Snap any number to nearest step (5%)
+  const snapToStep = (value: number, step = 5) => Math.round(value / step) * step;
+
+  // Normalize datasets within a category — increments of 5, total 100%
+  const normalizeCategory = (cat: string) => {
+    const ds = categories[cat].datasets;
+    const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
+    if (total === 0) return;
+
+    const newWeights = { ...weights };
+    const step = 5;
+
+    let sum = 0;
+    ds.forEach((d) => {
+      newWeights[d.id] = snapToStep((weights[d.id] / total) * 100, step);
+      sum += newWeights[d.id];
+    });
+
+    const diff = 100 - sum;
+    if (diff !== 0 && ds.length > 0) {
+      const largest = ds.reduce((a, b) =>
+        (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
+      );
+      newWeights[largest.id] = Math.max(
+        0,
+        Math.min(100, newWeights[largest.id] + diff)
+      );
+    }
+
+    setWeights(newWeights);
+  };
+
+  // Normalize all categories to total 100% — increments of 5, total = 100%
+  const normalizeAllCategories = () => {
+    const total = Object.values(categories).reduce((sum, c) => sum + (c.categoryWeight || 0), 0);
+    if (total === 0) return;
+
+    const newCats = { ...categories };
+    const step = 5;
+
+    let sum = 0;
+    Object.keys(newCats).forEach((cat) => {
+      newCats[cat].categoryWeight = snapToStep(
+        (newCats[cat].categoryWeight / total) * 100,
+        step
+      );
+      sum += newCats[cat].categoryWeight;
+    });
+
+    const diff = 100 - sum;
+    if (diff !== 0) {
+      const largestCat = Object.keys(newCats).reduce((a, b) =>
+        newCats[a].categoryWeight > newCats[b].categoryWeight ? a : b
+      );
+      newCats[largestCat].categoryWeight = Math.max(
+        0,
+        Math.min(100, newCats[largestCat].categoryWeight + diff)
+      );
+    }
+
+    setCategories(newCats);
+  };
+
+  const handleWeightChange = (datasetId: string, value: number) => {
+    setWeights(prev => ({ ...prev, [datasetId]: Math.max(0, value) }));
+  };
+
+  const handleCategoryWeightChange = (cat: string, value: number) => {
+    const updated = { ...categories };
+    updated[cat].categoryWeight = Math.max(0, value);
+    setCategories(updated);
+  };
+
+  // Load instance datasets & saved weights
   useEffect(() => {
     if (!instance?.id) return;
-
     const load = async () => {
-      // Get datasets by instance
       const { data: datasets, error: dsErr } = await supabase
         .from('instance_datasets')
         .select('dataset_id, datasets (id, name, category)')
@@ -54,20 +125,16 @@ export default function InstanceScoringModal({
         category: d.datasets.category || 'Uncategorized',
       }));
 
-      // Get existing weights if any
-      const { data: savedWeights, error: wtErr } = await supabase
+      const { data: savedWeights } = await supabase
         .from('instance_scoring_weights')
         .select('*')
         .eq('instance_id', instance.id);
-
-      if (wtErr) console.error('Weight load error:', wtErr);
 
       const weightMap: Record<string, number> = {};
       (savedWeights || []).forEach((w: any) => {
         weightMap[w.dataset_id] = (w.dataset_weight ?? 0) * 100;
       });
 
-      // Group datasets by category
       const grouped: Record<string, { name: string; datasets: any[]; categoryWeight: number }> = {};
       for (const d of flat) {
         const cat = d.category;
@@ -75,7 +142,6 @@ export default function InstanceScoringModal({
         grouped[cat].datasets.push(d);
       }
 
-      // Sort categories
       const sorted = Object.fromEntries(
         Object.entries(grouped).sort((a, b) => {
           const ai = CATEGORY_ORDER.indexOf(a[0]);
@@ -87,7 +153,6 @@ export default function InstanceScoringModal({
         })
       );
 
-      // Default even weights
       const numCats = Object.keys(sorted).length;
       Object.keys(sorted).forEach(cat => {
         sorted[cat].categoryWeight = 100 / numCats;
@@ -99,40 +164,10 @@ export default function InstanceScoringModal({
 
       setCategories(sorted);
       setWeights(weightMap);
+      normalizeAllCategories();
     };
     load();
   }, [instance]);
-
-  // Normalize within a category (dataset weights)
-  const normalizeCategory = (cat: string) => {
-    const ds = categories[cat].datasets;
-    const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
-    if (total === 0) return;
-    const newWeights = { ...weights };
-    ds.forEach(d => (newWeights[d.id] = (weights[d.id] / total) * 100));
-    setWeights(newWeights);
-  };
-
-  // Normalize all categories to total 100%
-  const normalizeAllCategories = () => {
-    const total = Object.values(categories).reduce((sum, c) => sum + (c.categoryWeight || 0), 0);
-    if (total === 0) return;
-    const newCats = { ...categories };
-    Object.keys(newCats).forEach(cat => {
-      newCats[cat].categoryWeight = (newCats[cat].categoryWeight / total) * 100;
-    });
-    setCategories(newCats);
-  };
-
-  const handleWeightChange = (datasetId: string, value: number) => {
-    setWeights(prev => ({ ...prev, [datasetId]: Math.max(0, value) }));
-  };
-
-  const handleCategoryWeightChange = (cat: string, value: number) => {
-    const updated = { ...categories };
-    updated[cat].categoryWeight = Math.max(0, value);
-    setCategories(updated);
-  };
 
   const handleSave = async () => {
     setLoading(true);
@@ -172,7 +207,6 @@ export default function InstanceScoringModal({
           Adjust weights per dataset and category. All levels auto-balance to 100%.
         </p>
 
-        {/* Aggregation method */}
         <div className="mb-4">
           <label className="block text-xs font-medium mb-1">Aggregation method</label>
           <select
@@ -187,22 +221,6 @@ export default function InstanceScoringModal({
           </select>
         </div>
 
-        {method === 'custom' && (
-          <div className="mb-4">
-            <label className="block text-xs font-medium mb-1">Custom threshold (0–1)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="1"
-              value={threshold}
-              onChange={e => setThreshold(parseFloat(e.target.value))}
-              className="border border-gray-300 rounded px-2 py-1 w-full text-sm"
-            />
-          </div>
-        )}
-
-        {/* Category panels */}
         {Object.entries(categories).map(([cat, obj]) => (
           <div key={cat} className="mb-3 border rounded p-2 bg-gray-50">
             <div className="flex justify-between items-center mb-2">
@@ -211,10 +229,10 @@ export default function InstanceScoringModal({
                 <span className="text-gray-500">Category Weight:</span>
                 <input
                   type="number"
-                  step="1"
+                  step="5"
                   min="0"
                   max="100"
-                  value={obj.categoryWeight}
+                  value={Math.round(obj.categoryWeight)}
                   onChange={e => handleCategoryWeightChange(cat, parseFloat(e.target.value))}
                   onBlur={normalizeAllCategories}
                   className="w-16 border rounded px-1 py-0.5 text-right"
@@ -229,10 +247,10 @@ export default function InstanceScoringModal({
                 <div className="flex gap-1 items-center">
                   <input
                     type="number"
-                    step="1"
+                    step="5"
                     min="0"
                     max="100"
-                    value={weights[d.id] ?? 0}
+                    value={Math.round(weights[d.id] ?? 0)}
                     onChange={e => handleWeightChange(d.id, parseFloat(e.target.value))}
                     onBlur={() => normalizeCategory(cat)}
                     className="w-16 text-sm border rounded px-1 py-0.5 text-right"
@@ -244,7 +262,6 @@ export default function InstanceScoringModal({
           </div>
         ))}
 
-        {/* Footer */}
         <div className="flex justify-end gap-2 mt-4">
           <button onClick={onClose} className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-100">
             Cancel
