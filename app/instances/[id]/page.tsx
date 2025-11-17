@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
+import { supabase } from '@/lib/supabaseClient';
 
-const Map = dynamic(() => import('@/components/MapView'), { ssr: false });
+// ✅ Dynamic React-Leaflet imports (so no MapView dependency)
+const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
@@ -15,44 +18,36 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [mostAffected, setMostAffected] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fetch instance and its data
+  // Load instance + data + scoring summary
   useEffect(() => {
     const load = async () => {
       setLoading(true);
 
-      const { data: inst } = await supabase
-        .from('instances')
-        .select('*')
-        .eq('id', params.id)
-        .single();
+      const { data: inst } = await supabase.from('instances').select('*').eq('id', params.id).single();
       setInstance(inst);
 
-      // 1️⃣ Scoring RPC
-      const { data: scoringData, error: scoringError } = await supabase.rpc(
-        'score_instance_overall',
-        { in_instance_id: params.id }
-      );
+      // Run scoring RPC
+      const { data: scoringData, error: scoringError } = await supabase.rpc('score_instance_overall', {
+        in_instance_id: params.id,
+      });
       if (scoringError) console.error('Scoring RPC error:', scoringError);
       else setScoringSummary(scoringData?.summary ?? scoringData ?? {});
 
-      // 2️⃣ Affected areas
+      // Affected areas
       const { data: affected } = await supabase
         .from('v_instance_affected_areas')
-        .select('admin_pcode, name')
+        .select('admin_pcode,name')
         .eq('instance_id', params.id);
       setAffectedAreas(affected || []);
 
-      // 3️⃣ Category breakdown
-      const { data: cat } = await supabase
-        .from('v_category_scores')
-        .select('*')
-        .eq('instance_id', params.id);
+      // Category scores
+      const { data: cat } = await supabase.from('v_category_scores').select('*').eq('instance_id', params.id);
       setCategoryScores(cat || []);
 
-      // 4️⃣ Most affected ADM3s
+      // Most affected ADM3s
       const { data: adm3 } = await supabase
         .from('v_instance_admin_scores')
-        .select('admin_pcode, name, avg_score')
+        .select('admin_pcode,name,avg_score')
         .eq('instance_id', params.id)
         .order('avg_score', { ascending: false })
         .limit(10);
@@ -60,24 +55,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       setLoading(false);
     };
-
     load();
   }, [params.id]);
 
-  if (loading)
-    return (
-      <div className="p-6 text-center text-gray-500 text-sm">
-        Loading instance data…
-      </div>
-    );
+  if (loading) return <div className="p-6 text-center text-gray-500 text-sm">Loading instance data…</div>;
 
   return (
     <div className="space-y-4 p-4 text-gray-800 text-sm">
-      <h1 className="text-lg font-semibold">
-        {instance?.name || 'Unnamed Instance'}
-      </h1>
+      <h1 className="text-lg font-semibold">{instance?.name || 'Unnamed Instance'}</h1>
 
-      {/* ⚙️ Scoring Diagnostics */}
+      {/* ⚙️ Scoring Summary */}
       <div className="bg-gray-50 border rounded p-3 space-y-1 text-xs">
         <h2 className="font-medium text-gray-700">Scoring Diagnostics</h2>
         {scoringSummary ? (
@@ -86,9 +73,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <p>Affected Areas: {scoringSummary.affected_count ?? '–'}</p>
             <p>Out of Scope: {scoringSummary.out_of_scope ?? '–'}</p>
             <p>
-              Score Range:{' '}
-              {scoringSummary.min_score ?? '–'} –{' '}
-              {scoringSummary.max_score ?? '–'}
+              Score Range: {scoringSummary.min_score ?? '–'} – {scoringSummary.max_score ?? '–'}
             </p>
             <p>Average Score: {scoringSummary.avg_score ?? '–'}</p>
           </>
@@ -97,7 +82,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         )}
       </div>
 
-      {/* 🌍 Map Section */}
+      {/* 🌍 Map */}
       <div className="border rounded p-2 bg-white">
         <div className="flex items-center justify-between mb-1">
           <h2 className="font-medium text-gray-700 text-sm">Affected Area Map</h2>
@@ -108,21 +93,24 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             {lockZoom ? '🔒 Locked' : '🔓 Unlocked'}
           </button>
         </div>
-        <Map instanceId={params.id} lockZoom={lockZoom} />
+        <MapContainer
+          center={[12.8797, 121.774]} // Philippines center
+          zoom={6}
+          style={{ height: '400px', width: '100%' }}
+          scrollWheelZoom={!lockZoom}
+        >
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          {/* Optional placeholder – later we’ll overlay affected ADM3 polygons */}
+        </MapContainer>
       </div>
 
       {/* 🧩 Category Breakdown */}
       <div className="border rounded p-3 bg-white">
-        <h2 className="font-medium text-gray-700 mb-2 text-sm">
-          Category Breakdown
-        </h2>
+        <h2 className="font-medium text-gray-700 mb-2 text-sm">Category Breakdown</h2>
         {categoryScores.length > 0 ? (
           <div className="space-y-1">
             {categoryScores.map((c, i) => (
-              <div
-                key={i}
-                className="flex justify-between items-center border-b last:border-none pb-1"
-              >
+              <div key={i} className="flex justify-between items-center border-b last:border-none pb-1">
                 <span className="text-gray-700">{c.category}</span>
                 <span className="font-semibold">{c.avg_score?.toFixed(2)}</span>
               </div>
@@ -135,17 +123,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       {/* 📊 Most Affected Areas */}
       <div className="border rounded p-3 bg-white">
-        <h2 className="font-medium text-gray-700 mb-2 text-sm">
-          Most Affected Areas
-        </h2>
+        <h2 className="font-medium text-gray-700 mb-2 text-sm">Most Affected Areas</h2>
         {mostAffected.length > 0 ? (
           <>
             <ul className="space-y-1">
               {mostAffected.slice(0, 5).map((a, i) => (
-                <li
-                  key={i}
-                  className="flex justify-between items-center text-xs border-b last:border-none pb-1"
-                >
+                <li key={i} className="flex justify-between items-center text-xs border-b last:border-none pb-1">
                   <span>{a.name || a.admin_pcode}</span>
                   <span className="font-semibold">{a.avg_score?.toFixed(2)}</span>
                 </li>
@@ -153,9 +136,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </ul>
             {mostAffected.length > 5 && (
               <div className="text-center mt-2">
-                <button className="text-blue-600 hover:underline text-xs">
-                  Show more
-                </button>
+                <button className="text-blue-600 hover:underline text-xs">Show more</button>
               </div>
             )}
           </>
@@ -164,7 +145,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         )}
       </div>
 
-      {/* Debug Output */}
+      {/* 🧠 Debug Panel */}
       <pre className="text-[10px] bg-gray-50 p-2 rounded border overflow-x-auto text-gray-600">
         {JSON.stringify(
           {
