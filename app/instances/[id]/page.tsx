@@ -19,6 +19,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [topAreas, setTopAreas] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
 
   // Load instance metadata
   useEffect(() => {
@@ -34,7 +35,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [params.id]);
 
-  // Load instance scores
+  // Load scores
   useEffect(() => {
     if (!instance) return;
     const loadScores = async () => {
@@ -50,7 +51,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadScores();
   }, [instance]);
 
-  // Map color scale
+  // Color scale
   const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return "#ccc";
     if (score <= 1) return "#00b050";
@@ -60,7 +61,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return "#ff0000";
   };
 
-  // Load geometry for affected admin units
+  // Load geometries
   useEffect(() => {
     const loadGeoms = async () => {
       if (!instance?.admin_scope?.length) return;
@@ -85,7 +86,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadGeoms();
   }, [instance, scores]);
 
-  // Recompute scores (aggregate)
+  // Recompute scores
   const recomputeScores = async () => {
     const { error } = await supabase.rpc("score_instance_overall", { in_instance: instance.id });
     if (error) console.error("Error recomputing scores:", error);
@@ -98,12 +99,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
-  // Load summary analytics
+  // Load summary analytics + category breakdown
   useEffect(() => {
     if (!instance) return;
     const loadSummary = async () => {
       try {
-        // Find population dataset dynamically
+        // 1️⃣ Find population dataset dynamically
         const { data: popDataset } = await supabase
           .from("datasets")
           .select("id")
@@ -120,7 +121,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           population_total = popVals?.reduce((sum, d) => sum + (d.value || 0), 0) || 0;
         }
 
-        // Load all scored values for the instance
+        // 2️⃣ Load all scores
         const { data: scored } = await supabase
           .from("scored_instance_values")
           .select("pcode, score")
@@ -141,6 +142,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           people_need,
         });
 
+        // 3️⃣ Top areas
         const { data: top } = await supabase
           .from("scored_instance_values")
           .select("pcode, score")
@@ -148,6 +150,34 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .order("score", { ascending: false })
           .limit(5);
         setTopAreas(top || []);
+
+        // 4️⃣ Category Breakdown (SSC Pillars, Hazard, etc.)
+        const { data: catBreakdown, error: catErr } = await supabase
+          .from("scored_instance_values")
+          .select(`
+            score,
+            dataset_id,
+            datasets(category)
+          `)
+          .eq("instance_id", instance.id);
+
+        if (!catErr && catBreakdown?.length) {
+          const grouped = catBreakdown.reduce((acc: any, row: any) => {
+            const cat = row.datasets?.category || "Uncategorized";
+            if (!acc[cat]) acc[cat] = [];
+            acc[cat].push(row.score || 0);
+            return acc;
+          }, {});
+
+          const result = Object.keys(grouped).map((cat) => ({
+            category: cat,
+            avg_score:
+              grouped[cat].reduce((a: number, b: number) => a + b, 0) /
+              grouped[cat].length,
+          }));
+
+          setCategories(result);
+        }
       } catch (err) {
         console.error("Error loading summary:", err);
       }
@@ -263,7 +293,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </div>
 
             <h3 className="font-medium mb-2">Most Affected Areas</h3>
-            <table className="w-full text-sm border">
+            <table className="w-full text-sm border mb-6">
               <thead className="bg-gray-100 text-left">
                 <tr>
                   <th className="p-2">Area</th>
@@ -284,6 +314,35 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   <tr>
                     <td colSpan={2} className="p-2 text-center text-gray-500">
                       No data
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            {/* Category Breakdown */}
+            <h3 className="font-medium mb-2">Category Breakdown</h3>
+            <table className="w-full text-sm border">
+              <thead className="bg-gray-100 text-left">
+                <tr>
+                  <th className="p-2">Category</th>
+                  <th className="p-2 text-right">Average Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categories?.length ? (
+                  categories.map((c, i) => (
+                    <tr key={i} className="border-t hover:bg-gray-50">
+                      <td className="p-2">{c.category}</td>
+                      <td className="p-2 text-right font-medium text-blue-600">
+                        {c.avg_score.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={2} className="p-2 text-center text-gray-500">
+                      No category data
                     </td>
                   </tr>
                 )}
