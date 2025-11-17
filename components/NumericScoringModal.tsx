@@ -1,176 +1,142 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+interface Props {
+  dataset: any;
+  instance: any;
+  onClose: () => void;
+  onSaved?: () => void;
+}
 
-export default function NumericScoringModal({ dataset, instance, onClose }) {
-  const [method, setMethod] = useState<"threshold" | "normalize">("normalize");
-  const [thresholds, setThresholds] = useState<
-    { min: string; max: string; score: string }[]
-  >([{ min: "", max: "", score: "" }]);
-  const [normalizeMax, setNormalizeMax] = useState(5);
-  const [higherIsWorse, setHigherIsWorse] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+export default function NumericScoringModal({ dataset, instance, onClose, onSaved }: Props) {
+  const [method, setMethod] = useState<"Thresholds" | "Normalization">("Thresholds");
+  const [ranges, setRanges] = useState<{ min: number | null; max: number | null; score: number | null }[]>([
+    { min: 0, max: null, score: null },
+  ]);
+  const [scale, setScale] = useState(5);
+  const [inverse, setInverse] = useState(false);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const loadConfig = async () => {
-      const { data, error } = await supabase
-        .from("instance_dataset_config")
-        .select("*")
-        .eq("instance_id", instance.id)
-        .eq("dataset_id", dataset.id)
-        .maybeSingle();
-      if (error) {
-        console.error(error);
-        return;
-      }
-      if (data) {
-        if (data.scoring_method) setMethod(data.scoring_method);
-        if (data.thresholds) setThresholds(data.thresholds);
-        if (data.normalize_max) setNormalizeMax(data.normalize_max);
-        if (data.higher_is_worse !== null)
-          setHigherIsWorse(data.higher_is_worse);
-      }
-    };
-    loadConfig();
-  }, [dataset.id, instance.id]);
+  const addRange = () => setRanges([...ranges, { min: null, max: null, score: null }]);
+  const removeRange = (i: number) => setRanges(ranges.filter((_, idx) => idx !== i));
 
-  const addThreshold = () => {
-    setThresholds([...thresholds, { min: "", max: "", score: "" }]);
-  };
-
-  const removeThreshold = (i: number) => {
-    const next = [...thresholds];
-    next.splice(i, 1);
-    setThresholds(next);
+  const updateRange = (i: number, field: keyof (typeof ranges)[0], value: any) => {
+    const next = [...ranges];
+    next[i][field] = value === "" ? null : Number(value);
+    setRanges(next);
   };
 
   const saveConfig = async () => {
-    setSaving(true);
-    const payload = {
-      instance_id: instance.id,
-      dataset_id: dataset.id,
-      scoring_method: method,
-      thresholds: method === "threshold" ? thresholds : null,
-      normalize_max: method === "normalize" ? normalizeMax : null,
-      higher_is_worse: method === "normalize" ? higherIsWorse : null,
-    };
-
+    setMessage("Saving configuration...");
     const { error } = await supabase
       .from("instance_dataset_config")
-      .upsert(payload, { onConflict: "instance_id,dataset_id" });
+      .upsert({
+        instance_id: instance.id,
+        dataset_id: dataset.id,
+        score_method: method.toLowerCase(),
+        score_config:
+          method === "Thresholds"
+            ? { ranges }
+            : { scale, inverse },
+      });
 
-    setSaving(false);
-    if (error) {
-      console.error(error);
-      setStatus("Error saving config: " + error.message);
-    } else {
-      setStatus("✅ Configuration saved");
+    if (error) setMessage("❌ Error saving config: " + error.message);
+    else setMessage("✅ Config saved!");
+  };
+
+  const applyScoring = async () => {
+    setLoading(true);
+    setMessage("Running scoring...");
+
+    try {
+      if (method === "Thresholds") {
+        const { error } = await supabase.rpc("score_numeric_thresholds", {
+          in_instance_id: instance.id,
+          in_dataset_id: dataset.id,
+          in_rules: JSON.stringify(ranges),
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.rpc("score_numeric_normalized", {
+          in_instance_id: instance.id,
+          in_dataset_id: dataset.id,
+          in_scale_max: scale,
+          in_inverse: inverse,
+        });
+        if (error) throw error;
+      }
+
+      setMessage("✅ Scoring complete!");
+      if (onSaved) onSaved();
+    } catch (err: any) {
+      setMessage("Error running scoring: " + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const runScoring = async () => {
-    setSaving(true);
-    setStatus("Scoring in progress...");
-
-    const rpcName =
-      method === "threshold"
-        ? "score_numeric_threshold"
-        : "score_numeric_normalized";
-
-    const { error } = await supabase.rpc(rpcName, {
-      instance_id: instance.id,
-      dataset_id: dataset.id,
-    });
-
-    setSaving(false);
-    if (error) setStatus("Error running scoring: " + error.message);
-    else setStatus("✅ Scoring complete!");
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg shadow-lg w-[700px] p-6 overflow-y-auto max-h-[90vh]">
-        <h3 className="text-lg font-semibold mb-3">{dataset.name}</h3>
+    <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center">
+      <div className="bg-white rounded-lg shadow-xl w-[700px] p-6 space-y-4">
+        <h2 className="text-lg font-semibold mb-2">{dataset.name}</h2>
 
-        {/* Method selector */}
-        <div className="mb-4">
-          <label className="font-medium mr-3">Scoring Method:</label>
+        <div className="space-y-2">
+          <label className="block text-sm font-medium">Scoring Method:</label>
           <select
             value={method}
-            onChange={(e) =>
-              setMethod(e.target.value as "threshold" | "normalize")
-            }
-            className="border rounded px-2 py-1"
+            onChange={(e) => setMethod(e.target.value as any)}
+            className="border rounded p-2 w-full"
           >
-            <option value="normalize">Normalization</option>
-            <option value="threshold">Thresholds</option>
+            <option>Thresholds</option>
+            <option>Normalization</option>
           </select>
         </div>
 
-        {/* Threshold mode */}
-        {method === "threshold" && (
-          <div className="mb-6">
-            <table className="w-full text-sm border border-gray-200 mb-3">
+        {method === "Thresholds" && (
+          <div className="space-y-3">
+            <table className="w-full text-sm border">
               <thead className="bg-gray-100">
                 <tr>
-                  <th className="p-2 text-left w-24">Min</th>
-                  <th className="p-2 text-left w-24">Max</th>
-                  <th className="p-2 text-left w-20">Score</th>
-                  <th className="p-2 w-12"></th>
+                  <th className="p-2">Min</th>
+                  <th className="p-2">Max</th>
+                  <th className="p-2">Score</th>
+                  <th className="p-2"></th>
                 </tr>
               </thead>
               <tbody>
-                {thresholds.map((t, i) => (
-                  <tr key={i} className="border-t">
+                {ranges.map((r, i) => (
+                  <tr key={i}>
                     <td className="p-1">
                       <input
                         type="number"
-                        value={t.min}
-                        onChange={(e) => {
-                          const next = [...thresholds];
-                          next[i].min = e.target.value;
-                          setThresholds(next);
-                        }}
-                        className="w-full border rounded px-1 text-center"
+                        value={r.min ?? ""}
+                        onChange={(e) => updateRange(i, "min", e.target.value)}
+                        className="w-full border rounded p-1"
                       />
                     </td>
                     <td className="p-1">
                       <input
                         type="number"
-                        value={t.max}
-                        onChange={(e) => {
-                          const next = [...thresholds];
-                          next[i].max = e.target.value;
-                          setThresholds(next);
-                        }}
-                        className="w-full border rounded px-1 text-center"
+                        value={r.max ?? ""}
+                        onChange={(e) => updateRange(i, "max", e.target.value)}
+                        className="w-full border rounded p-1"
                       />
                     </td>
                     <td className="p-1">
                       <input
                         type="number"
-                        min={1}
-                        max={5}
-                        value={t.score}
-                        onChange={(e) => {
-                          const next = [...thresholds];
-                          next[i].score = e.target.value;
-                          setThresholds(next);
-                        }}
-                        className="w-full border rounded px-1 text-center"
+                        value={r.score ?? ""}
+                        onChange={(e) => updateRange(i, "score", e.target.value)}
+                        className="w-full border rounded p-1"
                       />
                     </td>
-                    <td className="p-1 text-center">
+                    <td className="text-center">
                       <button
-                        onClick={() => removeThreshold(i)}
-                        className="text-red-600 hover:underline"
+                        onClick={() => removeRange(i)}
+                        className="text-red-500 hover:text-red-700"
                       >
                         ✕
                       </button>
@@ -180,65 +146,60 @@ export default function NumericScoringModal({ dataset, instance, onClose }) {
               </tbody>
             </table>
             <button
-              onClick={addThreshold}
-              className="bg-gray-200 text-sm px-3 py-1 rounded hover:bg-gray-300"
+              onClick={addRange}
+              className="text-blue-600 text-sm mt-1 hover:underline"
             >
               + Add Range
             </button>
           </div>
         )}
 
-        {/* Normalization mode */}
-        {method === "normalize" && (
-          <div className="mb-6 space-y-3">
+        {method === "Normalization" && (
+          <div className="space-y-3">
             <div>
-              <label className="font-medium mr-3">Scale (max score):</label>
+              <label className="block text-sm font-medium mb-1">Scale (max score):</label>
               <select
-                value={normalizeMax}
-                onChange={(e) => setNormalizeMax(Number(e.target.value))}
-                className="border rounded px-2 py-1"
+                value={scale}
+                onChange={(e) => setScale(Number(e.target.value))}
+                className="border rounded p-2 w-full"
               >
                 <option value={3}>1–3</option>
-                <option value={4}>1–4</option>
                 <option value={5}>1–5</option>
+                <option value={10}>1–10</option>
               </select>
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center space-x-2">
               <input
                 type="checkbox"
-                checked={higherIsWorse}
-                onChange={(e) => setHigherIsWorse(e.target.checked)}
-                className="mr-2"
+                checked={inverse}
+                onChange={(e) => setInverse(e.target.checked)}
               />
               <label>Higher values mean more vulnerability</label>
             </div>
           </div>
         )}
 
-        {/* Status */}
-        {status && <p className="text-sm text-gray-700 mb-3">{status}</p>}
+        {message && <div className="text-sm text-gray-700 mt-2">{message}</div>}
 
-        {/* Buttons */}
-        <div className="flex justify-end space-x-3">
+        <div className="flex justify-end space-x-2 mt-4">
           <button
             onClick={onClose}
-            className="px-4 py-2 border border-gray-400 rounded hover:bg-gray-100"
+            className="px-4 py-2 border rounded hover:bg-gray-100"
           >
             Cancel
           </button>
           <button
             onClick={saveConfig}
-            disabled={saving}
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-60"
+            className="px-4 py-2 border rounded bg-blue-600 text-white hover:bg-blue-700"
           >
             Save Config
           </button>
           <button
-            onClick={runScoring}
-            disabled={saving}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-60"
+            onClick={applyScoring}
+            disabled={loading}
+            className="px-4 py-2 border rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
           >
-            Apply Scoring
+            {loading ? "Scoring..." : "Apply Scoring"}
           </button>
         </div>
       </div>
