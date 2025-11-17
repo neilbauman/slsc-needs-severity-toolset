@@ -1,5 +1,5 @@
 "use client";
- 
+
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseClient";
