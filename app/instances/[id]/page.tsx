@@ -49,7 +49,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       if (!instance?.id) return;
       const { data, error } = await supabase
         .from('v_instance_affected_areas')
-        .select('admin_pcode,name,geom_json,avg_score')
+        .select('admin_pcode,name,geom_json')
         .eq('instance_id', instance.id);
       if (error) console.error('Error loading affected areas:', error);
       else setFeatures(data || []);
