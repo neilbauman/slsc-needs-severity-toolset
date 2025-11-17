@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface InstanceScoringModalProps {
   instance: any;
@@ -13,12 +14,15 @@ interface Dataset {
   id: string;
   name: string;
   type: string;
+  adm_level?: string;
+  rollup_method?: string;
   weight: number;
 }
 
 interface Category {
   category: string;
   active: boolean;
+  expanded: boolean;
   weight: number;
   datasets: Dataset[];
 }
@@ -40,11 +44,21 @@ export default function InstanceScoringModal({
     const load = async () => {
       const { data, error } = await supabase
         .from('instance_datasets_view')
-        .select('dataset_id,dataset_name,category,type')
+        .select('dataset_id,dataset_name,category,type,adm_level,rollup_method')
         .eq('instance_id', instance.id);
 
       if (error) {
         console.error('Error loading instance datasets:', error);
+        // Create placeholder so UI renders
+        setCategories([
+          {
+            category: 'SSC Framework - P1',
+            active: true,
+            expanded: true,
+            weight: 1,
+            datasets: [],
+          },
+        ]);
         return;
       }
 
@@ -55,38 +69,47 @@ export default function InstanceScoringModal({
           id: d.dataset_id,
           name: d.dataset_name,
           type: d.type,
+          adm_level: d.adm_level || 'ADM3',
+          rollup_method: d.rollup_method || 'direct',
           weight: 1,
         });
       });
 
-      const catArray: Category[] = Object.keys(grouped).map((cat) => ({
-        category: cat,
-        active: true,
-        weight: 1,
-        datasets: grouped[cat],
-      }));
-
-      setCategories(catArray);
+      setCategories(
+        Object.keys(grouped).map((cat) => ({
+          category: cat,
+          active: true,
+          expanded: true,
+          weight: 1,
+          datasets: grouped[cat],
+        }))
+      );
     };
     if (instance?.id) load();
   }, [instance]);
 
-  // Toggle category inclusion
-  const toggleCategory = (cat: string) => {
+  const toggleCategory = (cat: string) =>
     setCategories((prev) =>
-      prev.map((c) => (c.category === cat ? { ...c, active: !c.active } : c))
+      prev.map((c) =>
+        c.category === cat ? { ...c, active: !c.active } : c
+      )
     );
-  };
 
-  // Adjust category weight
-  const updateCategoryWeight = (cat: string, newWeight: number) => {
+  const toggleExpand = (cat: string) =>
     setCategories((prev) =>
-      prev.map((c) => (c.category === cat ? { ...c, weight: newWeight } : c))
+      prev.map((c) =>
+        c.category === cat ? { ...c, expanded: !c.expanded } : c
+      )
     );
-  };
 
-  // Adjust dataset weight
-  const updateDatasetWeight = (cat: string, dsId: string, newWeight: number) => {
+  const updateCategoryWeight = (cat: string, newWeight: number) =>
+    setCategories((prev) =>
+      prev.map((c) =>
+        c.category === cat ? { ...c, weight: newWeight } : c
+      )
+    );
+
+  const updateDatasetWeight = (cat: string, dsId: string, newWeight: number) =>
     setCategories((prev) =>
       prev.map((c) =>
         c.category === cat
@@ -99,11 +122,9 @@ export default function InstanceScoringModal({
           : c
       )
     );
-  };
 
   const handleApply = async () => {
     setLoading(true);
-
     const activeCategories = categories.filter((c) => c.active);
     if (!activeCategories.length) {
       alert('Select at least one category to aggregate.');
@@ -111,7 +132,6 @@ export default function InstanceScoringModal({
       return;
     }
 
-    // Existing RPC call (weights are not yet persisted or applied)
     const { data, error } = await supabase.rpc('score_instance_overall', {
       in_instance_id: instance.id,
       in_method: method,
@@ -126,7 +146,6 @@ export default function InstanceScoringModal({
       return;
     }
 
-    console.log('Instance scoring complete:', data);
     if (onSaved) await onSaved();
     onClose();
     setLoading(false);
@@ -160,87 +179,83 @@ export default function InstanceScoringModal({
           </select>
         </div>
 
-        {/* Custom threshold */}
-        {method === 'custom' && (
-          <div className="mb-3">
-            <label className="block text-xs font-medium mb-1">
-              Custom threshold (% as decimal)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max="1"
-              value={threshold}
-              onChange={(e) => setThreshold(parseFloat(e.target.value))}
-              className="border border-gray-300 rounded px-3 py-2 w-full text-sm"
-            />
-          </div>
-        )}
-
-        {/* Calibration Tree */}
         <h3 className="font-medium mt-4 mb-2 text-gray-700 text-sm">Calibration Tree</h3>
-        <div className="border rounded-md max-h-[50vh] overflow-y-auto text-sm">
-          {categories.map((cat, i) => (
-            <div key={i} className="border-b last:border-b-0 p-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={cat.active}
-                    onChange={() => toggleCategory(cat.category)}
-                  />
-                  <span className="font-medium text-gray-800">{cat.category}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-gray-600">Weight:</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    value={cat.weight}
-                    onChange={(e) =>
-                      updateCategoryWeight(cat.category, parseFloat(e.target.value) || 0)
-                    }
-                    className="w-20 border border-gray-300 rounded px-1 py-0.5 text-right"
-                  />
-                </div>
-              </div>
 
-              <table className="w-full border-collapse ml-6 mb-1">
-                <thead>
-                  <tr className="text-gray-500 text-xs">
-                    <th className="text-left p-1 w-2/3">Dataset</th>
-                    <th className="text-left p-1">Type</th>
-                    <th className="text-right p-1 w-24">Weight</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cat.datasets.map((d) => (
-                    <tr key={d.id} className="hover:bg-gray-50">
-                      <td className="p-1 text-gray-800">{d.name}</td>
-                      <td className="p-1 text-gray-500 text-xs">{d.type}</td>
-                      <td className="p-1 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.1"
-                          value={d.weight}
-                          onChange={(e) =>
-                            updateDatasetWeight(cat.category, d.id, parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 border border-gray-300 rounded px-1 py-0.5 text-right"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
+        <div className="border rounded-md max-h-[50vh] overflow-y-auto text-sm bg-gray-50">
+          {categories.length === 0 ? (
+            <p className="text-center text-gray-500 p-4 text-sm">
+              No datasets available. Define datasets before calibration.
+            </p>
+          ) : (
+            categories.map((cat, i) => (
+              <div key={i} className="border-b last:border-b-0 p-2 bg-white">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => toggleExpand(cat.category)} className="text-gray-600">
+                      {cat.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                    <input
+                      type="checkbox"
+                      checked={cat.active}
+                      onChange={() => toggleCategory(cat.category)}
+                    />
+                    <span className="font-medium text-gray-800">{cat.category}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-600">Weight</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={cat.weight}
+                      onChange={(e) => updateCategoryWeight(cat.category, parseFloat(e.target.value))}
+                      className="w-16 border border-gray-300 rounded px-1 py-0.5 text-right"
+                    />
+                  </div>
+                </div>
+
+                {cat.expanded && cat.datasets.length > 0 && (
+                  <table className="w-full border-collapse ml-6 mt-2">
+                    <thead>
+                      <tr className="text-gray-500 text-xs">
+                        <th className="text-left p-1 w-1/2">Dataset</th>
+                        <th className="text-left p-1">ADM</th>
+                        <th className="text-left p-1">Rollup</th>
+                        <th className="text-right p-1 w-24">Weight</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cat.datasets.map((d) => (
+                        <tr key={d.id} className="hover:bg-gray-50">
+                          <td className="p-1 text-gray-800">{d.name}</td>
+                          <td className="p-1 text-xs text-gray-500">{d.adm_level}</td>
+                          <td className="p-1 text-xs text-gray-500">{d.rollup_method}</td>
+                          <td className="p-1 text-right">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={d.weight}
+                              onChange={(e) =>
+                                updateDatasetWeight(
+                                  cat.category,
+                                  d.id,
+                                  parseFloat(e.target.value)
+                                )
+                              }
+                              className="w-16 border border-gray-300 rounded px-1 py-0.5 text-right"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))
+          )}
         </div>
 
-        {/* Footer buttons */}
         <div className="flex justify-end space-x-3 mt-5">
           <button
             onClick={onClose}
