@@ -19,6 +19,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [topAreas, setTopAreas] = useState<any[]>([]);
+  const [showAllAreas, setShowAllAreas] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
@@ -52,7 +53,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadScores();
   }, [instance]);
 
-  // Color scale
   const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return "#ccc";
     if (score <= 1) return "#00b050";
@@ -87,7 +87,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadGeoms();
   }, [instance, scores]);
 
-  // Recompute scores
   const recomputeScores = async () => {
     const { error } = await supabase.rpc("score_instance_overall", { in_instance: instance.id });
     if (error) console.error("Error recomputing scores:", error);
@@ -100,13 +99,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
-  // Load summary analytics and top affected areas
+  // Load summary + top affected
   useEffect(() => {
     if (!instance) return;
 
     const loadSummaryAndTopAreas = async () => {
       try {
-        // Population + Average severity
         const { data: popDataset } = await supabase
           .from("datasets")
           .select("id")
@@ -143,25 +141,23 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           people_need,
         });
 
-        // Top affected areas
+        // Top affected
         const { data: topRaw } = await supabase
           .from("scored_instance_values")
           .select("pcode, score")
           .eq("instance_id", instance.id)
-          .order("score", { ascending: false })
-          .limit(10);
+          .order("score", { ascending: false });
 
         if (topRaw?.length) {
           const pcodes = topRaw.map((r) => r.pcode);
           const { data: boundaries } = await supabase
             .from("admin_boundaries")
-            .select("admin_pcode, name, parent_pcode, admin_level")
-            .in("admin_pcode", pcodes);
+            .select("admin_pcode, name, parent_pcode, admin_level");
 
-          // Build ADM1→3 hierarchy
           const resolveHierarchy = (b: any, all: any[]) => {
+            if (!b) return { adm1: null, adm2: null, adm3: null };
             const adm3 = b;
-            const adm2 = all.find((x) => x.admin_pcode === adm3?.parent_pcode);
+            const adm2 = all.find((x) => x.admin_pcode === adm3.parent_pcode);
             const adm1 = all.find((x) => x.admin_pcode === adm2?.parent_pcode);
             return {
               adm1: adm1?.name || null,
@@ -173,10 +169,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           const enriched = topRaw.map((r) => {
             const boundary = boundaries.find((b) => b.admin_pcode === r.pcode);
             const hierarchy = resolveHierarchy(boundary, boundaries);
-            return {
-              ...r,
-              ...hierarchy,
-            };
+            return { ...r, ...hierarchy };
           });
 
           setTopAreas(enriched);
@@ -189,6 +182,61 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadSummaryAndTopAreas();
   }, [instance, scores]);
 
+  // Category Breakdown Loader
+  useEffect(() => {
+    if (!instance) return;
+    const loadCategoryBreakdown = async () => {
+      const { data } = await supabase
+        .from("scored_instance_values")
+        .select(`
+          score,
+          dataset_id,
+          datasets(id, name, category, type)
+        `)
+        .eq("instance_id", instance.id);
+
+      if (data?.length) {
+        const grouped = data.reduce((acc: any, row: any) => {
+          const cat = row.datasets?.category || "Uncategorized";
+          if (!acc[cat]) acc[cat] = {};
+          const ds = row.datasets?.name || "Unnamed Dataset";
+          if (!acc[cat][ds]) acc[cat][ds] = [];
+          acc[cat][ds].push(row.score || 0);
+          return acc;
+        }, {});
+
+        const result = Object.keys(grouped).map((cat) => ({
+          category: cat,
+          datasets: Object.keys(grouped[cat]).map((ds) => {
+            const scores = grouped[cat][ds];
+            const valid = scores.filter((s: any) => s !== null);
+            const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+            return {
+              name: ds,
+              avg,
+              min: valid.length ? Math.min(...valid) : null,
+              max: valid.length ? Math.max(...valid) : null,
+              count: valid.length,
+            };
+          }),
+        }));
+
+        const order = [
+          "SSC Framework - P1",
+          "SSC Framework - P2",
+          "SSC Framework - P3",
+          "Hazard",
+          "Underlying Vulnerability",
+          "Uncategorized",
+        ];
+
+        result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
+        setCategories(result);
+      }
+    };
+    loadCategoryBreakdown();
+  }, [instance, scores]);
+
   return (
     <div className="p-6 space-y-4">
       {instance && (
@@ -197,7 +245,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-xl font-semibold">{instance.name}</h1>
-              <p className="text-gray-600 text-sm">{instance.description || "description"}</p>
+              <p className="text-gray-600 text-sm">
+                {instance.description || "description"}
+              </p>
             </div>
             <div className="flex gap-2">
               <button
@@ -275,36 +325,83 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
             {/* Most Affected Areas */}
             <h3 className="font-medium mb-2">Most Affected Areas</h3>
-            <table className="w-full text-sm border mb-6">
+            <table className="w-full text-sm border mb-2">
               <thead className="bg-gray-100 text-left">
                 <tr>
-                  <th className="p-2">Area (ADM3)</th>
-                  <th className="p-2">Province (ADM2)</th>
                   <th className="p-2">Region (ADM1)</th>
+                  <th className="p-2">Province (ADM2)</th>
+                  <th className="p-2">Municipality (ADM3)</th>
                   <th className="p-2 text-right">Score</th>
                 </tr>
               </thead>
               <tbody>
-                {topAreas?.length ? (
-                  topAreas.map((a, i) => (
-                    <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="p-2">{a.adm3 || a.pcode}</td>
-                      <td className="p-2">{a.adm2 || "—"}</td>
-                      <td className="p-2">{a.adm1 || "—"}</td>
-                      <td className="p-2 text-right font-medium text-red-600">
-                        {a.score?.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
+                {(showAllAreas ? topAreas : topAreas.slice(0, 5))?.map((a, i) => (
+                  <tr key={i} className="border-t hover:bg-gray-50">
+                    <td className="p-2">{a.adm1 || "—"}</td>
+                    <td className="p-2">{a.adm2 || "—"}</td>
+                    <td className="p-2">{a.adm3 || a.pcode}</td>
+                    <td className="p-2 text-right font-medium text-red-600">
+                      {a.score?.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+                {topAreas.length > 5 && (
                   <tr>
-                    <td colSpan={4} className="p-2 text-center text-gray-500">
-                      No data
+                    <td colSpan={4} className="text-center py-2">
+                      <button
+                        className="text-blue-600 text-sm hover:underline"
+                        onClick={() => setShowAllAreas(!showAllAreas)}
+                      >
+                        {showAllAreas ? "Show Less" : "Show More"}
+                      </button>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
+
+            {/* Category Breakdown */}
+            <h3 className="font-medium mb-2 mt-4">Category Breakdown</h3>
+            <div className="space-y-3">
+              {categories.map((cat, i) => (
+                <div key={i} className="border rounded-md">
+                  <div
+                    className="flex justify-between items-center bg-gray-100 px-3 py-2 cursor-pointer hover:bg-gray-200"
+                    onClick={() => setExpandedCategory(expandedCategory === cat.category ? null : cat.category)}
+                  >
+                    <span className="font-semibold">{cat.category}</span>
+                    <span className="text-sm text-blue-600">
+                      {(
+                        cat.datasets.reduce((a, d) => a + (d.avg || 0), 0) /
+                        (cat.datasets.length || 1)
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                  {expandedCategory === cat.category && (
+                    <table className="w-full text-sm border-t">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="p-2 text-left">Dataset</th>
+                          <th className="p-2 text-right">Min</th>
+                          <th className="p-2 text-right">Avg</th>
+                          <th className="p-2 text-right">Max</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cat.datasets.map((ds, j) => (
+                          <tr key={j} className="border-t hover:bg-gray-50">
+                            <td className="p-2">{ds.name}</td>
+                            <td className="p-2 text-right">{ds.min?.toFixed(2) ?? "—"}</td>
+                            <td className="p-2 text-right text-blue-600">{ds.avg?.toFixed(2) ?? "—"}</td>
+                            <td className="p-2 text-right">{ds.max?.toFixed(2) ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}
