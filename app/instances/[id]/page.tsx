@@ -6,8 +6,9 @@ import { supabase } from '@/lib/supabaseClient';
 import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import InstanceScoringModal from '@/components/InstanceScoringModal';
+import L from 'leaflet';
 
-// ✅ Leaflet dynamic imports
+// ✅ Lazy load Leaflet components for SSR safety
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then((m) => m.GeoJSON), { ssr: false });
@@ -33,7 +34,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return '#ff0000';
   };
 
-  // Load instance
+  // ✅ Load instance
   useEffect(() => {
     const loadInstance = async () => {
       const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
@@ -43,21 +44,26 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [params.id]);
 
-  // Load affected area geometries
+  // ✅ Load affected area geometries
   useEffect(() => {
     const loadAreas = async () => {
       if (!instance?.id) return;
+      setLoading(true);
+
       const { data, error } = await supabase
         .from('v_instance_affected_areas')
         .select('admin_pcode,name,geom_json')
         .eq('instance_id', instance.id);
+
       if (error) console.error('Error loading affected areas:', error);
       else setFeatures(data || []);
+
+      setLoading(false);
     };
     loadAreas();
   }, [instance]);
 
-  // Load filtered scores
+  // ✅ Load filtered scores
   useEffect(() => {
     const loadScores = async () => {
       if (!instance?.id) return;
@@ -71,7 +77,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadScores();
   }, [instance]);
 
-  // Load category breakdown
+  // ✅ Load category breakdown
   useEffect(() => {
     const loadCategories = async () => {
       if (!instance?.id) return;
@@ -82,7 +88,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadCategories();
   }, [instance]);
 
-  // Recompute scores
+  // ✅ Recompute scores
   const recomputeScores = async () => {
     if (!instance?.id) return;
     await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
@@ -93,20 +99,24 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     if (!error) setScores(data || []);
   };
 
-  // Merge geometry + score
+  // ✅ Merge geometry + score
   const featuresWithScores = features.map((f) => ({
     ...f,
-    score:
-      scores.find((s) => s.pcode === f.admin_pcode)?.score ??
-      f.avg_score ??
-      null,
+    score: scores.find((s) => s.pcode === f.admin_pcode)?.score ?? null,
   }));
+
+  // ✅ Compute map bounds
+  const bounds =
+    typeof window !== 'undefined' && featuresWithScores.length > 0
+      ? L.geoJSON(featuresWithScores.map((f) => f.geom_json)).getBounds()
+      : null;
 
   const mostAffected = [...featuresWithScores]
     .filter((f) => f.score !== null)
     .sort((a, b) => b.score - a.score)
     .slice(0, expanded ? undefined : 5);
 
+  // ✅ Render
   return (
     <div className="p-4 space-y-3 text-sm text-gray-800">
       {instance && (
@@ -118,22 +128,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <p className="text-gray-500">{instance.description || 'No description'}</p>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={() => setShowAreaModal(true)}
-                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-              >
+              <button onClick={() => setShowAreaModal(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Define Area
               </button>
-              <button
-                onClick={() => setShowConfig(true)}
-                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-              >
+              <button onClick={() => setShowConfig(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Configure Datasets
               </button>
-              <button
-                onClick={() => setShowScoring(true)}
-                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-              >
+              <button onClick={() => setShowScoring(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Calibration
               </button>
               <button
@@ -155,10 +156,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <p className="text-xs text-gray-500">Average Score</p>
               <p className="text-base font-semibold">
                 {featuresWithScores.length
-                  ? (
-                      featuresWithScores.reduce((a, f) => a + (f.score || 0), 0) /
-                      featuresWithScores.length
-                    ).toFixed(2)
+                  ? (featuresWithScores.reduce((a, f) => a + (f.score || 0), 0) / featuresWithScores.length).toFixed(2)
                   : '—'}
               </p>
             </div>
@@ -176,7 +174,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* Map */}
+          {/* ✅ Map */}
           <div className="bg-white border rounded-lg shadow-sm p-2 relative">
             <div className="absolute right-3 top-3 z-10">
               <button
@@ -186,12 +184,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {zoomLocked ? '🔒 Locked' : '🔓 Unlocked'}
               </button>
             </div>
+
             {loading ? (
               <p className="text-center p-6">Loading map...</p>
             ) : (
               <MapContainer
-                center={[10.3, 123.9]}
-                zoom={8}
+                bounds={bounds || undefined}
                 scrollWheelZoom={!zoomLocked}
                 dragging={!zoomLocked}
                 style={{ height: '500px', width: '100%' }}
@@ -213,7 +211,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Category breakdown */}
+          {/* Category Breakdown */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
             <h3 className="font-semibold mb-2">Category Breakdown</h3>
             {categories.length === 0 ? (
@@ -240,7 +238,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Most affected areas */}
+          {/* Most Affected Areas */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
             <h3 className="font-semibold mb-2">Most Affected Areas</h3>
             <table className="w-full text-xs border">
@@ -272,7 +270,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </>
       )}
 
-      {/* Modals */}
+      {/* ✅ Modals */}
       {showConfig && (
         <InstanceDatasetConfigModal instance={instance} onClose={() => setShowConfig(false)} onSaved={recomputeScores} />
       )}
