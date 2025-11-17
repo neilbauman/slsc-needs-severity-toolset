@@ -20,6 +20,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [summary, setSummary] = useState<any>(null);
   const [topAreas, setTopAreas] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   // Load instance metadata
   useEffect(() => {
@@ -104,7 +105,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     if (!instance) return;
     const loadSummary = async () => {
       try {
-        // 1️⃣ Find population dataset dynamically
+        // 1️⃣ Population data
         const { data: popDataset } = await supabase
           .from("datasets")
           .select("id")
@@ -142,40 +143,68 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           people_need,
         });
 
-        // 3️⃣ Top areas
+        // 3️⃣ Top affected areas with admin names
         const { data: top } = await supabase
           .from("scored_instance_values")
-          .select("pcode, score")
+          .select(`
+            pcode,
+            score,
+            admin_boundaries!inner(name, parent_pcode)
+          `)
           .eq("instance_id", instance.id)
           .order("score", { ascending: false })
           .limit(5);
         setTopAreas(top || []);
 
-        // 4️⃣ Category Breakdown (SSC Pillars, Hazard, etc.)
-        const { data: catBreakdown, error: catErr } = await supabase
+        // 4️⃣ Category breakdown with datasets and metrics
+        const { data: datasetScores } = await supabase
           .from("scored_instance_values")
           .select(`
             score,
             dataset_id,
-            datasets(category)
+            datasets(id, name, category, type)
           `)
           .eq("instance_id", instance.id);
 
-        if (!catErr && catBreakdown?.length) {
-          const grouped = catBreakdown.reduce((acc: any, row: any) => {
+        if (datasetScores?.length) {
+          const grouped = datasetScores.reduce((acc: any, row: any) => {
             const cat = row.datasets?.category || "Uncategorized";
-            if (!acc[cat]) acc[cat] = [];
-            acc[cat].push(row.score || 0);
+            if (!acc[cat]) acc[cat] = {};
+            const ds = row.datasets?.name || "Unnamed Dataset";
+            if (!acc[cat][ds]) acc[cat][ds] = [];
+            acc[cat][ds].push(row.score || 0);
             return acc;
           }, {});
 
           const result = Object.keys(grouped).map((cat) => ({
             category: cat,
-            avg_score:
-              grouped[cat].reduce((a: number, b: number) => a + b, 0) /
-              grouped[cat].length,
+            datasets: Object.keys(grouped[cat]).map((ds) => {
+              const scores = grouped[cat][ds];
+              const valid = scores.filter((s: any) => s !== null);
+              const avg = valid.length
+                ? valid.reduce((a: number, b: number) => a + b, 0) / valid.length
+                : null;
+              return {
+                name: ds,
+                avg,
+                min: valid.length ? Math.min(...valid) : null,
+                max: valid.length ? Math.max(...valid) : null,
+                count: valid.length,
+              };
+            }),
           }));
 
+          // Sort by known SSC order
+          const order = [
+            "SSC Framework - P1",
+            "SSC Framework - P2",
+            "SSC Framework - P3",
+            "Hazard",
+            "Underlying Vulnerability",
+            "Uncategorized",
+          ];
+
+          result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
           setCategories(result);
         }
       } catch (err) {
@@ -261,37 +290,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Summary Section */}
+          {/* Summary */}
           <div className="bg-white border rounded-lg shadow-sm p-4 mt-6">
             <h2 className="font-semibold mb-2">Summary Analytics</h2>
-
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <div className="p-3 bg-gray-50 rounded text-center">
-                <p className="text-xs text-gray-500 uppercase">Total Population</p>
-                <p className="text-lg font-semibold">
-                  {summary?.population_total?.toLocaleString() ?? "—"}
-                </p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded text-center">
-                <p className="text-xs text-gray-500 uppercase">People of Concern</p>
-                <p className="text-lg font-semibold text-red-600">
-                  {summary?.people_concern?.toLocaleString() ?? "—"}
-                </p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded text-center">
-                <p className="text-xs text-gray-500 uppercase">People in Need</p>
-                <p className="text-lg font-semibold text-orange-600">
-                  {summary?.people_need?.toLocaleString() ?? "—"}
-                </p>
-              </div>
-              <div className="p-3 bg-gray-50 rounded text-center">
-                <p className="text-xs text-gray-500 uppercase">Average Severity</p>
-                <p className="text-lg font-semibold text-blue-600">
-                  {summary?.avg_score?.toFixed(2) ?? "—"}
-                </p>
-              </div>
+              <SummaryCard title="Total Population" value={summary?.population_total} />
+              <SummaryCard title="People of Concern" value={summary?.people_concern} color="text-red-600" />
+              <SummaryCard title="People in Need" value={summary?.people_need} color="text-orange-600" />
+              <SummaryCard title="Average Severity" value={summary?.avg_score?.toFixed(2)} color="text-blue-600" />
             </div>
 
+            {/* Most Affected Areas */}
             <h3 className="font-medium mb-2">Most Affected Areas</h3>
             <table className="w-full text-sm border mb-6">
               <thead className="bg-gray-100 text-left">
@@ -304,7 +313,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {topAreas?.length ? (
                   topAreas.map((a, i) => (
                     <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="p-2">{a.pcode}</td>
+                      <td className="p-2">
+                        <span className="font-medium">{a.admin_boundaries?.name}</span>
+                        <br />
+                        <span className="text-xs text-gray-500">{a.pcode}</span>
+                      </td>
                       <td className="p-2 text-right font-medium text-red-600">
                         {a.score?.toFixed(2)}
                       </td>
@@ -322,37 +335,50 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
             {/* Category Breakdown */}
             <h3 className="font-medium mb-2">Category Breakdown</h3>
-            <table className="w-full text-sm border">
-              <thead className="bg-gray-100 text-left">
-                <tr>
-                  <th className="p-2">Category</th>
-                  <th className="p-2 text-right">Average Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {categories?.length ? (
-                  categories.map((c, i) => (
-                    <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="p-2">{c.category}</td>
-                      <td className="p-2 text-right font-medium text-blue-600">
-                        {c.avg_score.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={2} className="p-2 text-center text-gray-500">
-                      No category data
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            <div className="space-y-3">
+              {categories.map((cat, i) => (
+                <div key={i} className="border rounded-md">
+                  <div
+                    className="flex justify-between items-center bg-gray-100 px-3 py-2 cursor-pointer hover:bg-gray-200"
+                    onClick={() => setExpandedCategory(expandedCategory === cat.category ? null : cat.category)}
+                  >
+                    <span className="font-semibold">{cat.category}</span>
+                    <span className="text-sm text-blue-600">
+                      {(
+                        cat.datasets.reduce((a, d) => a + (d.avg || 0), 0) /
+                        (cat.datasets.length || 1)
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                  {expandedCategory === cat.category && (
+                    <table className="w-full text-sm border-t">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="p-2 text-left">Dataset</th>
+                          <th className="p-2 text-right">Min</th>
+                          <th className="p-2 text-right">Avg</th>
+                          <th className="p-2 text-right">Max</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cat.datasets.map((ds, j) => (
+                          <tr key={j} className="border-t hover:bg-gray-50">
+                            <td className="p-2">{ds.name}</td>
+                            <td className="p-2 text-right">{ds.min?.toFixed(2) ?? "—"}</td>
+                            <td className="p-2 text-right text-blue-600">{ds.avg?.toFixed(2) ?? "—"}</td>
+                            <td className="p-2 text-right">{ds.max?.toFixed(2) ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}
 
-      {/* Modals */}
       {showConfig && (
         <InstanceDatasetConfigModal
           instance={instance}
@@ -368,6 +394,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           onSaved={recomputeScores}
         />
       )}
+    </div>
+  );
+}
+
+// Small reusable summary card
+function SummaryCard({ title, value, color }: { title: string; value: any; color?: string }) {
+  return (
+    <div className="p-3 bg-gray-50 rounded text-center">
+      <p className="text-xs text-gray-500 uppercase">{title}</p>
+      <p className={`text-lg font-semibold ${color || ""}`}>
+        {value ? value.toLocaleString() : "—"}
+      </p>
     </div>
   );
 }
