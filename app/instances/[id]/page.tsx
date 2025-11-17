@@ -2,8 +2,9 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseClient";
-import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
+import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
+import InstanceScoringModal from "@/components/InstanceScoringModal";
 import { Lock, Unlock } from "lucide-react";
 
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
@@ -22,6 +23,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [zoomLocked, setZoomLocked] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showArea, setShowArea] = useState(false);
+  const [showCalibration, setShowCalibration] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const colorFor = (s: number | null) =>
@@ -55,15 +57,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   useEffect(() => {
     if (!instance?.admin_scope?.length) return;
     const lowest = instance.admin_scope.at(-1);
-    supabase
-      .rpc("get_admin_geoms", { in_parent_pcode: lowest })
-      .then(({ data }) =>
-        setFeatures(
-          (data || [])
-            .filter((d: any) => affected.includes(d.admin_pcode))
-            .map((d: any) => ({ ...d, score: scores.find(s => s.pcode === d.admin_pcode)?.score ?? null }))
-        )
-      );
+    supabase.rpc("get_admin_geoms", { in_parent_pcode: lowest }).then(({ data }) =>
+      setFeatures(
+        (data || [])
+          .filter((d: any) => affected.includes(d.admin_pcode))
+          .map((d: any) => ({ ...d, score: scores.find(s => s.pcode === d.admin_pcode)?.score ?? null }))
+      )
+    );
   }, [instance, scores, affected]);
 
   useEffect(() => {
@@ -81,12 +81,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .eq("instance_id", instance.id)
         .in("pcode", affected);
       const avg = scored?.reduce((a, b) => a + (b.score || 0), 0) / (scored?.length || 1);
-      setSummary({
-        population: total,
-        concern: Math.round(total * (avg / 5) * 0.5),
-        need: Math.round(total * (avg / 5)),
-        avg,
-      });
+      setSummary({ population: total, concern: Math.round(total * (avg / 5) * 0.5), need: Math.round(total * (avg / 5)), avg });
 
       const { data: top } = await supabase
         .from("scored_instance_values")
@@ -94,10 +89,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .eq("instance_id", instance.id)
         .in("pcode", affected)
         .order("score", { ascending: false });
-      const { data: bounds } = await supabase
-        .from("admin_boundaries")
-        .select("admin_pcode,name,parent_pcode,admin_level");
-
+      const { data: bounds } = await supabase.from("admin_boundaries").select("admin_pcode,name,parent_pcode,admin_level");
       const map = new Map(bounds.map((b: any) => [b.admin_pcode, b]));
       const resolve = (c: string) => {
         const a3 = map.get(c);
@@ -112,57 +104,41 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   }, [instance, scores, affected]);
 
   useEffect(() => {
-  if (!instance || !affected.length) return;
-  supabase
-    .from("scored_instance_values")
-    .select("score,pcode,dataset_id,datasets(id,name,category)")
-    .eq("instance_id", instance.id)
-    .in("pcode", affected)
-    .then(({ data }) => {
-      if (!data) return;
-      const grouped: Record<string, Record<string, number[]>> = {};
-
-      for (const r of data) {
-        const dataset = (r as any).datasets; // ✅ cast fixes the TS type
-        const cat = dataset?.category || "Uncategorized";
-        const ds = dataset?.name || "Unnamed Dataset";
-
-        grouped[cat] ??= {};
-        grouped[cat][ds] ??= [];
-        grouped[cat][ds].push(r.score || 0);
-      }
-
-      const order = [
-        "SSC Framework - P1",
-        "SSC Framework - P2",
-        "SSC Framework - P3",
-        "Hazard",
-        "Underlying Vulnerability",
-        "Uncategorized",
-      ];
-
-      const result = Object.entries(grouped).map(([cat, d]) => ({
-        category: cat,
-        datasets: Object.entries(d).map(([n, s]: any) => ({
-          name: n,
-          avg: s.reduce((a: number, b: number) => a + b, 0) / s.length,
-          min: Math.min(...s),
-          max: Math.max(...s),
-        })),
-      }));
-
-      result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
-      setCategories(result);
-    });
-}, [instance, scores, affected]);
+    if (!instance || !affected.length) return;
+    supabase
+      .from("scored_instance_values")
+      .select("score,pcode,dataset_id,datasets(id,name,category)")
+      .eq("instance_id", instance.id)
+      .in("pcode", affected)
+      .then(({ data }) => {
+        if (!data) return;
+        const grouped: Record<string, Record<string, number[]>> = {};
+        for (const r of data) {
+          const ds = (r as any).datasets;
+          const cat = ds?.category || "Uncategorized";
+          const name = ds?.name || "Unnamed";
+          grouped[cat] ??= {};
+          grouped[cat][name] ??= [];
+          grouped[cat][name].push(r.score || 0);
+        }
+        const order = ["SSC Framework - P1", "SSC Framework - P2", "SSC Framework - P3", "Hazard", "Underlying Vulnerability"];
+        const result = Object.entries(grouped).map(([cat, d]) => ({
+          category: cat,
+          datasets: Object.entries(d).map(([n, s]: any) => ({
+            name: n,
+            avg: s.reduce((a: number, b: number) => a + b, 0) / s.length,
+            min: Math.min(...s),
+            max: Math.max(...s),
+          })),
+        }));
+        result.sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category));
+        setCategories(result);
+      });
+  }, [instance, scores, affected]);
 
   const recompute = async () => {
     await supabase.rpc("score_instance_overall", { in_instance: instance.id });
-    const { data } = await supabase
-      .from("scored_instance_values")
-      .select("pcode,score")
-      .eq("instance_id", instance.id)
-      .in("pcode", affected);
+    const { data } = await supabase.from("scored_instance_values").select("pcode,score").eq("instance_id", instance.id).in("pcode", affected);
     setScores(data || []);
   };
 
@@ -178,11 +154,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <div className="flex gap-2">
               <button onClick={() => setShowArea(true)} className="px-2 py-1 border rounded bg-gray-100 text-xs">Define Area</button>
               <button onClick={() => setShowConfig(true)} className="px-2 py-1 border rounded bg-gray-100 text-xs">Datasets</button>
+              <button onClick={() => setShowCalibration(true)} className="px-2 py-1 border rounded bg-gray-100 text-xs">Calibration</button>
               <button onClick={recompute} className="px-2 py-1 border rounded bg-blue-600 text-white text-xs">Recompute</button>
             </div>
           </div>
 
-          {/* Summary above map */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <Summary title="Population" val={summary?.population} />
             <Summary title="Concern" val={summary?.concern} color="text-red-600" />
@@ -190,7 +166,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <Summary title="Severity" val={summary?.avg?.toFixed(2)} color="text-blue-600" />
           </div>
 
-          {/* Map */}
           <div className="bg-white border rounded shadow-sm p-2">
             <div className="flex justify-between items-center mb-1">
               <h2 className="font-medium">Map Overview</h2>
@@ -198,33 +173,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {zoomLocked ? <Lock size={12} /> : <Unlock size={12} />} {zoomLocked ? "Locked" : "Unlocked"}
               </button>
             </div>
-            <MapContainer
-              center={[10.3, 123.9]}
-              zoom={8}
-              scrollWheelZoom={!zoomLocked}
-              dragging={!zoomLocked}
-              style={{ height: "400px", width: "100%" }}
-            >
+            <MapContainer center={[10.3, 123.9]} zoom={8} scrollWheelZoom={!zoomLocked} dragging={!zoomLocked} style={{ height: "400px", width: "100%" }}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               {features.map((f, i) => (
-                <GeoJSON
-                  key={i}
-                  data={f.geom_json}
-                  style={{ color: "#333", weight: 0.4, fillOpacity: 0.8, fillColor: colorFor(f.score) }}
-                />
+                <GeoJSON key={i} data={f.geom_json} style={{ color: "#333", weight: 0.4, fillOpacity: 0.8, fillColor: colorFor(f.score) }} />
               ))}
             </MapContainer>
           </div>
 
-          {/* Category Breakdown */}
           <div className="bg-white border rounded shadow-sm p-2">
             <h3 className="font-medium mb-1">Category Breakdown</h3>
             {categories.map((c, i) => (
               <div key={i} className="border rounded mb-1">
-                <div
-                  onClick={() => setExpanded(expanded === c.category ? null : c.category)}
-                  className="flex justify-between bg-gray-100 px-2 py-1 cursor-pointer hover:bg-gray-200"
-                >
+                <div onClick={() => setExpanded(expanded === c.category ? null : c.category)} className="flex justify-between bg-gray-100 px-2 py-1 cursor-pointer hover:bg-gray-200">
                   <span>{c.category}</span>
                   <span className="text-blue-600 text-xs">
                     {(c.datasets.reduce((a, d) => a + d.avg, 0) / c.datasets.length).toFixed(2)}
@@ -233,12 +194,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {expanded === c.category && (
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50">
-                      <tr>
-                        <th className="p-1 text-left">Dataset</th>
-                        <th className="p-1 text-right">Min</th>
-                        <th className="p-1 text-right">Avg</th>
-                        <th className="p-1 text-right">Max</th>
-                      </tr>
+                      <tr><th className="p-1 text-left">Dataset</th><th className="p-1 text-right">Min</th><th className="p-1 text-right">Avg</th><th className="p-1 text-right">Max</th></tr>
                     </thead>
                     <tbody>
                       {c.datasets.map((d, j) => (
@@ -256,17 +212,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             ))}
           </div>
 
-          {/* Most Affected Areas */}
           <div className="bg-white border rounded shadow-sm p-2">
             <h3 className="font-medium mb-1">Most Affected Areas</h3>
             <table className="w-full text-xs">
               <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-1">ADM1</th>
-                  <th className="p-1">ADM2</th>
-                  <th className="p-1">ADM3</th>
-                  <th className="p-1 text-right">Score</th>
-                </tr>
+                <tr><th className="p-1">ADM1</th><th className="p-1">ADM2</th><th className="p-1">ADM3</th><th className="p-1 text-right">Score</th></tr>
               </thead>
               <tbody>
                 {(showAll ? topAreas : topAreas.slice(0, 5)).map((a, i) => (
@@ -278,13 +228,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   </tr>
                 ))}
                 {topAreas.length > 5 && (
-                  <tr>
-                    <td colSpan={4} className="text-center py-1">
-                      <button className="text-blue-600 text-xs hover:underline" onClick={() => setShowAll(!showAll)}>
-                        {showAll ? "Show Less" : "Show More"}
-                      </button>
-                    </td>
-                  </tr>
+                  <tr><td colSpan={4} className="text-center py-1">
+                    <button className="text-blue-600 text-xs hover:underline" onClick={() => setShowAll(!showAll)}>
+                      {showAll ? "Show Less" : "Show More"}
+                    </button></td></tr>
                 )}
               </tbody>
             </table>
@@ -293,6 +240,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       )}
       {showConfig && <InstanceDatasetConfigModal instance={instance} onClose={() => setShowConfig(false)} onSaved={recompute} />}
       {showArea && <DefineAffectedAreaModal instance={instance} onClose={() => setShowArea(false)} onSaved={recompute} />}
+      {showCalibration && <InstanceScoringModal instance={instance} onClose={() => setShowCalibration(false)} onSaved={recompute} />}
     </div>
   );
 }
