@@ -21,7 +21,6 @@ export default function InstanceScoringModal({
   const [method, setMethod] = useState<'mean' | 'weighted_mean' | '20_percent' | 'custom'>(
     'weighted_mean'
   );
-  const [threshold, setThreshold] = useState<number>(0.2);
   const [loading, setLoading] = useState(false);
 
   const CATEGORY_ORDER = [
@@ -32,10 +31,10 @@ export default function InstanceScoringModal({
     'Underlying Vulnerability',
   ];
 
-  // Snap any number to nearest step (5%)
+  // Snap to nearest multiple of 5
   const snapToStep = (value: number, step = 5) => Math.round(value / step) * step;
 
-  // Normalize datasets within a category — increments of 5, total 100%
+  // Normalize dataset weights within a category
   const normalizeCategory = (cat: string) => {
     const ds = categories[cat].datasets;
     const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
@@ -55,24 +54,21 @@ export default function InstanceScoringModal({
       const largest = ds.reduce((a, b) =>
         (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
       );
-      newWeights[largest.id] = Math.max(
-        0,
-        Math.min(100, newWeights[largest.id] + diff)
-      );
+      newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
     }
 
     setWeights(newWeights);
   };
 
-  // Normalize all categories to total 100% — increments of 5, total = 100%
+  // Normalize all category weights
   const normalizeAllCategories = () => {
     const total = Object.values(categories).reduce((sum, c) => sum + (c.categoryWeight || 0), 0);
     if (total === 0) return;
 
     const newCats = { ...categories };
     const step = 5;
-
     let sum = 0;
+
     Object.keys(newCats).forEach((cat) => {
       newCats[cat].categoryWeight = snapToStep(
         (newCats[cat].categoryWeight / total) * 100,
@@ -96,7 +92,7 @@ export default function InstanceScoringModal({
   };
 
   const handleWeightChange = (datasetId: string, value: number) => {
-    setWeights(prev => ({ ...prev, [datasetId]: Math.max(0, value) }));
+    setWeights((prev) => ({ ...prev, [datasetId]: Math.max(0, value) }));
   };
 
   const handleCategoryWeightChange = (cat: string, value: number) => {
@@ -105,7 +101,7 @@ export default function InstanceScoringModal({
     setCategories(updated);
   };
 
-  // Load instance datasets & saved weights
+  // Load datasets and weights
   useEffect(() => {
     if (!instance?.id) return;
     const load = async () => {
@@ -154,10 +150,10 @@ export default function InstanceScoringModal({
       );
 
       const numCats = Object.keys(sorted).length;
-      Object.keys(sorted).forEach(cat => {
+      Object.keys(sorted).forEach((cat) => {
         sorted[cat].categoryWeight = 100 / numCats;
         const numDs = sorted[cat].datasets.length;
-        sorted[cat].datasets.forEach(d => {
+        sorted[cat].datasets.forEach((d) => {
           if (!weightMap[d.id]) weightMap[d.id] = 100 / numDs;
         });
       });
@@ -211,7 +207,7 @@ export default function InstanceScoringModal({
           <label className="block text-xs font-medium mb-1">Aggregation method</label>
           <select
             value={method}
-            onChange={e => setMethod(e.target.value as any)}
+            onChange={(e) => setMethod(e.target.value as any)}
             className="border border-gray-300 rounded px-2 py-1 w-full text-sm"
           >
             <option value="mean">Simple average</option>
@@ -233,7 +229,9 @@ export default function InstanceScoringModal({
                   min="0"
                   max="100"
                   value={Math.round(obj.categoryWeight)}
-                  onChange={e => handleCategoryWeightChange(cat, parseFloat(e.target.value))}
+                  onChange={(e) =>
+                    handleCategoryWeightChange(cat, parseFloat(e.target.value))
+                  }
                   onBlur={normalizeAllCategories}
                   className="w-16 border rounded px-1 py-0.5 text-right"
                 />
@@ -241,17 +239,28 @@ export default function InstanceScoringModal({
               </div>
             </div>
 
-            {obj.datasets.map(d => (
-              <div key={d.id} className="flex items-center justify-between pl-4 py-1 border-t text-gray-700">
+            {/* Visual weight bar for category */}
+            <div className="h-1 bg-gray-200 rounded mb-2 overflow-hidden">
+              <div
+                className="h-full bg-blue-500 transition-all"
+                style={{ width: `${obj.categoryWeight}%` }}
+              />
+            </div>
+
+            {obj.datasets.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between pl-4 py-1 border-t text-gray-700"
+              >
                 <span className="truncate">{d.name}</span>
-                <div className="flex gap-1 items-center">
+                <div className="flex items-center gap-1">
                   <input
                     type="number"
                     step="5"
                     min="0"
                     max="100"
                     value={Math.round(weights[d.id] ?? 0)}
-                    onChange={e => handleWeightChange(d.id, parseFloat(e.target.value))}
+                    onChange={(e) => handleWeightChange(d.id, parseFloat(e.target.value))}
                     onBlur={() => normalizeCategory(cat)}
                     className="w-16 text-sm border rounded px-1 py-0.5 text-right"
                   />
@@ -259,11 +268,25 @@ export default function InstanceScoringModal({
                 </div>
               </div>
             ))}
+
+            {/* Visual weight bar for dataset group */}
+            <div className="h-1 bg-gray-100 mt-2 rounded overflow-hidden flex gap-0.5">
+              {obj.datasets.map((d) => (
+                <div
+                  key={d.id}
+                  className="bg-green-500 transition-all"
+                  style={{ width: `${weights[d.id] || 0}%` }}
+                />
+              ))}
+            </div>
           </div>
         ))}
 
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onClose} className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-100">
+          <button
+            onClick={onClose}
+            className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-100"
+          >
             Cancel
           </button>
           <button
