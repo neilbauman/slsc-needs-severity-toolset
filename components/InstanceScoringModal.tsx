@@ -9,12 +9,18 @@ interface InstanceScoringModalProps {
   onSaved: () => Promise<void>;
 }
 
-export default function InstanceScoringModal({ instance, onClose, onSaved }: InstanceScoringModalProps) {
+export default function InstanceScoringModal({
+  instance,
+  onClose,
+  onSaved,
+}: InstanceScoringModalProps) {
   const [categories, setCategories] = useState<
     Record<string, { name: string; datasets: any[]; categoryWeight: number }>
   >({});
   const [weights, setWeights] = useState<Record<string, number>>({});
-  const [method, setMethod] = useState<'mean' | 'weighted_mean' | '20_percent' | 'custom'>('weighted_mean');
+  const [method, setMethod] = useState<'mean' | 'weighted_mean' | '20_percent' | 'custom'>(
+    'weighted_mean'
+  );
   const [threshold, setThreshold] = useState<number>(0.2);
   const [loading, setLoading] = useState(false);
 
@@ -26,17 +32,21 @@ export default function InstanceScoringModal({ instance, onClose, onSaved }: Ins
     'Underlying Vulnerability',
   ];
 
-  // Fetch datasets + weights
+  // Load datasets + weights
   useEffect(() => {
     if (!instance?.id) return;
 
     const load = async () => {
+      // Get datasets by instance
       const { data: datasets, error: dsErr } = await supabase
         .from('instance_datasets')
-        .select('dataset_id, datasets (id, name, category, type)')
+        .select('dataset_id, datasets (id, name, category)')
         .eq('instance_id', instance.id);
 
-      if (dsErr) return console.error('Dataset load error:', dsErr);
+      if (dsErr) {
+        console.error('Dataset load error:', dsErr);
+        return;
+      }
 
       const flat = (datasets || []).map((d: any) => ({
         id: d.datasets.id,
@@ -44,6 +54,7 @@ export default function InstanceScoringModal({ instance, onClose, onSaved }: Ins
         category: d.datasets.category || 'Uncategorized',
       }));
 
+      // Get existing weights if any
       const { data: savedWeights, error: wtErr } = await supabase
         .from('instance_scoring_weights')
         .select('*')
@@ -53,19 +64,18 @@ export default function InstanceScoringModal({ instance, onClose, onSaved }: Ins
 
       const weightMap: Record<string, number> = {};
       (savedWeights || []).forEach((w: any) => {
-        weightMap[w.dataset_id] = w.dataset_weight ?? 0;
+        weightMap[w.dataset_id] = (w.dataset_weight ?? 0) * 100;
       });
 
       // Group datasets by category
       const grouped: Record<string, { name: string; datasets: any[]; categoryWeight: number }> = {};
       for (const d of flat) {
         const cat = d.category;
-        if (!grouped[cat]) grouped[cat] = { name: cat, datasets: [], categoryWeight: 1.0 };
+        if (!grouped[cat]) grouped[cat] = { name: cat, datasets: [], categoryWeight: 1 };
         grouped[cat].datasets.push(d);
-        if (!weightMap[d.id]) weightMap[d.id] = 1.0;
       }
 
-      // Sort categories by the specified order
+      // Sort categories
       const sorted = Object.fromEntries(
         Object.entries(grouped).sort((a, b) => {
           const ai = CATEGORY_ORDER.indexOf(a[0]);
@@ -77,13 +87,23 @@ export default function InstanceScoringModal({ instance, onClose, onSaved }: Ins
         })
       );
 
+      // Default even weights
+      const numCats = Object.keys(sorted).length;
+      Object.keys(sorted).forEach(cat => {
+        sorted[cat].categoryWeight = 100 / numCats;
+        const numDs = sorted[cat].datasets.length;
+        sorted[cat].datasets.forEach(d => {
+          if (!weightMap[d.id]) weightMap[d.id] = 100 / numDs;
+        });
+      });
+
       setCategories(sorted);
       setWeights(weightMap);
     };
     load();
   }, [instance]);
 
-  // Normalize dataset weights within a category
+  // Normalize within a category (dataset weights)
   const normalizeCategory = (cat: string) => {
     const ds = categories[cat].datasets;
     const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
@@ -149,7 +169,7 @@ export default function InstanceScoringModal({ instance, onClose, onSaved }: Ins
       <div className="bg-white rounded-lg shadow-lg p-4 w-[900px] max-h-[85vh] overflow-y-auto text-sm">
         <h2 className="text-base font-semibold mb-2">Calibration – {instance?.name}</h2>
         <p className="text-gray-600 mb-4">
-          Adjust weights per dataset and category. All levels auto-normalize to 100%.
+          Adjust weights per dataset and category. All levels auto-balance to 100%.
         </p>
 
         {/* Aggregation method */}
