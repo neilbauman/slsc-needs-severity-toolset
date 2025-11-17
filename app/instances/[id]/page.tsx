@@ -55,7 +55,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadAffectedPcodes();
   }, [instance]);
 
-  // Load scores (filtered by affected area)
+  // Load scores
   useEffect(() => {
     if (!instance || !affectedPcodes.length) return;
     const loadScores = async () => {
@@ -122,7 +122,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
-  // Load summary + top affected areas (filtered)
+  // Load summary + top affected areas
   useEffect(() => {
     if (!instance || !affectedPcodes.length) return;
 
@@ -178,23 +178,30 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             .from("admin_boundaries")
             .select("admin_pcode, name, parent_pcode, admin_level");
 
-          const resolveHierarchy = (b: any, all: any[]) => {
-            if (!b) return { adm1: null, adm2: null, adm3: null };
-            const adm3 = b;
-            const adm2 = all.find((x) => x.admin_pcode === adm3.parent_pcode);
-            const adm1 = all.find((x) => x.admin_pcode === adm2?.parent_pcode);
+          // Map for fast lookup
+          const boundaryMap = new Map(boundaries.map((b: any) => [b.admin_pcode, b]));
+
+          // Recursive resolver with prefix fallback
+          const resolveHierarchy = (admCode: string) => {
+            const adm3 = boundaryMap.get(admCode);
+            if (!adm3) {
+              const fallback = boundaries.find((b) => admCode.startsWith(b.admin_pcode));
+              if (!fallback) return { adm1: "—", adm2: "—", adm3: admCode };
+              return resolveHierarchy(fallback.admin_pcode);
+            }
+            const adm2 = boundaryMap.get(adm3.parent_pcode);
+            const adm1 = boundaryMap.get(adm2?.parent_pcode);
             return {
-              adm1: adm1?.name || null,
-              adm2: adm2?.name || null,
-              adm3: adm3?.name || null,
+              adm1: adm1?.name || "—",
+              adm2: adm2?.name || "—",
+              adm3: adm3?.name || admCode,
             };
           };
 
-          const enriched = topRaw.map((r) => {
-            const boundary = boundaries.find((b) => b.admin_pcode === r.pcode);
-            const hierarchy = resolveHierarchy(boundary, boundaries);
-            return { ...r, ...hierarchy };
-          });
+          const enriched = topRaw.map((r) => ({
+            ...r,
+            ...resolveHierarchy(r.pcode),
+          }));
 
           setTopAreas(enriched);
         }
@@ -206,7 +213,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadSummaryAndTopAreas();
   }, [instance, scores, affectedPcodes]);
 
-  // Category Breakdown (filtered)
+  // Category breakdown
   useEffect(() => {
     if (!instance || !affectedPcodes.length) return;
     const loadCategoryBreakdown = async () => {
@@ -267,7 +274,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     <div className="p-6 space-y-4">
       {instance && (
         <>
-          {/* Header */}
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-xl font-semibold">{instance.name}</h1>
@@ -281,7 +287,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* Map */}
           <div className="bg-white border rounded-lg shadow-sm p-4">
             <h2 className="font-semibold mb-2">Geographic Overview</h2>
             {loading ? (
@@ -309,7 +314,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Summary */}
           <div className="bg-white border rounded-lg shadow-sm p-4 mt-6">
             <h2 className="font-semibold mb-2">Summary Analytics</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -319,7 +323,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <SummaryCard title="Average Severity" value={summary?.avg_score?.toFixed(2)} color="text-blue-600" />
             </div>
 
-            {/* Most Affected Areas */}
             <h3 className="font-medium mb-2">Most Affected Areas</h3>
             <table className="w-full text-sm border mb-2">
               <thead className="bg-gray-100 text-left">
@@ -333,9 +336,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <tbody>
                 {(showAllAreas ? topAreas : topAreas.slice(0, 5))?.map((a, i) => (
                   <tr key={i} className="border-t hover:bg-gray-50">
-                    <td className="p-2">{a.adm1 || "—"}</td>
-                    <td className="p-2">{a.adm2 || "—"}</td>
-                    <td className="p-2">{a.adm3 || a.pcode}</td>
+                    <td className="p-2">{a.adm1}</td>
+                    <td className="p-2">{a.adm2}</td>
+                    <td className="p-2">{a.adm3}</td>
                     <td className="p-2 text-right font-medium text-red-600">
                       {a.score?.toFixed(2)}
                     </td>
@@ -353,7 +356,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               </tbody>
             </table>
 
-            {/* Category Breakdown */}
             <h3 className="font-medium mb-2 mt-4">Category Breakdown</h3>
             <div className="space-y-3">
               {categories.map((cat, i) => (
