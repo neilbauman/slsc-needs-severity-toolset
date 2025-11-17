@@ -22,6 +22,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showAllAreas, setShowAllAreas] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [affectedPcodes, setAffectedPcodes] = useState<string[]>([]);
 
   // Load instance metadata
   useEffect(() => {
@@ -37,21 +38,39 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [params.id]);
 
-  // Load scores
+  // Load affected area (ADM3s under lowest admin_scope)
   useEffect(() => {
-    if (!instance) return;
+    const loadAffectedPcodes = async () => {
+      if (!instance?.admin_scope?.length) return;
+      const lowest = instance.admin_scope[instance.admin_scope.length - 1];
+
+      const { data, error } = await supabase
+        .from("admin_boundaries")
+        .select("admin_pcode")
+        .eq("parent_pcode", lowest);
+
+      if (error) console.error("Error fetching affected areas:", error);
+      else setAffectedPcodes(data.map((d: any) => d.admin_pcode));
+    };
+    loadAffectedPcodes();
+  }, [instance]);
+
+  // Load scores (filtered by affected area)
+  useEffect(() => {
+    if (!instance || !affectedPcodes.length) return;
     const loadScores = async () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("scored_instance_values")
         .select("pcode, score")
-        .eq("instance_id", instance.id);
+        .eq("instance_id", instance.id)
+        .in("pcode", affectedPcodes);
       if (error) console.error("Error loading scores:", error);
       setScores(data || []);
       setLoading(false);
     };
     loadScores();
-  }, [instance]);
+  }, [instance, affectedPcodes]);
 
   const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return "#ccc";
@@ -62,14 +81,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return "#ff0000";
   };
 
-  // Load geometries
+  // Load geometries (filtered)
   useEffect(() => {
     const loadGeoms = async () => {
       if (!instance?.admin_scope?.length) return;
-      const admScope = instance.admin_scope[instance.admin_scope.length - 1];
+      const lowest = instance.admin_scope[instance.admin_scope.length - 1];
 
       const { data, error } = await supabase.rpc("get_admin_geoms", {
-        in_parent_pcode: admScope,
+        in_parent_pcode: lowest,
       });
 
       if (error) {
@@ -77,16 +96,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         return;
       }
 
-      const joined = (data || []).map((d: any) => ({
-        ...d,
-        score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
-      }));
+      const joined = (data || [])
+        .filter((d: any) => affectedPcodes.includes(d.admin_pcode))
+        .map((d: any) => ({
+          ...d,
+          score: scores.find((s) => s.pcode === d.admin_pcode)?.score ?? null,
+        }));
 
       setFeatures(joined);
     };
     loadGeoms();
-  }, [instance, scores]);
+  }, [instance, scores, affectedPcodes]);
 
+  // Recompute scores
   const recomputeScores = async () => {
     const { error } = await supabase.rpc("score_instance_overall", { in_instance: instance.id });
     if (error) console.error("Error recomputing scores:", error);
@@ -94,14 +116,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       const { data } = await supabase
         .from("scored_instance_values")
         .select("pcode, score")
-        .eq("instance_id", instance.id);
+        .eq("instance_id", instance.id)
+        .in("pcode", affectedPcodes);
       setScores(data || []);
     }
   };
 
-  // Load summary + top affected
+  // Load summary + top affected areas (filtered)
   useEffect(() => {
-    if (!instance) return;
+    if (!instance || !affectedPcodes.length) return;
 
     const loadSummaryAndTopAreas = async () => {
       try {
@@ -116,15 +139,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (popDataset?.id) {
           const { data: popVals } = await supabase
             .from("dataset_values_numeric")
-            .select("value")
-            .eq("dataset_id", popDataset.id);
+            .select("value, admin_pcode")
+            .eq("dataset_id", popDataset.id)
+            .in("admin_pcode", affectedPcodes);
           population_total = popVals?.reduce((sum, d) => sum + (d.value || 0), 0) || 0;
         }
 
         const { data: scored } = await supabase
           .from("scored_instance_values")
           .select("pcode, score")
-          .eq("instance_id", instance.id);
+          .eq("instance_id", instance.id)
+          .in("pcode", affectedPcodes);
 
         const avg_score =
           scored && scored.length
@@ -141,15 +166,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           people_need,
         });
 
-        // Top affected
         const { data: topRaw } = await supabase
           .from("scored_instance_values")
           .select("pcode, score")
           .eq("instance_id", instance.id)
+          .in("pcode", affectedPcodes)
           .order("score", { ascending: false });
 
         if (topRaw?.length) {
-          const pcodes = topRaw.map((r) => r.pcode);
           const { data: boundaries } = await supabase
             .from("admin_boundaries")
             .select("admin_pcode, name, parent_pcode, admin_level");
@@ -180,20 +204,22 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     };
 
     loadSummaryAndTopAreas();
-  }, [instance, scores]);
+  }, [instance, scores, affectedPcodes]);
 
-  // Category Breakdown Loader
+  // Category Breakdown (filtered)
   useEffect(() => {
-    if (!instance) return;
+    if (!instance || !affectedPcodes.length) return;
     const loadCategoryBreakdown = async () => {
       const { data } = await supabase
         .from("scored_instance_values")
         .select(`
           score,
+          pcode,
           dataset_id,
           datasets(id, name, category, type)
         `)
-        .eq("instance_id", instance.id);
+        .eq("instance_id", instance.id)
+        .in("pcode", affectedPcodes);
 
       if (data?.length) {
         const grouped = data.reduce((acc: any, row: any) => {
@@ -235,7 +261,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       }
     };
     loadCategoryBreakdown();
-  }, [instance, scores]);
+  }, [instance, scores, affectedPcodes]);
 
   return (
     <div className="p-6 space-y-4">
@@ -245,35 +271,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-xl font-semibold">{instance.name}</h1>
-              <p className="text-gray-600 text-sm">
-                {instance.description || "description"}
-              </p>
+              <p className="text-gray-600 text-sm">{instance.description || "description"}</p>
             </div>
             <div className="flex gap-2">
-              <button
-                className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200"
-                onClick={() => setShowAreaModal(true)}
-              >
-                Define Affected Area
-              </button>
-              <button
-                className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200"
-                onClick={() => setShowConfig(true)}
-              >
-                Configure Datasets
-              </button>
-              <button
-                className="px-4 py-2 border rounded bg-blue-600 text-white hover:bg-blue-700"
-                onClick={recomputeScores}
-              >
-                Recompute Scores
-              </button>
-              <button
-                className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200"
-                onClick={() => history.back()}
-              >
-                Back
-              </button>
+              <button className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowAreaModal(true)}>Define Affected Area</button>
+              <button className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200" onClick={() => setShowConfig(true)}>Configure Datasets</button>
+              <button className="px-4 py-2 border rounded bg-blue-600 text-white hover:bg-blue-700" onClick={recomputeScores}>Recompute Scores</button>
+              <button className="px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200" onClick={() => history.back()}>Back</button>
             </div>
           </div>
 
@@ -283,19 +287,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             {loading ? (
               <p>Loading map data...</p>
             ) : (
-              <MapContainer
-                center={[10.3, 123.9]}
-                zoom={8}
-                style={{ height: "600px", width: "100%" }}
-              >
+              <MapContainer center={[10.3, 123.9]} zoom={8} style={{ height: "600px", width: "100%" }}>
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 {features.map((f, i) => {
                   let geom;
-                  try {
-                    geom = f.geom_json;
-                  } catch {
-                    return null;
-                  }
+                  try { geom = f.geom_json; } catch { return null; }
                   return (
                     <GeoJSON
                       key={i}
@@ -348,10 +344,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {topAreas.length > 5 && (
                   <tr>
                     <td colSpan={4} className="text-center py-2">
-                      <button
-                        className="text-blue-600 text-sm hover:underline"
-                        onClick={() => setShowAllAreas(!showAllAreas)}
-                      >
+                      <button className="text-blue-600 text-sm hover:underline" onClick={() => setShowAllAreas(!showAllAreas)}>
                         {showAllAreas ? "Show Less" : "Show More"}
                       </button>
                     </td>
