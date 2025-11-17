@@ -6,25 +6,25 @@ import { supabase } from '@/lib/supabaseClient';
 import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import InstanceScoringModal from '@/components/InstanceScoringModal';
-import L from 'leaflet';
 
-// ✅ Lazy load Leaflet components for SSR safety
+// Dynamic Leaflet imports
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then((m) => m.GeoJSON), { ssr: false });
 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
-  const [features, setFeatures] = useState<any[]>([]);
+  const [adm3Features, setAdm3Features] = useState<any[]>([]);
   const [scores, setScores] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [showScoring, setShowScoring] = useState(false);
   const [zoomLocked, setZoomLocked] = useState(true);
   const [expanded, setExpanded] = useState(false);
-  const [categories, setCategories] = useState<any[]>([]);
 
+  // --- Color scale
   const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return '#ccc';
     if (score <= 1) return '#00b050';
@@ -34,89 +34,74 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return '#ff0000';
   };
 
-  // ✅ Load instance
+  // --- Load instance metadata
   useEffect(() => {
     const loadInstance = async () => {
-      const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
+      const { data, error } = await supabase
+        .from('instances')
+        .select('*')
+        .eq('id', params.id)
+        .single();
       if (error) console.error('Error loading instance:', error);
       else setInstance(data);
     };
     loadInstance();
   }, [params.id]);
 
-  // ✅ Load affected area geometries
+  // --- Load ADM3 polygons with scores
   useEffect(() => {
-    const loadAreas = async () => {
+    const loadAdm3 = async () => {
       if (!instance?.id) return;
       setLoading(true);
-
       const { data, error } = await supabase
-        .from('v_instance_affected_areas')
-        .select('admin_pcode,name,geom_json')
+        .from('v_instance_affected_adm3')
+        .select('admin_pcode,name,geom_json,score')
         .eq('instance_id', instance.id);
-
-      if (error) console.error('Error loading affected areas:', error);
-      else setFeatures(data || []);
-
+      if (error) console.error('Error loading ADM3 features:', error);
+      else setAdm3Features(data || []);
       setLoading(false);
     };
-    loadAreas();
+    loadAdm3();
   }, [instance]);
 
-  // ✅ Load filtered scores
-  useEffect(() => {
-    const loadScores = async () => {
-      if (!instance?.id) return;
-      const { data, error } = await supabase
-        .from('v_instance_scores_filtered')
-        .select('pcode,score')
-        .eq('instance_id', instance.id);
-      if (error) console.error('Error loading scores:', error);
-      else setScores(data || []);
-    };
-    loadScores();
-  }, [instance]);
-
-  // ✅ Load category breakdown
+  // --- Load category breakdown
   useEffect(() => {
     const loadCategories = async () => {
       if (!instance?.id) return;
-      const { data, error } = await supabase.from('v_category_scores').select('*').eq('instance_id', instance.id);
+      const { data, error } = await supabase
+        .from('v_category_scores')
+        .select('*')
+        .eq('instance_id', instance.id);
       if (error) console.error('Error loading category scores:', error);
       else setCategories(data || []);
     };
     loadCategories();
   }, [instance]);
 
-  // ✅ Recompute scores
+  // --- Recompute scores
   const recomputeScores = async () => {
     if (!instance?.id) return;
     await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
+    // refresh ADM3 scores
     const { data, error } = await supabase
-      .from('v_instance_scores_filtered')
-      .select('pcode,score')
+      .from('v_instance_affected_adm3')
+      .select('admin_pcode,name,geom_json,score')
       .eq('instance_id', instance.id);
-    if (!error) setScores(data || []);
+    if (!error) setAdm3Features(data || []);
   };
 
-  // ✅ Merge geometry + score
-  const featuresWithScores = features.map((f) => ({
-    ...f,
-    score: scores.find((s) => s.pcode === f.admin_pcode)?.score ?? null,
-  }));
+  // --- Derived metrics
+  const validScores = adm3Features.filter(f => f.score !== null);
+  const avgScore = validScores.length
+    ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2)
+    : '—';
+  const maxScore = validScores.length ? Math.max(...validScores.map(f => f.score)).toFixed(2) : '—';
+  const minScore = validScores.length ? Math.min(...validScores.map(f => f.score)).toFixed(2) : '—';
 
-  // ✅ Compute map bounds
-  const bounds =
-    typeof window !== 'undefined' && featuresWithScores.length > 0
-      ? L.geoJSON(featuresWithScores.map((f) => f.geom_json)).getBounds()
-      : null;
-
-  const mostAffected = [...featuresWithScores]
-    .filter((f) => f.score !== null)
+  const mostAffected = [...validScores]
     .sort((a, b) => b.score - a.score)
     .slice(0, expanded ? undefined : 5);
 
-  // ✅ Render
   return (
     <div className="p-4 space-y-3 text-sm text-gray-800">
       {instance && (
@@ -128,13 +113,22 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <p className="text-gray-500">{instance.description || 'No description'}</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setShowAreaModal(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
+              <button
+                onClick={() => setShowAreaModal(true)}
+                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+              >
                 Define Area
               </button>
-              <button onClick={() => setShowConfig(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
+              <button
+                onClick={() => setShowConfig(true)}
+                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+              >
                 Configure Datasets
               </button>
-              <button onClick={() => setShowScoring(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
+              <button
+                onClick={() => setShowScoring(true)}
+                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+              >
                 Calibration
               </button>
               <button
@@ -149,32 +143,24 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           {/* Summary analytics */}
           <div className="grid grid-cols-4 gap-2 mt-2">
             <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Affected Areas</p>
-              <p className="text-base font-semibold">{features.length}</p>
+              <p className="text-xs text-gray-500">Affected ADM3 Areas</p>
+              <p className="text-base font-semibold">{adm3Features.length}</p>
             </div>
             <div className="bg-white border rounded-lg p-2 shadow-sm">
               <p className="text-xs text-gray-500">Average Score</p>
-              <p className="text-base font-semibold">
-                {featuresWithScores.length
-                  ? (featuresWithScores.reduce((a, f) => a + (f.score || 0), 0) / featuresWithScores.length).toFixed(2)
-                  : '—'}
-              </p>
+              <p className="text-base font-semibold">{avgScore}</p>
             </div>
             <div className="bg-white border rounded-lg p-2 shadow-sm">
               <p className="text-xs text-gray-500">Highest</p>
-              <p className="text-base font-semibold">
-                {Math.max(...featuresWithScores.map((f) => f.score || 0)).toFixed(2)}
-              </p>
+              <p className="text-base font-semibold">{maxScore}</p>
             </div>
             <div className="bg-white border rounded-lg p-2 shadow-sm">
               <p className="text-xs text-gray-500">Lowest</p>
-              <p className="text-base font-semibold">
-                {Math.min(...featuresWithScores.map((f) => f.score || 0)).toFixed(2)}
-              </p>
+              <p className="text-base font-semibold">{minScore}</p>
             </div>
           </div>
 
-          {/* ✅ Map */}
+          {/* Map */}
           <div className="bg-white border rounded-lg shadow-sm p-2 relative">
             <div className="absolute right-3 top-3 z-10">
               <button
@@ -184,18 +170,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 {zoomLocked ? '🔒 Locked' : '🔓 Unlocked'}
               </button>
             </div>
-
             {loading ? (
               <p className="text-center p-6">Loading map...</p>
             ) : (
               <MapContainer
-                bounds={bounds || undefined}
+                center={[10.3, 123.9]}
+                zoom={8}
                 scrollWheelZoom={!zoomLocked}
                 dragging={!zoomLocked}
                 style={{ height: '500px', width: '100%' }}
               >
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {featuresWithScores.map((f, i) => (
+                {adm3Features.map((f, i) => (
                   <GeoJSON
                     key={i}
                     data={f.geom_json}
@@ -211,7 +197,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Category Breakdown */}
+          {/* Category breakdown */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
             <h3 className="font-semibold mb-2">Category Breakdown</h3>
             {categories.length === 0 ? (
@@ -238,9 +224,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Most Affected Areas */}
+          {/* Most affected areas */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
-            <h3 className="font-semibold mb-2">Most Affected Areas</h3>
+            <h3 className="font-semibold mb-2">Most Affected ADM3 Areas</h3>
             <table className="w-full text-xs border">
               <thead className="bg-gray-100">
                 <tr>
@@ -259,9 +245,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 ))}
               </tbody>
             </table>
-            {featuresWithScores.length > 5 && (
+            {adm3Features.length > 5 && (
               <div className="text-center mt-2">
-                <button onClick={() => setExpanded(!expanded)} className="text-blue-600 text-xs hover:underline">
+                <button
+                  onClick={() => setExpanded(!expanded)}
+                  className="text-blue-600 text-xs hover:underline"
+                >
                   {expanded ? 'Show less' : 'Show more'}
                 </button>
               </div>
@@ -270,15 +259,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </>
       )}
 
-      {/* ✅ Modals */}
+      {/* Modals */}
       {showConfig && (
-        <InstanceDatasetConfigModal instance={instance} onClose={() => setShowConfig(false)} onSaved={recomputeScores} />
+        <InstanceDatasetConfigModal
+          instance={instance}
+          onClose={() => setShowConfig(false)}
+          onSaved={recomputeScores}
+        />
       )}
       {showAreaModal && (
-        <DefineAffectedAreaModal instance={instance} onClose={() => setShowAreaModal(false)} onSaved={recomputeScores} />
+        <DefineAffectedAreaModal
+          instance={instance}
+          onClose={() => setShowAreaModal(false)}
+          onSaved={recomputeScores}
+        />
       )}
       {showScoring && (
-        <InstanceScoringModal instance={instance} onClose={() => setShowScoring(false)} onSaved={recomputeScores} />
+        <InstanceScoringModal
+          instance={instance}
+          onClose={() => setShowScoring(false)}
+          onSaved={recomputeScores}
+        />
       )}
     </div>
   );
