@@ -12,7 +12,7 @@ interface NumericScoringModalProps {
 
 export default function NumericScoringModal({ dataset, instance, onClose, onSaved }: NumericScoringModalProps) {
   const [method, setMethod] = useState<'Normalization' | 'Thresholds'>('Normalization');
-  const [scaleMax, setScaleMax] = useState<number>(5);
+  const [scaleMax, setScaleMax] = useState<number>(3);
   const [inverse, setInverse] = useState<boolean>(false);
   const [thresholds, setThresholds] = useState<any[]>([]);
   const [scope, setScope] = useState<'Affected Area' | 'National'>('Affected Area');
@@ -20,7 +20,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
   const [saving, setSaving] = useState<boolean>(false);
   const [previewStats, setPreviewStats] = useState<any | null>(null);
 
-  // Load config
+  // Load existing saved config
   useEffect(() => {
     const loadConfig = async () => {
       const { data, error } = await supabase
@@ -31,7 +31,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
         .single();
 
       if (error) {
-        console.warn('No existing config found:', error.message);
+        console.warn('No existing score config found:', error.message);
         return;
       }
 
@@ -40,15 +40,13 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           setMethod(data.scoring_method === 'threshold' ? 'Thresholds' : 'Normalization');
         if (data.normalize_max) setScaleMax(data.normalize_max);
         if (data.higher_is_worse !== null) setInverse(data.higher_is_worse);
-        if (data.score_config?.thresholds?.length) {
-          setThresholds(data.score_config.thresholds);
-        }
+        if (data.score_config?.thresholds?.length) setThresholds(data.score_config.thresholds);
       }
     };
     loadConfig();
   }, [instance.id, dataset.id]);
 
-  // Save config
+  // Save configuration persistently
   const saveConfig = async () => {
     setSaving(true);
     setMessage('');
@@ -79,14 +77,14 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
       console.error('Error saving config:', error);
       setMessage(`❌ Error saving config: ${error.message}`);
     } else {
-      setMessage('✅ Configuration saved successfully');
+      setMessage('✅ Config saved!');
       if (onSaved) await onSaved();
     }
 
     setSaving(false);
   };
 
-  // Preview data stats
+  // Preview values
   const preview = async () => {
     setMessage('');
     setPreviewStats(null);
@@ -107,16 +105,21 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
       return;
     }
 
-    const values = data.map((d: any) => Number(d.value)).filter((v) => !isNaN(v));
-    if (values.length === 0) {
-      setMessage('⚠️ No numeric values found.');
+    const numericValues = data
+      .map((d: any) => Number(d.value))
+      .filter((v) => Number.isFinite(v));
+
+    if (numericValues.length === 0) {
+      setMessage('⚠️ No numeric values found in dataset.');
       return;
     }
 
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-    setPreviewStats({ count: values.length, min, max, avg });
+    const min = Math.min(...numericValues);
+    const max = Math.max(...numericValues);
+    const avg = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+
+    setPreviewStats({ count: numericValues.length, min, max, avg });
+    setMessage('✅ Preview generated.');
   };
 
   // Apply scoring
@@ -167,7 +170,6 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
         <h2 className="text-lg font-semibold mb-1">{dataset.name}</h2>
         <p className="text-gray-600 mb-4">Define and preview scoring configuration.</p>
 
-        {/* Config selectors */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className="block text-xs font-medium mb-1">Method</label>
@@ -180,6 +182,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
               <option>Thresholds</option>
             </select>
           </div>
+
           <div>
             <label className="block text-xs font-medium mb-1">Scope</label>
             <select
@@ -203,9 +206,12 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
               className="border rounded px-2 py-1 w-full"
             >
               {[3, 4, 5].map((v) => (
-                <option key={v}>1–{v}</option>
+                <option key={v} value={v}>
+                  1–{v}
+                </option>
               ))}
             </select>
+
             <label className="inline-flex items-center mt-2 text-xs">
               <input
                 type="checkbox"
@@ -223,7 +229,10 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-xs font-medium">Threshold Ranges</span>
-              <button onClick={addRange} className="px-2 py-1 text-xs border rounded hover:bg-gray-100">
+              <button
+                onClick={addRange}
+                className="px-2 py-1 text-xs border rounded hover:bg-gray-100"
+              >
                 + Add Range
               </button>
             </div>
@@ -264,7 +273,12 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
                       />
                     </td>
                     <td className="p-1 text-center">
-                      <button onClick={() => removeRange(i)} className="text-red-500 hover:text-red-700">✕</button>
+                      <button
+                        onClick={() => removeRange(i)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        ✕
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -273,18 +287,30 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           </div>
         )}
 
-        {/* Preview results */}
+        {/* Preview Stats */}
         {previewStats && (
           <div className="text-xs text-gray-700 mt-2 border-t pt-2">
-            <p><b>Count:</b> {previewStats.count}</p>
-            <p><b>Min:</b> {previewStats.min.toFixed(2)}</p>
-            <p><b>Max:</b> {previewStats.max.toFixed(2)}</p>
-            <p><b>Average:</b> {previewStats.avg.toFixed(2)}</p>
+            <p>
+              <b>Count:</b> {previewStats.count}
+            </p>
+            <p>
+              <b>Min:</b> {previewStats.min.toFixed(2)}
+            </p>
+            <p>
+              <b>Max:</b> {previewStats.max.toFixed(2)}
+            </p>
+            <p>
+              <b>Average:</b> {previewStats.avg.toFixed(2)}
+            </p>
           </div>
         )}
 
         {message && (
-          <p className={`mt-3 text-sm ${message.startsWith('✅') ? 'text-green-600' : 'text-red-600'}`}>
+          <p
+            className={`mt-3 text-sm ${
+              message.startsWith('✅') ? 'text-green-600' : 'text-red-600'
+            }`}
+          >
             {message}
           </p>
         )}
@@ -294,10 +320,18 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           <button onClick={onClose} className="px-3 py-1 border rounded hover:bg-gray-100">
             Cancel
           </button>
-          <button onClick={preview} disabled={saving} className="px-3 py-1 bg-yellow-100 border border-yellow-400 rounded hover:bg-yellow-200">
+          <button
+            onClick={preview}
+            disabled={saving}
+            className="px-3 py-1 bg-yellow-100 border border-yellow-400 rounded hover:bg-yellow-200"
+          >
             Preview
           </button>
-          <button onClick={saveConfig} disabled={saving} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
+          <button
+            onClick={saveConfig}
+            disabled={saving}
+            className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+          >
             Save Config
           </button>
           <button
