@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import InstanceScoringModal from '@/components/InstanceScoringModal';
+import ScoreLayerSelector from '@/components/ScoreLayerSelector';
 
 // --- Dynamic Leaflet imports
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
@@ -18,10 +19,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [categories, setCategories] = useState<any[]>([]);
   const [populationMetrics, setPopulationMetrics] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedLayer, setSelectedLayer] = useState<string>('overall');
+  const [zoomLocked, setZoomLocked] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [showScoring, setShowScoring] = useState(false);
-  const [zoomLocked, setZoomLocked] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
   // --- Color scale
@@ -34,84 +36,74 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return '#ff0000';
   };
 
-  // --- Load instance
+  // --- Load instance metadata
   useEffect(() => {
     const loadInstance = async () => {
-      const { data, error } = await supabase
-        .from('instances')
-        .select('*')
-        .eq('id', params.id)
-        .single();
-      if (error) console.error('Error loading instance:', error);
-      else setInstance(data);
+      const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
+      if (!error) setInstance(data);
     };
     loadInstance();
   }, [params.id]);
 
-  // --- Load ADM3 polygons
-  useEffect(() => {
-    const loadAdm3 = async () => {
-      if (!instance?.id) return;
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('v_instance_affected_adm3')
-        .select('admin_pcode,name,geom_json,score')
-        .eq('instance_id', instance.id);
-      if (error) console.error('Error loading ADM3 features:', error);
-      else setAdm3Features(data || []);
-      setLoading(false);
-    };
-    loadAdm3();
-  }, [instance]);
-
   // --- Load category breakdown
   useEffect(() => {
+    if (!instance?.id) return;
     const loadCategories = async () => {
-      if (!instance?.id) return;
       const { data, error } = await supabase
         .from('v_category_scores')
         .select('*')
         .eq('instance_id', instance.id);
-      if (error) console.error('Error loading category scores:', error);
-      else setCategories(data || []);
+      if (!error) setCategories(data || []);
     };
     loadCategories();
   }, [instance]);
 
-  // --- Load population metrics (RPC)
+  // --- Load ADM3 polygons (default overall)
   useEffect(() => {
-    const loadPopulationMetrics = async () => {
-      if (!instance?.id) return;
-      const { data, error } = await supabase
-        .rpc('get_population_metrics_fast', { in_instance_id: instance.id })
-        .single();
-      if (error) console.error('Error loading population metrics:', error);
-      else setPopulationMetrics(data);
-    };
-    loadPopulationMetrics();
+    if (!instance?.id) return;
+    loadMapData('overall');
   }, [instance]);
 
-  // --- Recompute all scores
+  // --- Load population metrics
+  useEffect(() => {
+    if (!instance?.id) return;
+    const loadPop = async () => {
+      const { data, error } = await supabase.rpc('get_population_metrics_fast', { in_instance_id: instance.id }).single();
+      if (!error) setPopulationMetrics(data);
+    };
+    loadPop();
+  }, [instance]);
+
+  // --- Helper: Load map data based on layer
+  const loadMapData = async (layer: string) => {
+    if (!instance?.id) return;
+    setLoading(true);
+    if (layer === 'overall') {
+      const { data, error } = await supabase
+        .from('v_instance_affected_adm3')
+        .select('admin_pcode,name,geom_json,score')
+        .eq('instance_id', instance.id);
+      if (!error) setAdm3Features(data || []);
+    } else {
+      const { data, error } = await supabase
+        .rpc('get_dataset_scores_for_instance', { in_instance_id: instance.id, in_dataset_name: layer });
+      if (!error) setAdm3Features(data || []);
+    }
+    setLoading(false);
+  };
+
+  // --- Recompute everything
   const recomputeScores = async () => {
     if (!instance?.id) return;
     await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
-    const { data, error } = await supabase
-      .from('v_instance_affected_adm3')
-      .select('admin_pcode,name,geom_json,score')
-      .eq('instance_id', instance.id);
-    if (!error) setAdm3Features(data || []);
-    // refresh metrics after recomputation
-    const { data: metrics, error: metricsError } = await supabase
-      .rpc('get_population_metrics_fast', { in_instance_id: instance.id })
-      .single();
-    if (!metricsError) setPopulationMetrics(metrics);
+    await loadMapData(selectedLayer);
+    const { data } = await supabase.rpc('get_population_metrics_fast', { in_instance_id: instance.id }).single();
+    setPopulationMetrics(data);
   };
 
   // --- Derived metrics
   const validScores = adm3Features.filter(f => f.score !== null);
-  const avgScore = validScores.length
-    ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2)
-    : '—';
+  const avgScore = validScores.length ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2) : '—';
   const maxScore = validScores.length ? Math.max(...validScores.map(f => f.score)).toFixed(2) : '—';
   const minScore = validScores.length ? Math.min(...validScores.map(f => f.score)).toFixed(2) : '—';
   const mostAffected = [...validScores].sort((a, b) => b.score - a.score).slice(0, expanded ? undefined : 5);
@@ -142,14 +134,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* New Population Metrics */}
+          {/* Population Metrics */}
           <div className="grid grid-cols-3 gap-2 mt-3">
             <StatCard title="Total Population" value={populationMetrics?.total_population ?? '—'} />
             <StatCard title="People of Concern (≥3)" value={populationMetrics?.people_of_concern ?? '—'} />
             <StatCard title="Poverty-Exposed Population" value={populationMetrics?.poverty_exposed ?? '—'} />
           </div>
 
-          {/* Summary analytics */}
+          {/* Summary Analytics */}
           <div className="grid grid-cols-4 gap-2 mt-2">
             <StatCard title="Affected ADM3 Areas" value={adm3Features.length} />
             <StatCard title="Average Score" value={avgScore} />
@@ -157,68 +149,51 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <StatCard title="Lowest" value={minScore} />
           </div>
 
-          {/* Map */}
-          <div className="bg-white border rounded-lg shadow-sm p-2 relative">
-            <div className="absolute right-3 top-3 z-10">
-              <button
-                onClick={() => setZoomLocked(!zoomLocked)}
-                className="px-2 py-1 text-xs border rounded bg-gray-50 hover:bg-gray-100"
-              >
-                {zoomLocked ? '🔒 Locked' : '🔓 Unlocked'}
-              </button>
-            </div>
-            {loading ? (
-              <p className="text-center p-6">Loading map...</p>
-            ) : (
-              <MapContainer
-                center={[10.3, 123.9]}
-                zoom={8}
-                scrollWheelZoom={!zoomLocked}
-                dragging={!zoomLocked}
-                style={{ height: '500px', width: '100%' }}
-              >
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                {adm3Features.map((f, i) => (
-                  <GeoJSON
-                    key={i}
-                    data={f.geom_json}
-                    style={{
-                      color: '#333',
-                      weight: 0.5,
-                      fillOpacity: 0.7,
-                      fillColor: colorForScore(f.score),
-                    }}
-                  />
-                ))}
-              </MapContainer>
-            )}
-          </div>
-
-          {/* Category breakdown */}
-          <div className="bg-white border rounded-lg shadow-sm p-3">
-            <h3 className="font-semibold mb-2">Category Breakdown</h3>
-            {categories.length === 0 ? (
-              <p className="text-gray-500 text-sm">No category scores available.</p>
-            ) : (
-              <table className="w-full text-xs border">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="p-1 text-left">Category</th>
-                    <th className="p-1 text-left">Average</th>
-                    <th className="p-1 text-left">Datasets</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {categories.map((c, i) => (
-                    <tr key={i} className="border-t hover:bg-gray-50">
-                      <td className="p-1">{c.category}</td>
-                      <td className="p-1">{Number(c.avg_score || 0).toFixed(2)}</td>
-                      <td className="p-1">{c.dataset_list || '—'}</td>
-                    </tr>
+          {/* Map + Selector */}
+          <div className="flex bg-white border rounded-lg shadow-sm">
+            <div className="flex-1 p-2 relative">
+              <div className="absolute right-3 top-3 z-10">
+                <button
+                  onClick={() => setZoomLocked(!zoomLocked)}
+                  className="px-2 py-1 text-xs border rounded bg-gray-50 hover:bg-gray-100"
+                >
+                  {zoomLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                </button>
+              </div>
+              {loading ? (
+                <p className="text-center p-6">Loading map...</p>
+              ) : (
+                <MapContainer
+                  center={[10.3, 123.9]}
+                  zoom={8}
+                  scrollWheelZoom={!zoomLocked}
+                  dragging={!zoomLocked}
+                  style={{ height: '500px', width: '100%' }}
+                >
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  {adm3Features.map((f, i) => (
+                    <GeoJSON
+                      key={i}
+                      data={f.geom_json}
+                      style={{
+                        color: '#333',
+                        weight: 0.5,
+                        fillOpacity: 0.7,
+                        fillColor: colorForScore(f.score),
+                      }}
+                    />
                   ))}
-                </tbody>
-              </table>
-            )}
+                </MapContainer>
+              )}
+            </div>
+            <ScoreLayerSelector
+              instanceId={instance.id}
+              selected={selectedLayer}
+              onSelect={(sel: string) => {
+                setSelectedLayer(sel);
+                loadMapData(sel);
+              }}
+            />
           </div>
         </>
       )}
