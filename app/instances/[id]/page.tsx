@@ -7,6 +7,15 @@ import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
+// Modal imports
+import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
+import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
+import InstanceScoringModal from "@/components/InstanceScoringModal";
+import FrameworkScoringModal from "@/components/FrameworkScoringModal";
+
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
 interface AreaRow {
   admin_pcode: string;
   name: string;
@@ -21,10 +30,11 @@ interface Stats {
   max: string | number;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
 export default function InstancePage() {
   const { id } = useParams();
-  const [layerType, setLayerType] = useState<"overall" | "category" | "dataset">("overall");
-  const [selectedLayer, setSelectedLayer] = useState<string>("overall");
   const [adm3, setAdm3] = useState<AreaRow[]>([]);
   const [stats, setStats] = useState<Stats>({
     affected: 0,
@@ -32,8 +42,19 @@ export default function InstancePage() {
     min: "-",
     max: "-",
   });
+  const [layerType, setLayerType] = useState<"overall" | "dataset" | "category">("overall");
+  const [selectedLayer, setSelectedLayer] = useState<string>("overall");
   const [loading, setLoading] = useState(false);
 
+  // Modal controls (local fallback)
+  const [showDefineArea, setShowDefineArea] = useState(false);
+  const [showDatasetConfig, setShowDatasetConfig] = useState(false);
+  const [showCalibrate, setShowCalibrate] = useState(false);
+  const [showRecompute, setShowRecompute] = useState(false);
+
+  // ─────────────────────────────────────────────────────────────
+  // Color scale 1–5
+  // ─────────────────────────────────────────────────────────────
   const getColor = (score: number | null | undefined) => {
     if (score == null || isNaN(score)) return "#cccccc";
     if (score >= 4.5) return "#800026";
@@ -43,128 +64,66 @@ export default function InstancePage() {
     return "#FFEDA0";
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // Fetch data (affected ADM3 only)
+  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
-
     const fetchData = async () => {
       setLoading(true);
-      let data: any[] | null = null;
-      let error: any = null;
 
-      // 🔹 1️⃣ OVERALL SCORE
-      if (layerType === "overall") {
-        const { data: affected } = await supabase
-          .from("v_instance_affected_adm3")
-          .select("admin_pcode")
-          .eq("instance_id", id);
+      const { data: affected } = await supabase
+        .from("v_instance_affected_adm3")
+        .select("admin_pcode")
+        .eq("instance_id", id);
 
-        const affectedCodes = affected?.map((a) => a.admin_pcode) ?? [];
-
-        const res = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode,name,score,geom_json")
-          .eq("instance_id", id)
-          .in("admin_pcode", affectedCodes);
-
-        data = res.data;
-        error = res.error;
+      const affectedCodes = affected?.map((a) => a.admin_pcode) ?? [];
+      if (affectedCodes.length === 0) {
+        console.warn("No affected ADM3 found.");
+        setAdm3([]);
+        setStats({ affected: 0, avg: "-", min: "-", max: "-" });
+        setLoading(false);
+        return;
       }
 
-      // 🔹 2️⃣ DATASET MODE
-      else if (layerType === "dataset") {
-        const datasetRes = await supabase
-          .from("datasets")
-          .select("id")
-          .ilike("name", selectedLayer)
-          .limit(1);
-
-        const datasetId = datasetRes.data?.[0]?.id;
-        if (datasetId) {
-          const res = await supabase
-            .from("dataset_values_numeric_normalized")
-            .select("admin_pcode,value as score,admin_name")
-            .eq("dataset_id", datasetId);
-          data = res.data;
-          error = res.error;
-        }
-      }
-
-      // 🔹 3️⃣ CATEGORY (placeholder)
-      else if (layerType === "category") {
-        const res = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode,name,score,geom_json")
-          .eq("instance_id", id);
-        data = res.data;
-        error = res.error;
-      }
+      const { data, error } = await supabase
+        .from("v_instance_admin_scores_geojson")
+        .select("admin_pcode,name,score,geom_json")
+        .eq("instance_id", id)
+        .in("admin_pcode", affectedCodes);
 
       if (error) {
         console.error("Error loading data:", error);
-        setAdm3([]);
         setLoading(false);
         return;
       }
 
-      if (!data || data.length === 0) {
-        console.warn("No rows found — rendering grey boundaries.");
-        const { data: geo, error: geoErr } = await supabase
-          .from("admin_boundaries_geojson")
-          .select("admin_pcode,name,geom")
-          .eq("admin_level", "ADM3");
-        if (!geoErr && geo) {
-          setAdm3(
-            geo.map((g: any) => ({
-              admin_pcode: g.admin_pcode,
-              name: g.name,
-              geom_json:
-                typeof g.geom === "string" ? JSON.parse(g.geom) : g.geom,
-              score: null,
-            }))
-          );
-        }
-        setStats({ affected: geo?.length || 0, avg: "-", min: "-", max: "-" });
-        setLoading(false);
-        return;
-      }
-
-      // 🔹 Parse + handle Polygon & MultiPolygon
-      const parsed = data.map((d: any) => {
+      const parsed = (data || []).map((d: any) => {
         let geomObj = null;
         try {
-          const raw = typeof d.geom_json === "string" ? JSON.parse(d.geom_json) : d.geom_json;
-          if (!raw) throw new Error("Empty geometry");
-
-          if (raw.type === "Polygon" || raw.type === "MultiPolygon") {
-            geomObj = raw;
-          } else if (raw.geometry?.type === "Polygon" || raw.geometry?.type === "MultiPolygon") {
-            geomObj = raw.geometry;
-          } else {
-            console.warn("Unrecognized geometry:", raw);
-          }
+          const raw =
+            typeof d.geom_json === "string" ? JSON.parse(d.geom_json) : d.geom_json;
+          if (raw?.type === "Polygon" || raw?.type === "MultiPolygon") geomObj = raw;
+          else if (raw?.geometry?.type) geomObj = raw.geometry;
         } catch {
-          console.warn("Invalid GeoJSON skipped:", d.admin_pcode);
+          console.warn("Invalid geometry skipped:", d.admin_pcode);
         }
-
         return {
           admin_pcode: d.admin_pcode,
-          name: d.name ?? d.admin_name ?? "",
+          name: d.name ?? "",
           score: d.score ? Number(d.score) : null,
           geom_json: geomObj,
         };
       });
 
-      const filtered = parsed.filter((d) => d.geom_json);
+      const filtered = parsed.filter((f) => f.geom_json);
       setAdm3(filtered);
 
       const validScores = filtered
         .map((d) => d.score)
         .filter((s): s is number => s !== null && !isNaN(s));
-
       if (validScores.length > 0) {
-        const avg = (
-          validScores.reduce((a, b) => a + b, 0) / validScores.length
-        ).toFixed(2);
+        const avg = (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2);
         const min = Math.min(...validScores).toFixed(2);
         const max = Math.max(...validScores).toFixed(2);
         setStats({ affected: filtered.length, avg, min, max });
@@ -176,20 +135,29 @@ export default function InstancePage() {
     };
 
     fetchData();
-  }, [id, selectedLayer, layerType]);
+  }, [id, layerType, selectedLayer]);
 
+  // ─────────────────────────────────────────────────────────────
+  // Handlers
+  // ─────────────────────────────────────────────────────────────
   const handleSelect = (value: string, type: string) => {
     setSelectedLayer(value);
     setLayerType(type as any);
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
   return (
-    <div className="flex">
-      <div className="flex-1 p-6 space-y-4">
-        <h1 className="text-xl font-semibold">Instance: Cebu EQ–Typhoon</h1>
-        <p className="text-gray-600">
-          Map visualization of the selected scoring layer.
-        </p>
+    <div className="flex flex-row h-[calc(100vh-4rem)]">
+      {/* Left Section: Map + Stats */}
+      <div className="flex-1 p-6 overflow-hidden flex flex-col space-y-4">
+        <div>
+          <h1 className="text-xl font-semibold">Instance: Cebu EQ–Typhoon</h1>
+          <p className="text-gray-600">
+            Visualization of scoring and affected administrative areas.
+          </p>
+        </div>
 
         <div className="grid grid-cols-5 gap-3">
           <StatCard title="Affected ADM3 Areas" value={stats.affected.toString()} />
@@ -197,11 +165,14 @@ export default function InstancePage() {
           <StatCard title="Highest / Lowest Score" value={`${stats.max} / ${stats.min}`} />
         </div>
 
-        <div className="border rounded-lg overflow-hidden shadow">
+        <div className="flex-1 border rounded-lg overflow-hidden shadow">
           <MapContainer
-            style={{ height: "600px", width: "100%" }}
+            style={{ height: "100%", width: "100%" }}
             center={[10.3, 123.9]}
             zoom={8}
+            scrollWheelZoom={false}
+            doubleClickZoom={false}
+            dragging={false}
           >
             <TileLayer
               attribution='&copy; OpenStreetMap contributors'
@@ -232,15 +203,66 @@ export default function InstancePage() {
         </div>
       </div>
 
-      <ScoreLayerSelector
-        instanceId={id}
-        selected={selectedLayer}
-        onSelect={handleSelect}
-      />
+      {/* Right Section: Sidebar Controls */}
+      <div className="w-80 border-l bg-gray-50 p-4 flex flex-col space-y-4">
+        <h2 className="text-lg font-semibold mb-2">Map Layers & Actions</h2>
+
+        <div className="flex-1 overflow-y-auto">
+          <ScoreLayerSelector
+            instanceId={id}
+            selected={selectedLayer}
+            onSelect={handleSelect}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <button
+            onClick={() => setShowDefineArea(true)}
+            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
+          >
+            🗺 Define Affected Area
+          </button>
+          <button
+            onClick={() => setShowDatasetConfig(true)}
+            className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700"
+          >
+            🧩 Configure Datasets
+          </button>
+          <button
+            onClick={() => setShowCalibrate(true)}
+            className="w-full bg-teal-600 text-white py-2 rounded hover:bg-teal-700"
+          >
+            🎚 Calibrate Scores
+          </button>
+          <button
+            onClick={() => setShowRecompute(true)}
+            className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700"
+          >
+            🔁 Recompute Framework Scores
+          </button>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {showDefineArea && (
+        <DefineAffectedAreaModal open={true} onClose={() => setShowDefineArea(false)} />
+      )}
+      {showDatasetConfig && (
+        <InstanceDatasetConfigModal open={true} onClose={() => setShowDatasetConfig(false)} />
+      )}
+      {showCalibrate && (
+        <InstanceScoringModal open={true} onClose={() => setShowCalibrate(false)} />
+      )}
+      {showRecompute && (
+        <FrameworkScoringModal open={true} onClose={() => setShowRecompute(false)} />
+      )}
     </div>
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// Helper Component
+// ─────────────────────────────────────────────────────────────
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="p-3 rounded-lg shadow bg-white text-center">
