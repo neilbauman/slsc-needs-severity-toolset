@@ -44,8 +44,8 @@ export default function InstancePage() {
         setAdm3Data(adm3 || []);
       }
 
-      // --- Load stats safely (with explicit aliasing) ---
-      const { data: statData, error: statErr } = await supabase
+      // --- Load stats (safe & alias-cast) ---
+      const { data: rawStatData, error: statErr } = await supabase
         .from("scored_instance_values_adm3")
         .select(`
           total:count(*),
@@ -56,9 +56,11 @@ export default function InstancePage() {
         .eq("instance_id", instanceId)
         .single();
 
+      const statData: any = rawStatData || {}; // ✅ prevents build parser issues
+
       if (statErr) {
         console.error("Stat query error:", statErr);
-      } else if (statData) {
+      } else {
         setStats({
           affected: statData.total ?? 0,
           avg: statData.avg ? Number(statData.avg).toFixed(2) : "-",
@@ -73,6 +75,7 @@ export default function InstancePage() {
     loadData();
   }, [instanceId]);
 
+  // --- Recompute all numeric scores for this instance ---
   const recompute = async () => {
     try {
       await supabase.rpc("refresh_all_numeric_scores", { in_instance_id: instanceId });
