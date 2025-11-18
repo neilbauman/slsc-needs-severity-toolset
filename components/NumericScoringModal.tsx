@@ -7,7 +7,7 @@ interface NumericScoringModalProps {
   dataset: any;
   instance: any;
   onClose: () => void;
-  onSaved?: () => Promise<void>; // ✅ optional now
+  onSaved?: () => Promise<void>;
 }
 
 export default function NumericScoringModal({ dataset, instance, onClose, onSaved }: NumericScoringModalProps) {
@@ -18,9 +18,9 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
   const [scope, setScope] = useState<'Affected Area' | 'National'>('Affected Area');
   const [message, setMessage] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
-  const [stats, setStats] = useState<any | null>(null);
+  const [previewStats, setPreviewStats] = useState<any | null>(null);
 
-  // Load existing config
+  // Load config
   useEffect(() => {
     const loadConfig = async () => {
       const { data, error } = await supabase
@@ -36,10 +36,10 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
       }
 
       if (data) {
-        if (data.scoring_method) setMethod(data.scoring_method === 'threshold' ? 'Thresholds' : 'Normalization');
+        if (data.scoring_method)
+          setMethod(data.scoring_method === 'threshold' ? 'Thresholds' : 'Normalization');
         if (data.normalize_max) setScaleMax(data.normalize_max);
         if (data.higher_is_worse !== null) setInverse(data.higher_is_worse);
-
         if (data.score_config?.thresholds?.length) {
           setThresholds(data.score_config.thresholds);
         }
@@ -48,7 +48,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
     loadConfig();
   }, [instance.id, dataset.id]);
 
-  // Save config (persistent upsert)
+  // Save config
   const saveConfig = async () => {
     setSaving(true);
     setMessage('');
@@ -86,11 +86,43 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
     setSaving(false);
   };
 
+  // Preview data stats
+  const preview = async () => {
+    setMessage('');
+    setPreviewStats(null);
+
+    const { data, error } = await supabase
+      .from('dataset_values')
+      .select('value')
+      .eq('dataset_id', dataset.id);
+
+    if (error) {
+      console.error('Preview error:', error);
+      setMessage(`❌ Preview error: ${error.message}`);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      setMessage('⚠️ No data available for preview.');
+      return;
+    }
+
+    const values = data.map((d: any) => Number(d.value)).filter((v) => !isNaN(v));
+    if (values.length === 0) {
+      setMessage('⚠️ No numeric values found.');
+      return;
+    }
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    setPreviewStats({ count: values.length, min, max, avg });
+  };
+
   // Apply scoring
   const applyScoring = async () => {
     setSaving(true);
     setMessage('Running scoring...');
-    setStats(null);
 
     let rpcResponse;
 
@@ -112,30 +144,11 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
     if (rpcResponse.error) {
       console.error('Error running scoring:', rpcResponse.error);
       setMessage(`❌ Error running scoring: ${rpcResponse.error.message}`);
-      setSaving(false);
-      return;
+    } else {
+      setMessage('✅ Scoring complete!');
+      if (onSaved) await onSaved();
     }
 
-    // Fetch preview stats
-    const { data: statsData, error: statsError } = await supabase
-      .from('instance_dataset_scores')
-      .select('score')
-      .eq('instance_id', instance.id)
-      .eq('dataset_id', dataset.id);
-
-    if (!statsError && statsData.length > 0) {
-      const scores = statsData.map((s: any) => s.score);
-      const min = Math.min(...scores);
-      const max = Math.max(...scores);
-      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-
-      setStats({ min, max, avg, count: scores.length });
-      setMessage('✅ Scoring applied successfully!');
-    } else if (statsError) {
-      setMessage(`⚠️ Scoring applied, but failed to fetch summary: ${statsError.message}`);
-    }
-
-    if (onSaved) await onSaved();
     setSaving(false);
   };
 
@@ -154,7 +167,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
         <h2 className="text-lg font-semibold mb-1">{dataset.name}</h2>
         <p className="text-gray-600 mb-4">Define and preview scoring configuration.</p>
 
-        {/* Config Row */}
+        {/* Config selectors */}
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className="block text-xs font-medium mb-1">Method</label>
@@ -167,7 +180,6 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
               <option>Thresholds</option>
             </select>
           </div>
-
           <div>
             <label className="block text-xs font-medium mb-1">Scope</label>
             <select
@@ -181,7 +193,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           </div>
         </div>
 
-        {/* Normalization Config */}
+        {/* Normalization */}
         {method === 'Normalization' && (
           <div className="mb-4">
             <label className="block text-xs font-medium mb-1">Scale (max score)</label>
@@ -190,7 +202,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
               onChange={(e) => setScaleMax(Number(e.target.value))}
               className="border rounded px-2 py-1 w-full"
             >
-              {[3, 4, 5, 10].map((v) => (
+              {[3, 4, 5].map((v) => (
                 <option key={v}>1–{v}</option>
               ))}
             </select>
@@ -206,7 +218,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           </div>
         )}
 
-        {/* Threshold Config */}
+        {/* Thresholds */}
         {method === 'Thresholds' && (
           <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -261,13 +273,13 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
           </div>
         )}
 
-        {/* Results */}
-        {stats && (
+        {/* Preview results */}
+        {previewStats && (
           <div className="text-xs text-gray-700 mt-2 border-t pt-2">
-            <p><b>ADM3 Count:</b> {stats.count}</p>
-            <p><b>Min:</b> {stats.min.toFixed(2)}</p>
-            <p><b>Max:</b> {stats.max.toFixed(2)}</p>
-            <p><b>Average:</b> {stats.avg.toFixed(2)}</p>
+            <p><b>Count:</b> {previewStats.count}</p>
+            <p><b>Min:</b> {previewStats.min.toFixed(2)}</p>
+            <p><b>Max:</b> {previewStats.max.toFixed(2)}</p>
+            <p><b>Average:</b> {previewStats.avg.toFixed(2)}</p>
           </div>
         )}
 
@@ -281,6 +293,9 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-3 py-1 border rounded hover:bg-gray-100">
             Cancel
+          </button>
+          <button onClick={preview} disabled={saving} className="px-3 py-1 bg-yellow-100 border border-yellow-400 rounded hover:bg-yellow-200">
+            Preview
           </button>
           <button onClick={saveConfig} disabled={saving} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
             Save Config
