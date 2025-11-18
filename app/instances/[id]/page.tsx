@@ -15,8 +15,8 @@ const GeoJSON = dynamic(() => import('react-leaflet').then((m) => m.GeoJSON), { 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
   const [adm3Features, setAdm3Features] = useState<any[]>([]);
-  const [scores, setScores] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [populationMetrics, setPopulationMetrics] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
@@ -37,11 +37,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   // --- Load instance metadata
   useEffect(() => {
     const loadInstance = async () => {
-      const { data, error } = await supabase
-        .from('instances')
-        .select('*')
-        .eq('id', params.id)
-        .single();
+      const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
       if (error) console.error('Error loading instance:', error);
       else setInstance(data);
     };
@@ -49,58 +45,60 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   }, [params.id]);
 
   // --- Load ADM3 polygons with scores
-  useEffect(() => {
-    const loadAdm3 = async () => {
-      if (!instance?.id) return;
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('v_instance_affected_adm3')
-        .select('admin_pcode,name,geom_json,score')
-        .eq('instance_id', instance.id);
-      if (error) console.error('Error loading ADM3 features:', error);
-      else setAdm3Features(data || []);
-      setLoading(false);
-    };
-    loadAdm3();
-  }, [instance]);
-
-  // --- Load category breakdown
-  useEffect(() => {
-    const loadCategories = async () => {
-      if (!instance?.id) return;
-      const { data, error } = await supabase
-        .from('v_category_scores')
-        .select('*')
-        .eq('instance_id', instance.id);
-      if (error) console.error('Error loading category scores:', error);
-      else setCategories(data || []);
-    };
-    loadCategories();
-  }, [instance]);
-
-  // --- Recompute scores
-  const recomputeScores = async () => {
-    if (!instance?.id) return;
-    await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
-    // refresh ADM3 scores
+  const loadAdm3 = async (id: string) => {
+    setLoading(true);
     const { data, error } = await supabase
       .from('v_instance_affected_adm3')
       .select('admin_pcode,name,geom_json,score')
-      .eq('instance_id', instance.id);
-    if (!error) setAdm3Features(data || []);
+      .eq('instance_id', id);
+    if (error) console.error('Error loading ADM3 features:', error);
+    else setAdm3Features(data || []);
+    setLoading(false);
   };
 
-  // --- Derived metrics
+  // --- Load category breakdown
+  const loadCategories = async (id: string) => {
+    const { data, error } = await supabase.from('v_category_scores').select('*').eq('instance_id', id);
+    if (error) console.error('Error loading category scores:', error);
+    else setCategories(data || []);
+  };
+
+  // --- Load population metrics
+  const loadPopulationMetrics = async (id: string) => {
+    const { data, error } = await supabase
+      .from('v_instance_population_metrics_v2')
+      .select('*')
+      .eq('instance_id', id)
+      .single();
+    if (error) console.error('Error loading population metrics:', error);
+    else setPopulationMetrics(data || {});
+  };
+
+  // --- Recompute scores and refresh data
+  const recomputeScores = async () => {
+    if (!instance?.id) return;
+    await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
+    await loadAdm3(instance.id);
+    await loadPopulationMetrics(instance.id);
+    await loadCategories(instance.id);
+  };
+
+  // --- Initial data loads
+  useEffect(() => {
+    if (!instance?.id) return;
+    loadAdm3(instance.id);
+    loadCategories(instance.id);
+    loadPopulationMetrics(instance.id);
+  }, [instance]);
+
+  // --- Derived metrics for ADM3
   const validScores = adm3Features.filter(f => f.score !== null);
   const avgScore = validScores.length
     ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2)
     : '—';
   const maxScore = validScores.length ? Math.max(...validScores.map(f => f.score)).toFixed(2) : '—';
   const minScore = validScores.length ? Math.min(...validScores.map(f => f.score)).toFixed(2) : '—';
-
-  const mostAffected = [...validScores]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, expanded ? undefined : 5);
+  const mostAffected = [...validScores].sort((a, b) => b.score - a.score).slice(0, expanded ? undefined : 5);
 
   return (
     <div className="p-4 space-y-3 text-sm text-gray-800">
@@ -113,22 +111,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <p className="text-gray-500">{instance.description || 'No description'}</p>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={() => setShowAreaModal(true)}
-                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-              >
+              <button onClick={() => setShowAreaModal(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Define Area
               </button>
-              <button
-                onClick={() => setShowConfig(true)}
-                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-              >
+              <button onClick={() => setShowConfig(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Configure Datasets
               </button>
-              <button
-                onClick={() => setShowScoring(true)}
-                className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
-              >
+              <button onClick={() => setShowScoring(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Calibration
               </button>
               <button
@@ -140,7 +129,35 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
-          {/* Summary analytics */}
+          {/* Population and Risk Panels */}
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            <div className="bg-white border rounded-lg p-2 shadow-sm">
+              <p className="text-xs text-gray-500">Total Population</p>
+              <p className="text-base font-semibold">
+                {populationMetrics.total_population
+                  ? populationMetrics.total_population.toLocaleString()
+                  : '—'}
+              </p>
+            </div>
+            <div className="bg-white border rounded-lg p-2 shadow-sm">
+              <p className="text-xs text-gray-500">People of Concern (≥3)</p>
+              <p className="text-base font-semibold text-orange-600">
+                {populationMetrics.people_of_concern
+                  ? populationMetrics.people_of_concern.toLocaleString()
+                  : '—'}
+              </p>
+            </div>
+            <div className="bg-white border rounded-lg p-2 shadow-sm">
+              <p className="text-xs text-gray-500">Poverty-Exposed Population</p>
+              <p className="text-base font-semibold text-red-600">
+                {populationMetrics.poverty_exposed
+                  ? populationMetrics.poverty_exposed.toLocaleString()
+                  : '—'}
+              </p>
+            </div>
+          </div>
+
+          {/* ADM3 Score Panels */}
           <div className="grid grid-cols-4 gap-2 mt-2">
             <div className="bg-white border rounded-lg p-2 shadow-sm">
               <p className="text-xs text-gray-500">Affected ADM3 Areas</p>
@@ -197,7 +214,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Category breakdown */}
+          {/* Category Breakdown */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
             <h3 className="font-semibold mb-2">Category Breakdown</h3>
             {categories.length === 0 ? (
@@ -224,7 +241,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Most affected areas */}
+          {/* Most Affected ADM3 Areas */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
             <h3 className="font-semibold mb-2">Most Affected ADM3 Areas</h3>
             <table className="w-full text-xs border">
