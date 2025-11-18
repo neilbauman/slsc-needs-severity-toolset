@@ -48,7 +48,7 @@ export default function InstancePage({ params }: any) {
     setInstance(instanceData);
 
     // 2️⃣ Load ADM3 scoring data
-    const { data: adm3Scores, error: adm3Err } = await supabase
+    const { error: adm3Err } = await supabase
       .from("scored_instance_values_adm3")
       .select("pcode, score")
       .eq("instance_id", instanceId);
@@ -59,7 +59,7 @@ export default function InstancePage({ params }: any) {
       return;
     }
 
-    // 3️⃣ Compute stats (safe version with explicit casting)
+    // 3️⃣ Compute stats (safe version with unknown cast)
     type StatRow = {
       count: number | null;
       min: number | null;
@@ -69,16 +69,14 @@ export default function InstancePage({ params }: any) {
 
     const { data: statData, error: statErr } = await supabase
       .from("scored_instance_values_adm3")
-      .select(
-        "count:count(*), min:min(score), max:max(score), avg:avg(score)"
-      )
+      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
       .eq("instance_id", instanceId)
       .maybeSingle();
 
     if (statErr) {
       console.error("Stat query error:", statErr);
     } else {
-      const statRows = statData as StatRow;
+      const statRows = statData as unknown as StatRow;
       setStats((prev: any) => ({
         ...prev,
         affected: statRows?.count ?? 0,
@@ -121,7 +119,6 @@ export default function InstancePage({ params }: any) {
     setLoading(false);
   };
 
-  // ✅ Recompute button
   const handleRecompute = async () => {
     setRecomputing(true);
     const { error } = await supabase.rpc("refresh_all_numeric_scores", {
