@@ -22,7 +22,7 @@ export default function ScoreLayerSelector({ instanceId, selected, onSelect }: a
       <h3 className="font-semibold mb-2">Map Layer</h3>
       <button
         className={`w-full text-left p-1 rounded ${selected === 'overall' ? 'bg-blue-100' : ''}`}
-        onClick={() => onSelect('overall')}
+        onClick={() => onSelect('overall', 'overall')}
       >
         Overall Score
       </button>
@@ -33,12 +33,21 @@ export default function ScoreLayerSelector({ instanceId, selected, onSelect }: a
         const datasets = c.dataset_list?.split(',').map(d => d.trim()) || [];
         return (
           <div key={cat}>
-            <p className="font-medium text-xs text-gray-700 mt-2">{cat}</p>
+            <button
+              className={`block w-full text-left font-medium text-xs mt-2 ${
+                selected === cat ? 'bg-blue-100 rounded' : ''
+              }`}
+              onClick={() => onSelect(cat, 'category')}
+            >
+              {cat}
+            </button>
             {datasets.map(ds => (
               <button
                 key={ds}
-                className={`block w-full text-left pl-4 p-1 text-xs rounded ${selected === ds ? 'bg-blue-100' : ''}`}
-                onClick={() => onSelect(ds)}
+                className={`block w-full text-left pl-4 p-1 text-xs rounded ${
+                  selected === ds ? 'bg-blue-100' : ''
+                }`}
+                onClick={() => onSelect(ds, 'dataset')}
               >
                 {ds}
               </button>
