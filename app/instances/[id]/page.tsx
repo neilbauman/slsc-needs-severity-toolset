@@ -24,7 +24,7 @@ interface Adm3Row {
 interface InstanceRow {
   id: string;
   name: string;
-  admin_scope: string[];
+  admin_scope: string[] | string;
   population_dataset_id: string | null;
   poverty_dataset_id: string | null;
 }
@@ -72,11 +72,18 @@ export default function InstancePage() {
   // Fetch ADM3 scores filtered to affected area
   // ------------------------------------------------------------
   useEffect(() => {
-    if (!instance?.admin_scope?.length) return;
+    if (!instance?.admin_scope) return;
     (async () => {
       setLoading(true);
 
-      // Get all ADM3 scores for instance
+      // Normalize admin_scope from string or array
+      const scopeArray =
+        typeof instance.admin_scope === "string"
+          ? JSON.parse(instance.admin_scope)
+          : instance.admin_scope;
+      const validParents = new Set(scopeArray);
+
+      // Fetch all ADM3 scores
       const { data: allScores, error: errScores } = await supabase
         .from("v_instance_admin_scores_geojson")
         .select("admin_pcode,name,score,geom_json")
@@ -88,7 +95,7 @@ export default function InstancePage() {
         return;
       }
 
-      // Get all ADM3 boundary metadata
+      // Fetch all ADM3 boundaries
       const { data: boundaries, error: errBound } = await supabase
         .from("admin_boundaries")
         .select("admin_pcode,parent_pcode,admin_level")
@@ -100,8 +107,7 @@ export default function InstancePage() {
         return;
       }
 
-      // Filter only ADM3s whose parent ADM2 is in admin_scope
-      const validParents = new Set(instance.admin_scope);
+      // Filter to affected ADM3s
       const filtered = allScores.filter((row) =>
         boundaries.some(
           (b) =>
@@ -116,7 +122,7 @@ export default function InstancePage() {
   }, [instance]);
 
   // ------------------------------------------------------------
-  // Compute simple stats (placeholder logic)
+  // Compute basic stats
   // ------------------------------------------------------------
   useEffect(() => {
     if (!adm3.length) return;
@@ -130,7 +136,7 @@ export default function InstancePage() {
   }, [adm3]);
 
   // ------------------------------------------------------------
-  // GeoJSON Normalization (supports Polygon & MultiPolygon)
+  // Normalize GeoJSON (Polygon, MultiPolygon, etc.)
   // ------------------------------------------------------------
   const normalizeGeometry = (geom: any) => {
     if (!geom) return null;
@@ -165,9 +171,7 @@ export default function InstancePage() {
     <div className="p-4 flex flex-col gap-3 text-sm">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-lg font-semibold">
-          {instance?.name || "Loading Instance..."}
-        </h1>
+        <h1 className="text-lg font-semibold">{instance?.name || "Loading..."}</h1>
         <div className="flex gap-2">
           <button
             onClick={() => setShowDefineArea(true)}
