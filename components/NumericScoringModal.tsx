@@ -25,7 +25,7 @@ export default function NumericScoringModal({
   const [preview, setPreview] = useState<any | null>(null);
   const [message, setMessage] = useState<string>("");
 
-  // ✅ Load existing configuration
+  // ✅ Load saved config
   useEffect(() => {
     const loadConfig = async () => {
       const { data, error } = await supabase
@@ -36,12 +36,12 @@ export default function NumericScoringModal({
         .single();
 
       if (error) {
-        console.warn("No existing config found:", error.message);
+        console.warn("No config found:", error.message);
         return;
       }
 
-      if (data?.score_config) {
-        const cfg = data.score_config;
+      const cfg = data?.score_config;
+      if (cfg) {
         if (cfg.method) setMethod(cfg.method);
         if (cfg.scaleMax) setScaleMax(cfg.scaleMax);
         if (cfg.inverse !== undefined) setInverse(cfg.inverse);
@@ -52,18 +52,10 @@ export default function NumericScoringModal({
     loadConfig();
   }, [instance.id, dataset.id]);
 
-  // ✅ Save configuration
+  // ✅ Save configuration JSON
   const saveConfig = async () => {
     setSaving(true);
-    setMessage("");
-
-    const config = {
-      method,
-      scaleMax,
-      inverse,
-      useNational,
-      thresholds,
-    };
+    const config = { method, scaleMax, inverse, useNational, thresholds };
 
     const { error } = await supabase
       .from("instance_dataset_config")
@@ -72,19 +64,20 @@ export default function NumericScoringModal({
       .eq("dataset_id", dataset.id);
 
     if (error) {
-      console.error("Error saving config:", error);
-      setMessage(`❌ Error saving config: ${error.message}`);
+      console.error(error);
+      setMessage(`❌ ${error.message}`);
     } else {
-      setMessage("✅ Configuration saved successfully!");
-      if (onSaved) await onSaved();
+      setMessage("✅ Configuration saved");
+      await onSaved();
     }
-
     setSaving(false);
   };
 
-  // ✅ Preview results before applying
+  // ✅ Preview scoring summary
   const previewScoring = async () => {
     setMessage("Generating preview...");
+    setPreview(null);
+
     const rpc =
       method === "Normalization"
         ? "score_numeric_normalized"
@@ -108,29 +101,39 @@ export default function NumericScoringModal({
 
     const { error } = await supabase.rpc(rpc, params);
     if (error) {
-      console.error("Preview error:", error);
-      setMessage(`❌ Error: ${error.message}`);
+      console.error(error);
+      setMessage(`❌ Preview failed: ${error.message}`);
       return;
     }
 
-    // Query summary stats
     const { data, error: statsErr } = await supabase
       .from("scored_instance_values_adm3")
-      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
+      .select("count(*), min(score), max(score), avg(score)")
       .eq("instance_id", instance.id)
       .eq("dataset_id", dataset.id)
-      .single();
+      .maybeSingle();
 
     if (statsErr) {
-      setMessage(`❌ Error loading preview stats: ${statsErr.message}`);
+      setMessage(`❌ Error loading preview: ${statsErr.message}`);
       return;
     }
 
-    setPreview(data);
-    setMessage("✅ Preview generated successfully!");
+    if (!data) {
+      setMessage("⚠️ No data available for preview.");
+      return;
+    }
+
+    setPreview({
+      count: data.count,
+      min: Number(data.min)?.toFixed(2),
+      max: Number(data.max)?.toFixed(2),
+      avg: Number(data.avg)?.toFixed(2),
+    });
+
+    setMessage("✅ Preview generated successfully");
   };
 
-  // ✅ Apply scoring (materialize)
+  // ✅ Apply scoring (persist to scored_instance_values_adm3)
   const applyScoring = async () => {
     setSaving(true);
     setMessage("Applying scoring...");
@@ -159,17 +162,16 @@ export default function NumericScoringModal({
     const { error } = await supabase.rpc(rpc, params);
 
     if (error) {
-      console.error("Scoring error:", error);
       setMessage(`❌ Scoring failed: ${error.message}`);
     } else {
-      setMessage("✅ Scoring applied successfully!");
-      if (onSaved) await onSaved();
+      setMessage("✅ Scoring applied successfully");
+      await onSaved();
     }
 
     setSaving(false);
   };
 
-  // ✅ Add and manage threshold ranges
+  // ✅ Manage thresholds
   const addRange = () =>
     setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
   const updateRange = (idx: number, key: string, value: any) => {
@@ -190,7 +192,6 @@ export default function NumericScoringModal({
           Adjust scoring settings for this dataset within the instance.
         </p>
 
-        {/* Method */}
         <div className="mb-4">
           <label className="block text-xs font-medium mb-1">Scoring Method</label>
           <select
@@ -311,16 +312,12 @@ export default function NumericScoringModal({
           </>
         )}
 
-        {/* Preview Section */}
         {preview && (
           <div className="bg-gray-50 border rounded p-3 text-xs mt-3">
             <div className="font-semibold mb-1">Preview Summary:</div>
-            <p>Count: {preview.count}</p>
-            <p>
-              Score Range: {Number(preview.min).toFixed(2)} –{" "}
-              {Number(preview.max).toFixed(2)}
-            </p>
-            <p>Average: {Number(preview.avg).toFixed(2)}</p>
+            <p>ADM3 Count: {preview.count}</p>
+            <p>Score Range: {preview.min} – {preview.max}</p>
+            <p>Average: {preview.avg}</p>
           </div>
         )}
 
