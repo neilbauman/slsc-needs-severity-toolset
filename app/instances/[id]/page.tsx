@@ -1,259 +1,170 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabaseClient";
-import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-import Link from "next/link";
+import { useParams } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
+import dynamic from "next/dynamic";
 
-const supabase = createClient();
+const Map = dynamic(() => import("react-leaflet").then(mod => mod.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import("react-leaflet").then(mod => mod.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import("react-leaflet").then(mod => mod.GeoJSON), { ssr: false });
 
-export default function InstancePage({ params }: any) {
-  const instanceId = params.id;
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  const [instance, setInstance] = useState<any>(null);
+export default function InstancePage() {
+  const { id } = useParams();
+  const instanceId = id as string;
   const [adm3Data, setAdm3Data] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({
     affected: 0,
     avg: "-",
     min: "-",
-    max: "-",
-    total_population: "-",
-    people_of_concern: "-",
-    poverty_exposed: "-",
+    max: "-"
   });
   const [loading, setLoading] = useState(true);
-  const [recomputing, setRecomputing] = useState(false);
 
+  // Fetch ADM3 boundaries and scores
   useEffect(() => {
-    loadInstanceData();
-  }, [instanceId]);
+    const loadData = async () => {
+      setLoading(true);
 
-  const loadInstanceData = async () => {
-    setLoading(true);
+      // --- Load ADM3 data with score and geometry ---
+      const { data: adm3, error: adm3Err } = await supabase
+        .from("v_instance_affected_adm3")
+        .select("admin_pcode, name, geom_json, score")
+        .eq("instance_id", instanceId);
 
-    // 1️⃣ Load instance info
-    const { data: instanceData, error: instErr } = await supabase
-      .from("instances")
-      .select("*")
-      .eq("id", instanceId)
-      .single();
+      if (adm3Err) {
+        console.error("ADM3 query error:", adm3Err);
+        setAdm3Data([]);
+      } else {
+        setAdm3Data(adm3 || []);
+      }
 
-    if (instErr) {
-      console.error("Error loading instance:", instErr);
+      // --- Load instance stats ---
+      const { data: statData, error: statErr } = await supabase
+        .from("scored_instance_values_adm3")
+        .select("count(*), min(score), max(score), avg(score)")
+        .eq("instance_id", instanceId)
+        .maybeSingle();
+
+      if (statErr) {
+        console.error("Stat query error:", statErr);
+      } else if (statData) {
+        setStats({
+          affected: statData.count ?? 0,
+          avg: statData.avg ? Number(statData.avg).toFixed(2) : "-",
+          min: statData.min ? Number(statData.min).toFixed(2) : "-",
+          max: statData.max ? Number(statData.max).toFixed(2) : "-"
+        });
+      }
+
       setLoading(false);
-      return;
-    }
-
-    setInstance(instanceData);
-
-    // 2️⃣ Load ADM3 scoring data
-    const { error: adm3Err } = await supabase
-      .from("scored_instance_values_adm3")
-      .select("pcode, score")
-      .eq("instance_id", instanceId);
-
-    if (adm3Err) {
-      console.error("ADM3 score load error:", adm3Err);
-      setLoading(false);
-      return;
-    }
-
-    // 3️⃣ Compute stats (safe version with unknown cast)
-    type StatRow = {
-      count: number | null;
-      min: number | null;
-      max: number | null;
-      avg: number | null;
     };
 
-    const { data: statData, error: statErr } = await supabase
-      .from("scored_instance_values_adm3")
-      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
-      .eq("instance_id", instanceId)
-      .maybeSingle();
+    loadData();
+  }, [instanceId]);
 
-    if (statErr) {
-      console.error("Stat query error:", statErr);
-    } else {
-      const statRows = statData as unknown as StatRow;
-      setStats((prev: any) => ({
-        ...prev,
-        affected: statRows?.count ?? 0,
-        avg: statRows?.avg ? Number(statRows.avg).toFixed(2) : "-",
-        min: statRows?.min ? Number(statRows.min).toFixed(2) : "-",
-        max: statRows?.max ? Number(statRows.max).toFixed(2) : "-",
-      }));
+  const recompute = async () => {
+    try {
+      await supabase.rpc("refresh_all_numeric_scores", { in_instance_id: instanceId });
+      // Refresh after recompute
+      const { data: adm3 } = await supabase
+        .from("v_instance_affected_adm3")
+        .select("admin_pcode, name, geom_json, score")
+        .eq("instance_id", instanceId);
+      setAdm3Data(adm3 || []);
+    } catch (err) {
+      console.error("Recompute failed:", err);
     }
-
-    // 4️⃣ Load ADM3 geometries
-    const { data: adm3Geo, error: geoErr } = await supabase
-      .from("v_instance_affected_adm3")
-      .select("name, admin_pcode, geom_json, score")
-      .eq("instance_id", instanceId);
-
-    if (geoErr) {
-      console.error("ADM3 geo load error:", geoErr);
-    } else {
-      setAdm3Data(adm3Geo || []);
-    }
-
-    // 5️⃣ Load population summary if exists
-    const { data: popData, error: popErr } = await supabase
-      .from("v_instance_admin_scores_by_dataset")
-      .select(
-        "total_population, people_of_concern, poverty_exposed, instance_id"
-      )
-      .eq("instance_id", instanceId)
-      .maybeSingle();
-
-    if (!popErr && popData) {
-      setStats((prev: any) => ({
-        ...prev,
-        total_population: popData.total_population ?? "-",
-        people_of_concern: popData.people_of_concern ?? "-",
-        poverty_exposed: popData.poverty_exposed ?? "-",
-      }));
-    }
-
-    setLoading(false);
   };
 
-  const handleRecompute = async () => {
-    setRecomputing(true);
-    const { error } = await supabase.rpc("refresh_all_numeric_scores", {
-      in_instance_id: instanceId,
-    });
-
-    if (error) {
-      console.error("Recompute error:", error);
-      alert("Error during recomputation: " + error.message);
-    } else {
-      await loadInstanceData();
-    }
-
-    setRecomputing(false);
+  const getColor = (score: number) => {
+    if (score >= 4) return "#d73027";
+    if (score >= 3) return "#fc8d59";
+    if (score >= 2) return "#fee08b";
+    if (score >= 1) return "#d9ef8b";
+    return "#91cf60";
   };
-
-  const formatNum = (val: any) =>
-    val === null || val === undefined || val === "-"
-      ? "-"
-      : Number(val).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   return (
-    <div className="p-6 space-y-4">
-      {loading ? (
-        <div className="text-gray-500">Loading instance data...</div>
-      ) : (
-        <>
-          {/* Header */}
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-xl font-semibold text-gray-800">
-                {instance?.name || "Unnamed Instance"}
-              </h1>
-              <p className="text-gray-500 text-sm">
-                {instance?.description || "No description provided."}
-              </p>
-            </div>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-1">Cebu EQ–Typhoon</h1>
+      <p className="text-gray-500 mb-6">description</p>
 
-            <div className="flex gap-2">
-              <Link
-                href={`/instances`}
-                className="px-3 py-2 border rounded text-sm hover:bg-gray-100"
-              >
-                Back
-              </Link>
-              <button
-                onClick={handleRecompute}
-                disabled={recomputing}
-                className="px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {recomputing ? "Recomputing..." : "Recompute"}
-              </button>
-            </div>
+      {/* Stats Section */}
+      <div className="grid grid-cols-6 gap-4 mb-6">
+        <div className="bg-white rounded-lg p-4 shadow">
+          <div className="text-sm text-gray-500">Total Population</div>
+          <div className="text-lg font-semibold">–</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 shadow">
+          <div className="text-sm text-gray-500">People of Concern (≥3)</div>
+          <div className="text-lg font-semibold">–</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 shadow">
+          <div className="text-sm text-gray-500">Poverty-Exposed Population</div>
+          <div className="text-lg font-semibold">–</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 shadow">
+          <div className="text-sm text-gray-500">Affected ADM3 Areas</div>
+          <div className="text-lg font-semibold">{stats.affected}</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 shadow">
+          <div className="text-sm text-gray-500">Average Score</div>
+          <div className="text-lg font-semibold">{stats.avg}</div>
+        </div>
+        <div className="bg-white rounded-lg p-4 shadow">
+          <div className="text-sm text-gray-500">Highest / Lowest Score</div>
+          <div className="text-lg font-semibold">
+            {stats.max} / {stats.min}
           </div>
+        </div>
+      </div>
 
-          {/* Summary cards */}
-          <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-center">
-            <div className="p-3 bg-gray-50 rounded shadow-sm">
-              <div className="text-xs text-gray-500">Total Population</div>
-              <div className="text-lg font-semibold">
-                {formatNum(stats.total_population)}
-              </div>
-            </div>
+      {/* Map Section */}
+      <div className="relative rounded-lg overflow-hidden shadow bg-white">
+        {loading ? (
+          <div className="p-10 text-center text-gray-500">Loading map...</div>
+        ) : (
+          <Map
+            center={[10.3157, 123.8854]}
+            zoom={8}
+            style={{ height: "600px", width: "100%" }}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {adm3Data.map((item, idx) => {
+              const geom = item.geom_json;
+              if (!geom) return null;
+              return (
+                <GeoJSON
+                  key={idx}
+                  data={geom}
+                  style={() => ({
+                    color: "black",
+                    weight: 0.6,
+                    fillColor: getColor(item.score),
+                    fillOpacity: 0.7,
+                  })}
+                />
+              );
+            })}
+          </Map>
+        )}
+      </div>
 
-            <div className="p-3 bg-gray-50 rounded shadow-sm">
-              <div className="text-xs text-gray-500">People of Concern</div>
-              <div className="text-lg font-semibold">
-                {formatNum(stats.people_of_concern)}
-              </div>
-            </div>
-
-            <div className="p-3 bg-gray-50 rounded shadow-sm">
-              <div className="text-xs text-gray-500">
-                Poverty-Exposed Population
-              </div>
-              <div className="text-lg font-semibold">
-                {formatNum(stats.poverty_exposed)}
-              </div>
-            </div>
-
-            <div className="p-3 bg-gray-50 rounded shadow-sm">
-              <div className="text-xs text-gray-500">Affected ADM3 Areas</div>
-              <div className="text-lg font-semibold">{stats.affected}</div>
-            </div>
-
-            <div className="p-3 bg-gray-50 rounded shadow-sm">
-              <div className="text-xs text-gray-500">Average Score</div>
-              <div className="text-lg font-semibold">{stats.avg}</div>
-            </div>
-
-            <div className="p-3 bg-gray-50 rounded shadow-sm">
-              <div className="text-xs text-gray-500">
-                Highest / Lowest Score
-              </div>
-              <div className="text-lg font-semibold">
-                {stats.max} / {stats.min}
-              </div>
-            </div>
-          </div>
-
-          {/* Map */}
-          <div className="border rounded mt-4 overflow-hidden">
-            <MapContainer
-              style={{ height: "500px", width: "100%" }}
-              center={[10.3, 123.9]}
-              zoom={8}
-            >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution="&copy; OpenStreetMap contributors"
-              />
-              {adm3Data.length > 0 &&
-                adm3Data.map((adm3: any, idx: number) => {
-                  try {
-                    const geom = JSON.parse(adm3.geom_json);
-                    return (
-                      <GeoJSON
-                        key={idx}
-                        data={geom}
-                        style={{
-                          color: "#4b5563",
-                          weight: 0.8,
-                          fillColor: "#3b82f6",
-                          fillOpacity: 0.5,
-                        }}
-                      />
-                    );
-                  } catch {
-                    return null;
-                  }
-                })}
-            </MapContainer>
-          </div>
-        </>
-      )}
+      {/* Controls */}
+      <div className="flex justify-end mt-4">
+        <button
+          onClick={recompute}
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          Recompute
+        </button>
+      </div>
     </div>
   );
 }
