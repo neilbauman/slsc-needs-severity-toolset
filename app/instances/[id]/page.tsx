@@ -15,17 +15,17 @@ export default function InstancePage({ params }: any) {
   const [adm3Data, setAdm3Data] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({
     affected: 0,
-    avg: 0,
-    min: 0,
-    max: 0,
-    total_population: null,
-    people_of_concern: null,
-    poverty_exposed: null,
+    avg: "-",
+    min: "-",
+    max: "-",
+    total_population: "-",
+    people_of_concern: "-",
+    poverty_exposed: "-",
   });
   const [loading, setLoading] = useState(true);
   const [recomputing, setRecomputing] = useState(false);
 
-  // ✅ Load instance + ADM3 scoring data
+  // Load all instance data
   useEffect(() => {
     loadInstanceData();
   }, [instanceId]);
@@ -33,7 +33,7 @@ export default function InstancePage({ params }: any) {
   const loadInstanceData = async () => {
     setLoading(true);
 
-    // 1️⃣ Load instance details
+    // 1️⃣ Load instance info
     const { data: instanceData, error: instErr } = await supabase
       .from("instances")
       .select("*")
@@ -48,7 +48,7 @@ export default function InstancePage({ params }: any) {
 
     setInstance(instanceData);
 
-    // 2️⃣ Load affected ADM3s + scores
+    // 2️⃣ Load ADM3 scoring data
     const { data: adm3Scores, error: adm3Err } = await supabase
       .from("scored_instance_values_adm3")
       .select("pcode, score")
@@ -60,24 +60,24 @@ export default function InstancePage({ params }: any) {
       return;
     }
 
-    // 3️⃣ Compute score summary stats
+    // 3️⃣ Compute stats (✅ using aliases to fix TS type error)
     const { data: statRows, error: statErr } = await supabase
       .from("scored_instance_values_adm3")
-      .select("count(*), min(score), max(score), avg(score)")
+      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
       .eq("instance_id", instanceId)
       .maybeSingle();
 
-    if (statErr) {
-      console.error("Stat query error:", statErr);
-    }
+    if (statErr) console.error("Stat query error:", statErr);
 
-    setStats((prev: any) => ({
-      ...prev,
-      affected: statRows?.count || 0,
-      avg: statRows?.avg ? Number(statRows.avg).toFixed(2) : "-",
-      min: statRows?.min ? Number(statRows.min).toFixed(2) : "-",
-      max: statRows?.max ? Number(statRows.max).toFixed(2) : "-",
-    }));
+    if (statRows) {
+      setStats((prev: any) => ({
+        ...prev,
+        affected: statRows.count ?? 0,
+        avg: statRows.avg ? Number(statRows.avg).toFixed(2) : "-",
+        min: statRows.min ? Number(statRows.min).toFixed(2) : "-",
+        max: statRows.max ? Number(statRows.max).toFixed(2) : "-",
+      }));
+    }
 
     // 4️⃣ Load ADM3 geometries
     const { data: adm3Geo, error: geoErr } = await supabase
@@ -91,7 +91,7 @@ export default function InstancePage({ params }: any) {
       setAdm3Data(adm3Geo || []);
     }
 
-    // 5️⃣ Load population summary (if available)
+    // 5️⃣ Load population summary if exists
     const { data: popData, error: popErr } = await supabase
       .from("v_instance_admin_scores_by_dataset")
       .select(
@@ -103,16 +103,16 @@ export default function InstancePage({ params }: any) {
     if (!popErr && popData) {
       setStats((prev: any) => ({
         ...prev,
-        total_population: popData.total_population,
-        people_of_concern: popData.people_of_concern,
-        poverty_exposed: popData.poverty_exposed,
+        total_population: popData.total_population ?? "-",
+        people_of_concern: popData.people_of_concern ?? "-",
+        poverty_exposed: popData.poverty_exposed ?? "-",
       }));
     }
 
     setLoading(false);
   };
 
-  // ✅ Recompute button handler
+  // ✅ Recompute button
   const handleRecompute = async () => {
     setRecomputing(true);
     const { error } = await supabase.rpc("refresh_all_numeric_scores", {
@@ -129,10 +129,10 @@ export default function InstancePage({ params }: any) {
     setRecomputing(false);
   };
 
-  const formatNum = (val: number | null) =>
-    val === null || val === undefined
+  const formatNum = (val: any) =>
+    val === null || val === undefined || val === "-"
       ? "-"
-      : val.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      : Number(val).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   return (
     <div className="p-6 space-y-4">
@@ -140,6 +140,7 @@ export default function InstancePage({ params }: any) {
         <div className="text-gray-500">Loading instance data...</div>
       ) : (
         <>
+          {/* Header */}
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-xl font-semibold text-gray-800">
@@ -167,7 +168,7 @@ export default function InstancePage({ params }: any) {
             </div>
           </div>
 
-          {/* --- Summary Cards --- */}
+          {/* Summary cards */}
           <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-center">
             <div className="p-3 bg-gray-50 rounded shadow-sm">
               <div className="text-xs text-gray-500">Total Population</div>
@@ -212,7 +213,7 @@ export default function InstancePage({ params }: any) {
             </div>
           </div>
 
-          {/* --- Map --- */}
+          {/* Map */}
           <div className="border rounded mt-4 overflow-hidden">
             <MapContainer
               style={{ height: "500px", width: "100%" }}
@@ -232,10 +233,10 @@ export default function InstancePage({ params }: any) {
                         key={idx}
                         data={geom}
                         style={{
-                          color: "#666",
+                          color: "#4b5563",
                           weight: 0.8,
-                          fillColor: "#f59e0b",
-                          fillOpacity: 0.6,
+                          fillColor: "#3b82f6",
+                          fillOpacity: 0.5,
                         }}
                       />
                     );
