@@ -1,257 +1,252 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import dynamic from 'next/dynamic';
-import { supabase } from '@/lib/supabaseClient';
-import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal';
-import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
-import InstanceScoringModal from '@/components/InstanceScoringModal';
-import ScoreLayerSelector from '@/components/ScoreLayerSelector';
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabaseClient";
+import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import Link from "next/link";
 
-// --- Dynamic Leaflet imports
-const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import('react-leaflet').then((m) => m.GeoJSON), { ssr: false });
+const supabase = createClient();
 
-export default function InstancePage({ params }: { params: { id: string } }) {
+export default function InstancePage({ params }: any) {
+  const instanceId = params.id;
+
   const [instance, setInstance] = useState<any>(null);
-  const [adm3Features, setAdm3Features] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [populationMetrics, setPopulationMetrics] = useState<any | null>(null);
+  const [adm3Data, setAdm3Data] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>({
+    affected: 0,
+    avg: 0,
+    min: 0,
+    max: 0,
+    total_population: null,
+    people_of_concern: null,
+    poverty_exposed: null,
+  });
   const [loading, setLoading] = useState(true);
-  const [selectedLayer, setSelectedLayer] = useState<string>('overall');
-  const [zoomLocked, setZoomLocked] = useState(true);
-  const [showConfig, setShowConfig] = useState(false);
-  const [showAreaModal, setShowAreaModal] = useState(false);
-  const [showScoring, setShowScoring] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
 
-  // --- Color scale
-  const colorForScore = (score: number | null) => {
-    if (score === null || score === undefined) return '#ccc';
-    if (score <= 1) return '#00b050';
-    if (score <= 2) return '#92d050';
-    if (score <= 3) return '#ffff00';
-    if (score <= 4) return '#ffc000';
-    return '#ff0000';
-  };
-
-  // --- Load instance metadata
+  // ✅ Load instance + ADM3 scoring data
   useEffect(() => {
-    const loadInstance = async () => {
-      const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
-      if (!error) setInstance(data);
-      else console.error('Instance load error:', error);
-    };
-    loadInstance();
-  }, [params.id]);
+    loadInstanceData();
+  }, [instanceId]);
 
-  // --- Load category breakdown
-  useEffect(() => {
-    if (!instance?.id) return;
-    const loadCategories = async () => {
-      const { data, error } = await supabase
-        .from('v_category_scores')
-        .select('*')
-        .eq('instance_id', instance.id);
-      if (!error) setCategories(data || []);
-      else console.error('Category load error:', error);
-    };
-    loadCategories();
-  }, [instance]);
-
-  // --- Load ADM3 polygons (default overall)
-  useEffect(() => {
-    if (!instance?.id) return;
-    loadMapData('overall');
-  }, [instance]);
-
-  // --- Load population metrics from materialized view
-  useEffect(() => {
-    if (!instance?.id) return;
-    const loadPop = async () => {
-      const { data, error } = await supabase
-        .from('mv_instance_population_metrics_v2')
-        .select('*')
-        .eq('instance_id', instance.id)
-        .single();
-      if (!error) setPopulationMetrics(data);
-      else console.error('Population metrics error:', error);
-    };
-    loadPop();
-  }, [instance]);
-
-  // --- Load map data
-  const loadMapData = async (layer: string) => {
-    if (!instance?.id) return;
+  const loadInstanceData = async () => {
     setLoading(true);
-    try {
-      if (layer === 'overall') {
-        const { data, error } = await supabase
-          .from('v_instance_affected_adm3')
-          .select('admin_pcode,name,geom_json,score')
-          .eq('instance_id', instance.id);
-        if (!error) setAdm3Features(data || []);
-        else console.error('ADM3 load error:', error);
-      } else {
-        const { data, error } = await supabase.rpc('get_dataset_scores_for_instance', {
-          in_instance_id: instance.id,
-          in_dataset_name: layer,
-        });
-        if (!error) setAdm3Features(data || []);
-        else console.error('Dataset layer load error:', error);
-      }
-    } finally {
+
+    // 1️⃣ Load instance details
+    const { data: instanceData, error: instErr } = await supabase
+      .from("instances")
+      .select("*")
+      .eq("id", instanceId)
+      .single();
+
+    if (instErr) {
+      console.error("Error loading instance:", instErr);
       setLoading(false);
+      return;
     }
-  };
 
-  // --- Recompute scores + refresh materialized view
-  const recomputeScores = async () => {
-    if (!instance?.id) return;
-    try {
-      const { error: scoreErr } = await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
-      if (scoreErr) throw scoreErr;
+    setInstance(instanceData);
 
-      const { error: refreshErr } = await supabase.rpc('refresh_instance_population_metrics', { in_instance_id: instance.id });
-      if (refreshErr) throw refreshErr;
+    // 2️⃣ Load affected ADM3s + scores
+    const { data: adm3Scores, error: adm3Err } = await supabase
+      .from("scored_instance_values_adm3")
+      .select("pcode, score")
+      .eq("instance_id", instanceId);
 
-      await loadMapData(selectedLayer);
-
-      const { data, error } = await supabase
-        .from('mv_instance_population_metrics_v2')
-        .select('*')
-        .eq('instance_id', instance.id)
-        .single();
-      if (!error) setPopulationMetrics(data);
-      else console.error('Metrics reload error:', error);
-    } catch (err) {
-      console.error('Recompute failed:', err);
+    if (adm3Err) {
+      console.error("ADM3 score load error:", adm3Err);
+      setLoading(false);
+      return;
     }
+
+    // 3️⃣ Compute score summary stats
+    const { data: statRows, error: statErr } = await supabase
+      .from("scored_instance_values_adm3")
+      .select("count(*), min(score), max(score), avg(score)")
+      .eq("instance_id", instanceId)
+      .maybeSingle();
+
+    if (statErr) {
+      console.error("Stat query error:", statErr);
+    }
+
+    setStats((prev: any) => ({
+      ...prev,
+      affected: statRows?.count || 0,
+      avg: statRows?.avg ? Number(statRows.avg).toFixed(2) : "-",
+      min: statRows?.min ? Number(statRows.min).toFixed(2) : "-",
+      max: statRows?.max ? Number(statRows.max).toFixed(2) : "-",
+    }));
+
+    // 4️⃣ Load ADM3 geometries
+    const { data: adm3Geo, error: geoErr } = await supabase
+      .from("v_instance_affected_adm3")
+      .select("name, admin_pcode, geom_json, score")
+      .eq("instance_id", instanceId);
+
+    if (geoErr) {
+      console.error("ADM3 geo load error:", geoErr);
+    } else {
+      setAdm3Data(adm3Geo || []);
+    }
+
+    // 5️⃣ Load population summary (if available)
+    const { data: popData, error: popErr } = await supabase
+      .from("v_instance_admin_scores_by_dataset")
+      .select(
+        "total_population, people_of_concern, poverty_exposed, instance_id"
+      )
+      .eq("instance_id", instanceId)
+      .maybeSingle();
+
+    if (!popErr && popData) {
+      setStats((prev: any) => ({
+        ...prev,
+        total_population: popData.total_population,
+        people_of_concern: popData.people_of_concern,
+        poverty_exposed: popData.poverty_exposed,
+      }));
+    }
+
+    setLoading(false);
   };
 
-  const formatNumber = (val: any) => {
-    if (val === null || val === undefined || isNaN(val)) return '—';
-    return Math.round(val).toLocaleString();
+  // ✅ Recompute button handler
+  const handleRecompute = async () => {
+    setRecomputing(true);
+    const { error } = await supabase.rpc("refresh_all_numeric_scores", {
+      in_instance_id: instanceId,
+    });
+
+    if (error) {
+      console.error("Recompute error:", error);
+      alert("Error during recomputation: " + error.message);
+    } else {
+      await loadInstanceData();
+    }
+
+    setRecomputing(false);
   };
 
-  // --- Derived metrics
-  const validScores = adm3Features.filter((f) => f.score !== null);
-  const avgScore = validScores.length
-    ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2)
-    : '—';
-  const maxScore = validScores.length ? Math.max(...validScores.map((f) => f.score)).toFixed(2) : '—';
-  const minScore = validScores.length ? Math.min(...validScores.map((f) => f.score)).toFixed(2) : '—';
+  const formatNum = (val: number | null) =>
+    val === null || val === undefined
+      ? "-"
+      : val.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
   return (
-    <div className="p-4 space-y-3 text-sm text-gray-800">
-      {instance && (
+    <div className="p-6 space-y-4">
+      {loading ? (
+        <div className="text-gray-500">Loading instance data...</div>
+      ) : (
         <>
-          {/* Header + Buttons */}
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-lg font-semibold">{instance.name}</h1>
-              <p className="text-gray-500">{instance.description || 'No description'}</p>
+              <h1 className="text-xl font-semibold text-gray-800">
+                {instance?.name || "Unnamed Instance"}
+              </h1>
+              <p className="text-gray-500 text-sm">
+                {instance?.description || "No description provided."}
+              </p>
             </div>
+
             <div className="flex gap-2">
-              <button onClick={() => setShowAreaModal(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
-                Define Area
-              </button>
-              <button onClick={() => setShowConfig(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
-                Configure Datasets
-              </button>
-              <button onClick={() => setShowScoring(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
-                Calibration
-              </button>
-              <button
-                onClick={recomputeScores}
-                className="px-3 py-1 border rounded bg-blue-600 text-white hover:bg-blue-700"
+              <Link
+                href={`/instances`}
+                className="px-3 py-2 border rounded text-sm hover:bg-gray-100"
               >
-                Recompute
+                Back
+              </Link>
+              <button
+                onClick={handleRecompute}
+                disabled={recomputing}
+                className="px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {recomputing ? "Recomputing..." : "Recompute"}
               </button>
             </div>
           </div>
 
-          {/* Population Metrics */}
-          <div className="grid grid-cols-3 gap-2 mt-3">
-            <StatCard title="Total Population" value={formatNumber(populationMetrics?.total_population)} />
-            <StatCard title="People of Concern (≥3)" value={formatNumber(populationMetrics?.people_of_concern)} />
-            <StatCard title="Poverty-Exposed Population" value={formatNumber(populationMetrics?.poverty_exposed)} />
-          </div>
-
-          {/* Summary */}
-          <div className="grid grid-cols-4 gap-2 mt-2">
-            <StatCard title="Affected ADM3 Areas" value={adm3Features.length} />
-            <StatCard title="Average Score" value={avgScore} />
-            <StatCard title="Highest" value={maxScore} />
-            <StatCard title="Lowest" value={minScore} />
-          </div>
-
-          {/* Map */}
-          <div className="flex bg-white border rounded-lg shadow-sm">
-            <div className="flex-1 p-2 relative">
-              <div className="absolute right-3 top-3 z-10">
-                <button
-                  onClick={() => setZoomLocked(!zoomLocked)}
-                  className="px-2 py-1 text-xs border rounded bg-gray-50 hover:bg-gray-100"
-                >
-                  {zoomLocked ? '🔒 Locked' : '🔓 Unlocked'}
-                </button>
+          {/* --- Summary Cards --- */}
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-center">
+            <div className="p-3 bg-gray-50 rounded shadow-sm">
+              <div className="text-xs text-gray-500">Total Population</div>
+              <div className="text-lg font-semibold">
+                {formatNum(stats.total_population)}
               </div>
-              {loading ? (
-                <p className="text-center p-6">Loading map...</p>
-              ) : (
-                <MapContainer
-                  center={[10.3, 123.9]}
-                  zoom={8}
-                  scrollWheelZoom={!zoomLocked}
-                  dragging={!zoomLocked}
-                  style={{ height: '500px', width: '100%' }}
-                >
-                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  {adm3Features.map((f, i) => (
-                    <GeoJSON
-                      key={i}
-                      data={f.geom_json}
-                      style={{
-                        color: '#333',
-                        weight: 0.5,
-                        fillOpacity: 0.7,
-                        fillColor: colorForScore(f.score),
-                      }}
-                    />
-                  ))}
-                </MapContainer>
-              )}
             </div>
-            <ScoreLayerSelector
-              instanceId={instance.id}
-              selected={selectedLayer}
-              onSelect={(sel: string) => {
-                setSelectedLayer(sel);
-                loadMapData(sel);
-              }}
-            />
+
+            <div className="p-3 bg-gray-50 rounded shadow-sm">
+              <div className="text-xs text-gray-500">People of Concern</div>
+              <div className="text-lg font-semibold">
+                {formatNum(stats.people_of_concern)}
+              </div>
+            </div>
+
+            <div className="p-3 bg-gray-50 rounded shadow-sm">
+              <div className="text-xs text-gray-500">
+                Poverty-Exposed Population
+              </div>
+              <div className="text-lg font-semibold">
+                {formatNum(stats.poverty_exposed)}
+              </div>
+            </div>
+
+            <div className="p-3 bg-gray-50 rounded shadow-sm">
+              <div className="text-xs text-gray-500">Affected ADM3 Areas</div>
+              <div className="text-lg font-semibold">{stats.affected}</div>
+            </div>
+
+            <div className="p-3 bg-gray-50 rounded shadow-sm">
+              <div className="text-xs text-gray-500">Average Score</div>
+              <div className="text-lg font-semibold">{stats.avg}</div>
+            </div>
+
+            <div className="p-3 bg-gray-50 rounded shadow-sm">
+              <div className="text-xs text-gray-500">
+                Highest / Lowest Score
+              </div>
+              <div className="text-lg font-semibold">
+                {stats.max} / {stats.min}
+              </div>
+            </div>
+          </div>
+
+          {/* --- Map --- */}
+          <div className="border rounded mt-4 overflow-hidden">
+            <MapContainer
+              style={{ height: "500px", width: "100%" }}
+              center={[10.3, 123.9]}
+              zoom={8}
+            >
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution="&copy; OpenStreetMap contributors"
+              />
+              {adm3Data.length > 0 &&
+                adm3Data.map((adm3: any, idx: number) => {
+                  try {
+                    const geom = JSON.parse(adm3.geom_json);
+                    return (
+                      <GeoJSON
+                        key={idx}
+                        data={geom}
+                        style={{
+                          color: "#666",
+                          weight: 0.8,
+                          fillColor: "#f59e0b",
+                          fillOpacity: 0.6,
+                        }}
+                      />
+                    );
+                  } catch {
+                    return null;
+                  }
+                })}
+            </MapContainer>
           </div>
         </>
-      )}
-
-      {/* Modals */}
-      {showConfig && (
-        <InstanceDatasetConfigModal instance={instance} onClose={() => setShowConfig(false)} onSaved={recomputeScores} />
-      )}
-      {showAreaModal && (
-        <DefineAffectedAreaModal instance={instance} onClose={() => setShowAreaModal(false)} onSaved={recomputeScores} />
-      )}
-      {showScoring && (
-        <InstanceScoringModal instance={instance} onClose={() => setShowScoring(false)} onSaved={recomputeScores} />
       )}
     </div>
   );
 }
-
-const StatCard = ({ title, value }: { title: string; value: any }) => (
-  <div className="bg-white border rounded-lg p-3 shadow-sm text-center">
-    <p className="text-xs text-gray-500">{title}</p>
-    <p className="text-lg font-semibold">{value ?? '—'}</p>
-  </div>
-);
