@@ -8,7 +8,7 @@ import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import InstanceScoringModal from '@/components/InstanceScoringModal';
 import ScoreLayerSelector from '@/components/ScoreLayerSelector';
 
-// Dynamic Leaflet imports
+// --- Dynamic Leaflet imports
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then((m) => m.GeoJSON), { ssr: false });
@@ -26,7 +26,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showScoring, setShowScoring] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // --- Color scale for scores
+  // --- Color scale
   const colorForScore = (score: number | null) => {
     if (score === null || score === undefined) return '#ccc';
     if (score <= 1) return '#00b050';
@@ -40,11 +40,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   useEffect(() => {
     const loadInstance = async () => {
       const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
-      if (error) {
-        console.error('Instance load error:', error);
-        return;
-      }
-      setInstance(data);
+      if (!error) setInstance(data);
+      else console.error('Instance load error:', error);
     };
     loadInstance();
   }, [params.id]);
@@ -53,86 +50,92 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   useEffect(() => {
     if (!instance?.id) return;
     const loadCategories = async () => {
-      const { data, error } = await supabase.from('v_category_scores').select('*').eq('instance_id', instance.id);
-      if (error) console.error('Category load error:', error);
-      setCategories(data || []);
+      const { data, error } = await supabase
+        .from('v_category_scores')
+        .select('*')
+        .eq('instance_id', instance.id);
+      if (!error) setCategories(data || []);
+      else console.error('Category load error:', error);
     };
     loadCategories();
   }, [instance]);
 
-  // --- Load ADM3 polygons
+  // --- Load ADM3 polygons (default overall)
   useEffect(() => {
     if (!instance?.id) return;
     loadMapData('overall');
   }, [instance]);
 
-  // --- Load population metrics from materialized view
+  // --- Load population metrics from the materialized view
   useEffect(() => {
     if (!instance?.id) return;
-    const loadMetrics = async () => {
+    const loadPop = async () => {
       const { data, error } = await supabase
-        .from('mv_instance_summary')
+        .from('mv_instance_population_metrics_v2')
         .select('*')
         .eq('instance_id', instance.id)
         .single();
-
-      if (error) console.error('Population metrics load error:', error);
-      setPopulationMetrics(data || null);
+      if (!error) setPopulationMetrics(data);
+      else console.error('Population metrics error:', error);
     };
-    loadMetrics();
+    loadPop();
   }, [instance]);
 
-  // --- Load map data based on layer selection
+  // --- Helper: Load map data based on layer
   const loadMapData = async (layer: string) => {
     if (!instance?.id) return;
     setLoading(true);
-
     try {
-      let data: any[] = [];
-
       if (layer === 'overall') {
-        const res = await supabase
+        const { data, error } = await supabase
           .from('v_instance_affected_adm3')
           .select('admin_pcode,name,geom_json,score')
           .eq('instance_id', instance.id);
-        if (res.error) throw res.error;
-        data = res.data || [];
+        if (!error) setAdm3Features(data || []);
+        else console.error('ADM3 load error:', error);
       } else {
-        const res = await supabase.rpc('get_dataset_scores_for_instance', {
-          in_instance_id: instance.id,
-          in_dataset_name: layer,
-        });
-        if (res.error) throw res.error;
-        data = res.data || [];
+        const { data, error } = await supabase
+          .rpc('get_dataset_scores_for_instance', { in_instance_id: instance.id, in_dataset_name: layer });
+        if (!error) setAdm3Features(data || []);
+        else console.error('Dataset layer load error:', error);
       }
-
-      setAdm3Features(data);
-    } catch (err) {
-      console.error('Map load error:', err);
-      setAdm3Features([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // --- Recompute scores
+  // --- Recompute everything (now includes materialized view refresh)
   const recomputeScores = async () => {
     if (!instance?.id) return;
-    await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
-    await loadMapData(selectedLayer);
+    try {
+      // Step 1 – Run scoring function
+      const { error: scoreErr } = await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
+      if (scoreErr) throw scoreErr;
 
-    // Refresh metrics after recomputation
-    const { data } = await supabase
-      .from('mv_instance_summary')
-      .select('*')
-      .eq('instance_id', instance.id)
-      .single();
-    setPopulationMetrics(data);
+      // Step 2 – Refresh the materialized view
+      const { error: refreshErr } = await supabase.rpc('refresh_instance_population_metrics', { in_instance_id: instance.id });
+      if (refreshErr) throw refreshErr;
+
+      // Step 3 – Reload map and metrics
+      await loadMapData(selectedLayer);
+
+      const { data, error } = await supabase
+        .from('mv_instance_population_metrics_v2')
+        .select('*')
+        .eq('instance_id', instance.id)
+        .single();
+      if (!error) setPopulationMetrics(data);
+      else console.error('Metrics reload error:', error);
+    } catch (err) {
+      console.error('Recompute failed:', err);
+    }
   };
 
-  // --- Derived stats from map scores
+  // --- Derived metrics
   const validScores = adm3Features.filter((f) => f.score !== null);
-  const avgScore = validScores.length ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2) : '—';
+  const avgScore = validScores.length
+    ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2)
+    : '—';
   const maxScore = validScores.length ? Math.max(...validScores.map((f) => f.score)).toFixed(2) : '—';
   const minScore = validScores.length ? Math.min(...validScores.map((f) => f.score)).toFixed(2) : '—';
 
@@ -140,7 +143,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     <div className="p-4 space-y-3 text-sm text-gray-800">
       {instance && (
         <>
-          {/* Header + Actions */}
+          {/* Header + Buttons */}
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-lg font-semibold">{instance.name}</h1>
@@ -156,33 +159,31 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <button onClick={() => setShowScoring(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Calibration
               </button>
-              <button onClick={recomputeScores} className="px-3 py-1 border rounded bg-blue-600 text-white hover:bg-blue-700">
+              <button
+                onClick={recomputeScores}
+                className="px-3 py-1 border rounded bg-blue-600 text-white hover:bg-blue-700"
+              >
                 Recompute
               </button>
             </div>
           </div>
 
-          {/* Population + Impact Metrics */}
+          {/* Population Metrics */}
           <div className="grid grid-cols-3 gap-2 mt-3">
-            <StatCard title="Total Population" value={populationMetrics?.total_population?.toLocaleString() ?? '—'} />
-            <StatCard title="People of Concern (≥3)" value={populationMetrics?.people_of_concern?.toLocaleString() ?? '—'} />
-            <StatCard
-              title="Poverty-Exposed Population"
-              value={populationMetrics?.poverty_exposed
-                ? Math.round(populationMetrics.poverty_exposed).toLocaleString()
-                : '—'}
-            />
+            <StatCard title="Total Population" value={populationMetrics?.total_population ?? '—'} />
+            <StatCard title="People of Concern (≥3)" value={populationMetrics?.people_of_concern ?? '—'} />
+            <StatCard title="Poverty-Exposed Population" value={populationMetrics?.poverty_exposed ?? '—'} />
           </div>
 
-          {/* Map Summary */}
+          {/* Summary Analytics */}
           <div className="grid grid-cols-4 gap-2 mt-2">
-            <StatCard title="Affected ADM3 Areas" value={adm3Features.length || '—'} />
+            <StatCard title="Affected ADM3 Areas" value={adm3Features.length} />
             <StatCard title="Average Score" value={avgScore} />
             <StatCard title="Highest" value={maxScore} />
             <StatCard title="Lowest" value={minScore} />
           </div>
 
-          {/* Map and Layer Selector */}
+          {/* Map + Selector */}
           <div className="flex bg-white border rounded-lg shadow-sm">
             <div className="flex-1 p-2 relative">
               <div className="absolute right-3 top-3 z-10">
