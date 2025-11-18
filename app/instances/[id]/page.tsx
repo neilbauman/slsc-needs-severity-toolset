@@ -5,59 +5,46 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
+// ─────────────────────────────────────────────────────────────
+// Type definitions
+// ─────────────────────────────────────────────────────────────
 interface AreaRow {
   admin_pcode: string;
   name: string;
-  score: number;
+  score?: number | null;
   geom_json: any;
 }
 
+interface Stats {
+  affected: number;
+  avg: string | number;
+  min: string | number;
+  max: string | number;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
 export default function InstancePage() {
   const { id } = useParams();
+  const [layerType, setLayerType] = useState<"overall" | "category" | "dataset">("overall");
+  const [selectedLayer, setSelectedLayer] = useState<string>("overall");
   const [adm3, setAdm3] = useState<AreaRow[]>([]);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<Stats>({
     affected: 0,
     avg: "-",
     min: "-",
     max: "-",
   });
+  const [loading, setLoading] = useState(false);
 
-  // 🔹 Fetch the scores + geometry
-  useEffect(() => {
-    if (!id) return;
-    (async () => {
-      const { data, error } = await supabase
-        .from("v_instance_admin_scores_geojson")
-        .select("admin_pcode,name,score,geom_json")
-        .eq("instance_id", id);
-
-      if (error) {
-        console.error("Error loading adm3:", error);
-        return;
-      }
-
-      if (!data || data.length === 0) return;
-
-      setAdm3(data);
-
-      const scores = data.map((d) => Number(d.score)).filter((s) => !isNaN(s));
-      const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
-      const min = Math.min(...scores).toFixed(2);
-      const max = Math.max(...scores).toFixed(2);
-
-      setStats({
-        affected: data.length,
-        avg,
-        min,
-        max,
-      });
-    })();
-  }, [id]);
-
-  // 🔹 Color scale
-  const getColor = (score: number) => {
-    if (!score) return "#d3d3d3";
+  // ─────────────────────────────────────────────────────────────
+  // Color scale for numeric datasets / overall
+  // ─────────────────────────────────────────────────────────────
+  const getColor = (score: number | null | undefined) => {
+    if (score == null || isNaN(score)) return "#cccccc"; // grey fallback
     if (score >= 4.5) return "#800026";
     if (score >= 3.5) return "#BD0026";
     if (score >= 2.5) return "#E31A1C";
@@ -65,66 +52,184 @@ export default function InstancePage() {
     return "#FFEDA0";
   };
 
-  // 🔹 Map rendering
+  // ─────────────────────────────────────────────────────────────
+  // Fetch geometry + scores depending on selected layer
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!id) return;
+    const fetchData = async () => {
+      setLoading(true);
+
+      let data: any[] | null = null;
+      let error: any = null;
+
+      // ───── 1️⃣ OVERALL ─────
+      if (layerType === "overall") {
+        const res = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode,name,score,geom_json")
+          .eq("instance_id", id);
+        data = res.data;
+        error = res.error;
+      }
+
+      // ───── 2️⃣ DATASET LAYER ─────
+      else if (layerType === "dataset") {
+        const datasetRes = await supabase
+          .from("datasets")
+          .select("id")
+          .ilike("name", selectedLayer)
+          .limit(1);
+        const datasetId = datasetRes.data?.[0]?.id;
+
+        if (datasetId) {
+          const res = await supabase
+            .from("dataset_values_numeric_normalized")
+            .select("admin_pcode,value as score,admin_name")
+            .eq("dataset_id", datasetId);
+          data = res.data;
+          error = res.error;
+        }
+      }
+
+      // ───── 3️⃣ CATEGORY (future aggregation placeholder) ─────
+      else if (layerType === "category") {
+        const res = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode,name,score,geom_json")
+          .eq("instance_id", id);
+        data = res.data;
+        error = res.error;
+      }
+
+      if (error) {
+        console.error("Error loading data:", error);
+        setAdm3([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.warn("No rows found — rendering grey boundaries.");
+
+        // fallback: just show ADM3 boundaries
+        const { data: geo, error: geoErr } = await supabase
+          .from("admin_boundaries_geojson")
+          .select("admin_pcode,name,geom")
+          .eq("admin_level", "ADM3");
+        if (!geoErr && geo) {
+          setAdm3(geo.map((g: any) => ({
+            admin_pcode: g.admin_pcode,
+            name: g.name,
+            geom_json: g.geom,
+            score: null,
+          })));
+        }
+        setStats({ affected: geo?.length || 0, avg: "-", min: "-", max: "-" });
+        setLoading(false);
+        return;
+      }
+
+      // Normalize dataset into ADM3 + compute stats
+      const parsed = data.map((d: any) => ({
+        admin_pcode: d.admin_pcode,
+        name: d.name ?? d.admin_name ?? "",
+        score: d.score ? Number(d.score) : null,
+        geom_json: d.geom_json ?? null,
+      }));
+
+      setAdm3(parsed);
+
+      const validScores = parsed.map(d => d.score).filter((s): s is number => s !== null && !isNaN(s));
+      if (validScores.length > 0) {
+        const avg = (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2);
+        const min = Math.min(...validScores).toFixed(2);
+        const max = Math.max(...validScores).toFixed(2);
+        setStats({ affected: parsed.length, avg, min, max });
+      } else {
+        setStats({ affected: parsed.length, avg: "-", min: "-", max: "-" });
+      }
+
+      setLoading(false);
+    };
+
+    fetchData();
+  }, [id, selectedLayer, layerType]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Handler from ScoreLayerSelector
+  // ─────────────────────────────────────────────────────────────
+  const handleSelect = (value: string, type: string) => {
+    setSelectedLayer(value);
+    setLayerType(type as any);
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-xl font-semibold">Cebu EQ–Typhoon</h1>
-      <p className="text-gray-600">
-        Overview of scoring and affected administrative areas.
-      </p>
+    <div className="flex">
+      {/* Left main content */}
+      <div className="flex-1 p-6 space-y-4">
+        <h1 className="text-xl font-semibold">Instance: Cebu EQ–Typhoon</h1>
+        <p className="text-gray-600">
+          Map visualization of the selected scoring layer.
+        </p>
 
-      <div className="grid grid-cols-5 gap-3">
-        <StatCard title="Total Population" value="–" />
-        <StatCard title="People of Concern (≥3)" value="–" />
-        <StatCard title="Poverty-Exposed Population" value="–" />
-        <StatCard title="Affected ADM3 Areas" value={stats.affected.toString()} />
-        <StatCard title="Average Score" value={stats.avg.toString()} />
-        <StatCard
-          title="Highest / Lowest Score"
-          value={`${stats.max} / ${stats.min}`}
-        />
-      </div>
+        <div className="grid grid-cols-5 gap-3">
+          <StatCard title="Affected ADM3 Areas" value={stats.affected.toString()} />
+          <StatCard title="Average Score" value={stats.avg.toString()} />
+          <StatCard title="Highest / Lowest Score" value={`${stats.max} / ${stats.min}`} />
+        </div>
 
-      <MapContainer
-        style={{ height: "600px", width: "100%" }}
-        center={[10.3, 123.9]}
-        zoom={8}
-      >
-        <TileLayer
-          attribution='&copy; OpenStreetMap contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {adm3.map((area, i) => (
-          <GeoJSON
-            key={i}
-            data={area.geom_json}
-            style={() => ({
-              color: "#333",
-              weight: 0.5,
-              fillColor: getColor(area.score),
-              fillOpacity: 0.75,
-            })}
+        <div className="border rounded-lg overflow-hidden shadow">
+          <MapContainer
+            style={{ height: "600px", width: "100%" }}
+            center={[10.3, 123.9]}
+            zoom={8}
           >
-            <Tooltip sticky>
-              <div>
-                <strong>{area.name}</strong>
-                <br />
-                Score: {Number(area.score).toFixed(2)}
-              </div>
-            </Tooltip>
-          </GeoJSON>
-        ))}
-      </MapContainer>
-
-      <div className="text-right">
-        <button className="bg-blue-600 text-white px-4 py-2 rounded shadow">
-          Recompute Scores
-        </button>
+            <TileLayer
+              attribution='&copy; OpenStreetMap contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            {!loading &&
+              adm3.map((area, i) => (
+                <GeoJSON
+                  key={i}
+                  data={area.geom_json}
+                  style={() => ({
+                    color: "#333",
+                    weight: 0.5,
+                    fillColor: getColor(area.score),
+                    fillOpacity: 0.75,
+                  })}
+                >
+                  <Tooltip sticky>
+                    <div>
+                      <strong>{area.name}</strong>
+                      <br />
+                      Score: {area.score ?? "—"}
+                    </div>
+                  </Tooltip>
+                </GeoJSON>
+              ))}
+          </MapContainer>
+        </div>
       </div>
+
+      {/* Right selector panel */}
+      <ScoreLayerSelector
+        instanceId={id}
+        selected={selectedLayer}
+        onSelect={handleSelect}
+      />
     </div>
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// Subcomponent
+// ─────────────────────────────────────────────────────────────
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="p-3 rounded-lg shadow bg-white text-center">
