@@ -7,7 +7,7 @@ interface NumericScoringModalProps {
   dataset: any;
   instance: any;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved?: () => Promise<void>; // ✅ optional now
 }
 
 export default function NumericScoringModal({ dataset, instance, onClose, onSaved }: NumericScoringModalProps) {
@@ -80,6 +80,7 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
       setMessage(`❌ Error saving config: ${error.message}`);
     } else {
       setMessage('✅ Configuration saved successfully');
+      if (onSaved) await onSaved();
     }
 
     setSaving(false);
