@@ -1,251 +1,287 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
-interface AreaRow {
+import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
+import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
+import InstanceScoringModal from "@/components/InstanceScoringModal";
+import FrameworkScoringModal from "@/components/FrameworkScoringModal";
+
+// ------------------------------------------
+// Interfaces
+// ------------------------------------------
+interface Adm3Row {
   admin_pcode: string;
   name: string;
-  score?: number | null;
+  score: number;
   geom_json: any;
 }
 
-interface Stats {
-  affected: number;
-  avg: string | number;
-  min: string | number;
-  max: string | number;
+interface InstanceRow {
+  id: string;
+  name: string;
+  admin_scope: string[];
+  population_dataset_id: string | null;
+  poverty_dataset_id: string | null;
 }
 
+// ------------------------------------------
+// Main Component
+// ------------------------------------------
 export default function InstancePage() {
   const { id } = useParams();
-  const [adm3, setAdm3] = useState<AreaRow[]>([]);
-  const [stats, setStats] = useState<Stats>({
-    affected: 0,
-    avg: "-",
-    min: "-",
-    max: "-",
+  const [instance, setInstance] = useState<InstanceRow | null>(null);
+  const [adm3, setAdm3] = useState<Adm3Row[]>([]);
+  const [stats, setStats] = useState({
+    totalPopulation: "-",
+    peopleConcern: "-",
+    peopleNeed: "-",
   });
-  const [layerType, setLayerType] = useState<"overall" | "dataset" | "category">("overall");
-  const [selectedLayer, setSelectedLayer] = useState<string>("overall");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // ─────────────────────────────────────────────
-  // Safe global modal invoker
-  // ─────────────────────────────────────────────
-  const openModalSafe = (name: string, props: any = {}) => {
-    if (typeof (window as any)?.openModal === "function") {
-      (window as any).openModal(name, props);
-    } else {
-      console.warn(`Modal system not detected: ${name}`, props);
-    }
-  };
+  const [showDefineArea, setShowDefineArea] = useState(false);
+  const [showDatasetConfig, setShowDatasetConfig] = useState(false);
+  const [showScoring, setShowScoring] = useState(false);
+  const [showFrameworkScoring, setShowFrameworkScoring] = useState(false);
 
-  // ─────────────────────────────────────────────
-  // Color scale 1–5
-  // ─────────────────────────────────────────────
-  const getColor = (score: number | null | undefined) => {
-    if (score == null || isNaN(score)) return "#cccccc";
-    if (score >= 4.5) return "#800026";
-    if (score >= 3.5) return "#BD0026";
-    if (score >= 2.5) return "#E31A1C";
-    if (score >= 1.5) return "#FC4E2A";
+  // ------------------------------------------------------------
+  // Fetch instance info (to get admin_scope, dataset refs, etc.)
+  // ------------------------------------------------------------
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from("instances")
+        .select("id,name,admin_scope,population_dataset_id,poverty_dataset_id")
+        .eq("id", id)
+        .single();
+
+      if (error) {
+        console.error("Failed to load instance:", error);
+        return;
+      }
+      setInstance(data);
+    })();
+  }, [id]);
+
+  // ------------------------------------------------------------
+  // Fetch ADM3 scores filtered to affected area
+  // ------------------------------------------------------------
+  useEffect(() => {
+    if (!instance?.admin_scope?.length) return;
+    (async () => {
+      setLoading(true);
+
+      const { data, error } = await supabase.rpc("exec_filtered_instance_scores", {
+        in_instance_id: instance.id,
+      });
+
+      // if RPC not present fallback to manual filtering
+      let results = data;
+      if (error || !results) {
+        const { data: manual, error: errManual } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode,name,score,geom_json")
+          .eq("instance_id", instance.id);
+        if (errManual) {
+          console.error("ADM3 fetch error:", errManual);
+          setLoading(false);
+          return;
+        }
+
+        // We'll fetch all ADM3 under admin_scope manually
+        const { data: adm3list } = await supabase
+          .from("admin_boundaries")
+          .select("admin_pcode,parent_pcode,admin_level")
+          .eq("admin_level", "ADM3");
+
+        const validParents = new Set(instance.admin_scope);
+        const filtered = manual.filter((row) =>
+          adm3list.some(
+            (ab) =>
+              ab.admin_pcode === row.admin_pcode &&
+              validParents.has(ab.parent_pcode)
+          )
+        );
+
+        results = filtered;
+      }
+
+      setAdm3(results);
+      setLoading(false);
+    })();
+  }, [instance]);
+
+  // ------------------------------------------------------------
+  // Compute simple stats (placeholder logic)
+  // ------------------------------------------------------------
+  useEffect(() => {
+    if (!adm3.length) return;
+    const scores = adm3.map((a) => a.score || 0);
+    const concern = scores.filter((s) => s >= 3).length;
+    const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+    setStats({
+      totalPopulation: "–", // placeholder until population dataset integrated
+      peopleConcern: concern.toString(),
+      peopleNeed: "–", // will multiply concern × poverty rate later
+    });
+  }, [adm3]);
+
+  // ------------------------------------------------------------
+  // Color scale
+  // ------------------------------------------------------------
+  const getColor = (score: number) => {
+    if (!score) return "#d3d3d3";
+    if (score >= 5) return "#E31A1C";
+    if (score >= 4) return "#FD8D3C";
+    if (score >= 3) return "#FEB24C";
+    if (score >= 2) return "#FED976";
     return "#FFEDA0";
   };
 
-  // ─────────────────────────────────────────────
-  // Fetch affected ADM3 geometries + scores
-  // ─────────────────────────────────────────────
-  useEffect(() => {
-    if (!id) return;
-    const fetchData = async () => {
-      setLoading(true);
-
-      const { data: affected } = await supabase
-        .from("v_instance_affected_adm3")
-        .select("admin_pcode")
-        .eq("instance_id", id);
-
-      const affectedCodes = affected?.map((a) => a.admin_pcode) ?? [];
-      if (affectedCodes.length === 0) {
-        setAdm3([]);
-        setStats({ affected: 0, avg: "-", min: "-", max: "-" });
-        setLoading(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("v_instance_admin_scores_geojson")
-        .select("admin_pcode,name,score,geom_json")
-        .eq("instance_id", id)
-        .in("admin_pcode", affectedCodes);
-
-      if (error) {
-        console.error("Error loading data:", error);
-        setLoading(false);
-        return;
-      }
-
-      const parsed = (data || []).map((d: any) => {
-        let geomObj = null;
-        try {
-          const raw =
-            typeof d.geom_json === "string" ? JSON.parse(d.geom_json) : d.geom_json;
-          if (raw?.type === "Polygon" || raw?.type === "MultiPolygon") geomObj = raw;
-          else if (raw?.geometry?.type) geomObj = raw.geometry;
-        } catch {
-          console.warn("Invalid geometry skipped:", d.admin_pcode);
-        }
-        return {
-          admin_pcode: d.admin_pcode,
-          name: d.name ?? "",
-          score: d.score ? Number(d.score) : null,
-          geom_json: geomObj,
-        };
-      });
-
-      const filtered = parsed.filter((f) => f.geom_json);
-      setAdm3(filtered);
-
-      const validScores = filtered
-        .map((d) => d.score)
-        .filter((s): s is number => s !== null && !isNaN(s));
-      if (validScores.length > 0) {
-        const avg = (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2);
-        const min = Math.min(...validScores).toFixed(2);
-        const max = Math.max(...validScores).toFixed(2);
-        setStats({ affected: filtered.length, avg, min, max });
-      } else {
-        setStats({ affected: filtered.length, avg: "-", min: "-", max: "-" });
-      }
-
-      setLoading(false);
-    };
-
-    fetchData();
-  }, [id, layerType, selectedLayer]);
-
-  // ─────────────────────────────────────────────
-  // Handlers
-  // ─────────────────────────────────────────────
-  const handleSelect = (value: string, type: string) => {
-    setSelectedLayer(value);
-    setLayerType(type as any);
-  };
-
-  // ─────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────
+  // ------------------------------------------------------------
+  // Map Rendering
+  // ------------------------------------------------------------
   return (
-    <div className="flex flex-row h-[calc(100vh-4rem)]">
-      {/* Left Section: Map + Stats */}
-      <div className="flex-1 p-6 overflow-hidden flex flex-col space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold">Instance: Cebu EQ–Typhoon</h1>
-          <p className="text-gray-600">
-            Visualization of scoring and affected administrative areas.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-5 gap-3">
-          <StatCard title="Affected ADM3 Areas" value={stats.affected.toString()} />
-          <StatCard title="Average Score" value={stats.avg.toString()} />
-          <StatCard title="Highest / Lowest Score" value={`${stats.max} / ${stats.min}`} />
-        </div>
-
-        <div className="flex-1 border rounded-lg overflow-hidden shadow">
-          <MapContainer
-            style={{ height: "100%", width: "100%" }}
-            center={[10.3, 123.9]}
-            zoom={8}
-            scrollWheelZoom={false}
-            doubleClickZoom={false}
-            dragging={false}
+    <div className="p-4 flex flex-col gap-3 text-sm">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <h1 className="text-lg font-semibold">
+          {instance?.name || "Loading Instance..."}
+        </h1>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowDefineArea(true)}
+            className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            <TileLayer
-              attribution='&copy; OpenStreetMap contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            {!loading &&
-              adm3.map((area, i) => (
+            Define Affected Area
+          </button>
+          <button
+            onClick={() => setShowDatasetConfig(true)}
+            className="px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-800"
+          >
+            Configure Datasets
+          </button>
+          <button
+            onClick={() => setShowScoring(true)}
+            className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700"
+          >
+            Calibrate Scores
+          </button>
+          <button
+            onClick={() => setShowFrameworkScoring(true)}
+            className="px-3 py-1 bg-green-700 text-white rounded hover:bg-green-800"
+          >
+            Recompute All Scores
+          </button>
+        </div>
+      </div>
+
+      {/* Stats Row */}
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard title="Total Population" value={stats.totalPopulation} />
+        <StatCard title="People of Concern (≥3)" value={stats.peopleConcern} />
+        <StatCard title="People in Need" value={stats.peopleNeed} />
+      </div>
+
+      {/* Map + Sidebar */}
+      <div className="flex gap-4">
+        <div className="flex-1 rounded border overflow-hidden">
+          {loading ? (
+            <div className="p-4 text-gray-500">Loading map...</div>
+          ) : (
+            <MapContainer
+              center={[10.3, 123.9]}
+              zoom={8}
+              scrollWheelZoom={false}
+              style={{ height: "600px", width: "100%" }}
+            >
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution="&copy; OpenStreetMap contributors"
+              />
+              {adm3.map((area, i) => (
                 <GeoJSON
                   key={i}
                   data={area.geom_json}
                   style={() => ({
-                    color: "#333",
-                    weight: 0.5,
+                    color: "#555",
+                    weight: 0.6,
                     fillColor: getColor(area.score),
-                    fillOpacity: 0.75,
+                    fillOpacity: 0.8,
                   })}
                 >
                   <Tooltip sticky>
                     <div>
                       <strong>{area.name}</strong>
                       <br />
-                      Score: {area.score ?? "—"}
+                      Score: {Number(area.score).toFixed(2)}
                     </div>
                   </Tooltip>
                 </GeoJSON>
               ))}
-          </MapContainer>
+            </MapContainer>
+          )}
+        </div>
+
+        {/* Right-hand layer selector placeholder */}
+        <div className="w-72 bg-white rounded border p-3 flex flex-col gap-2 h-[600px] overflow-y-auto">
+          <h3 className="text-sm font-semibold mb-1">Map Layers</h3>
+          <p className="text-xs text-gray-600">
+            Select dataset layers or switch to overall score.
+          </p>
+          {/* TODO: Integrate ScoreLayerSelector */}
+          <div className="p-2 text-xs text-gray-500 border-t mt-2">
+            (Layer selector coming soon)
+          </div>
         </div>
       </div>
 
-      {/* Right Section: Sidebar Controls */}
-      <div className="w-80 border-l bg-gray-50 p-4 flex flex-col space-y-4">
-        <h2 className="text-lg font-semibold mb-2">Map Layers & Actions</h2>
-
-        <div className="flex-1 overflow-y-auto">
-          <ScoreLayerSelector
-            instanceId={id}
-            selected={selectedLayer}
-            onSelect={handleSelect}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <button
-            onClick={() => openModalSafe("DefineAffectedAreaModal", { instanceId: id })}
-            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-          >
-            🗺 Define Affected Area
-          </button>
-          <button
-            onClick={() => openModalSafe("InstanceDatasetConfigModal", { instanceId: id })}
-            className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700"
-          >
-            🧩 Configure Datasets
-          </button>
-          <button
-            onClick={() => openModalSafe("InstanceScoringModal", { instanceId: id })}
-            className="w-full bg-teal-600 text-white py-2 rounded hover:bg-teal-700"
-          >
-            🎚 Calibrate Scores
-          </button>
-          <button
-            onClick={() => openModalSafe("FrameworkScoringModal", { instanceId: id })}
-            className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700"
-          >
-            🔁 Recompute Framework Scores
-          </button>
-        </div>
-      </div>
+      {/* Modals */}
+      {showDefineArea && (
+        <DefineAffectedAreaModal
+          instance={instance}
+          onClose={() => setShowDefineArea(false)}
+          onSaved={async () => window.location.reload()}
+        />
+      )}
+      {showDatasetConfig && (
+        <InstanceDatasetConfigModal
+          instance={instance}
+          onClose={() => setShowDatasetConfig(false)}
+          onSaved={async () => window.location.reload()}
+        />
+      )}
+      {showScoring && (
+        <InstanceScoringModal
+          instance={instance}
+          onClose={() => setShowScoring(false)}
+          onSaved={async () => window.location.reload()}
+        />
+      )}
+      {showFrameworkScoring && (
+        <FrameworkScoringModal
+          instance={instance}
+          onClose={() => setShowFrameworkScoring(false)}
+          onSaved={async () => window.location.reload()}
+        />
+      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────
-// Helper Component
-// ─────────────────────────────────────────────
+// ------------------------------------------------------------
+// Reusable Compact Stat Card
+// ------------------------------------------------------------
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="p-3 rounded-lg shadow bg-white text-center">
-      <h4 className="text-gray-500 text-sm">{title}</h4>
-      <div className="text-xl font-semibold mt-1">{value}</div>
+    <div className="bg-white rounded border p-3 shadow-sm text-center">
+      <div className="text-gray-500 text-xs">{title}</div>
+      <div className="text-base font-semibold">{value}</div>
     </div>
   );
 }
