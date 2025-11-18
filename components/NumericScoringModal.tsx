@@ -48,23 +48,29 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
   const previewScores = async () => {
     setPreviewData(null);
     setMessage('Fetching preview...');
-    let sql;
+
+    let sql = '';
+
     if (method === 'Normalization') {
       sql = `
-        SELECT MIN(value) as min_val, MAX(value) as max_val, COUNT(*) as n
+        SELECT MIN(value) AS min_val, MAX(value) AS max_val, AVG(value) AS avg_val, COUNT(*) AS n
         FROM dataset_values_numeric dv
         ${scope === 'affected' ? `JOIN v_instance_affected_adm3 a ON a.admin_pcode = dv.admin_pcode AND a.instance_id = '${instance.id}'` : ''}
-        WHERE dv.dataset_id = '${dataset.id}';
+        WHERE dv.dataset_id = '${dataset.id}'
       `;
-    } else {
+    } else if (method === 'Thresholds') {
       sql = `
-        SELECT COUNT(*) as n FROM dataset_values_numeric dv
+        SELECT MIN(value) AS min_val, MAX(value) AS max_val, AVG(value) AS avg_val, COUNT(*) AS n
+        FROM dataset_values_numeric dv
         ${scope === 'affected' ? `JOIN v_instance_affected_adm3 a ON a.admin_pcode = dv.admin_pcode AND a.instance_id = '${instance.id}'` : ''}
-        WHERE dv.dataset_id = '${dataset.id}';
+        WHERE dv.dataset_id = '${dataset.id}'
       `;
     }
+
     const { data, error } = await supabase.rpc('run_sql', { sql_text: sql });
+
     if (error) {
+      console.error('Preview error:', error);
       setMessage(`❌ Preview error: ${error.message}`);
     } else {
       setPreviewData(data?.[0]);
@@ -94,10 +100,14 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
     }
 
     const { error } = await rpc;
-    if (error) setMessage(`❌ Error running scoring: ${error.message}`);
-    else setMessage('✅ Scoring applied successfully!');
+    if (error) {
+      console.error('Apply scoring error:', error);
+      setMessage(`❌ Error running scoring: ${error.message}`);
+    } else {
+      setMessage('✅ Scoring applied successfully!');
+      if (onSaved) await onSaved();
+    }
     setSaving(false);
-    if (onSaved) await onSaved();
   };
 
   const addRange = () => setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
@@ -234,25 +244,39 @@ export default function NumericScoringModal({ dataset, instance, onClose, onSave
         {previewData && (
           <div className="mt-4 bg-gray-50 border rounded p-2 text-xs">
             <p><strong>ADM3 Count:</strong> {previewData.n}</p>
-            {previewData.min_val && <p><strong>Min:</strong> {previewData.min_val}</p>}
-            {previewData.max_val && <p><strong>Max:</strong> {previewData.max_val}</p>}
+            <p><strong>Min:</strong> {Number(previewData.min_val).toFixed(2)}</p>
+            <p><strong>Max:</strong> {Number(previewData.max_val).toFixed(2)}</p>
+            <p><strong>Average:</strong> {Number(previewData.avg_val).toFixed(2)}</p>
           </div>
         )}
 
         {message && (
-          <p className={`mt-2 text-xs ${message.startsWith('✅') ? 'text-green-600' : 'text-red-600'}`}>
+          <p
+            className={`mt-2 text-xs ${
+              message.startsWith('✅') ? 'text-green-600' : 'text-red-600'
+            }`}
+          >
             {message}
           </p>
         )}
 
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onClose} className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-100">
+          <button
+            onClick={onClose}
+            className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-100"
+          >
             Cancel
           </button>
-          <button onClick={saveConfig} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
+          <button
+            onClick={saveConfig}
+            className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+          >
             Save Config
           </button>
-          <button onClick={previewScores} className="px-3 py-1 border rounded bg-yellow-100 hover:bg-yellow-200">
+          <button
+            onClick={previewScores}
+            className="px-3 py-1 border rounded bg-yellow-100 hover:bg-yellow-200"
+          >
             Preview
           </button>
           <button
