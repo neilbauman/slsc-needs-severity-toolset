@@ -8,7 +8,7 @@ import "leaflet/dist/leaflet.css";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
 // ─────────────────────────────────────────────────────────────
-// Type definitions
+// Types
 // ─────────────────────────────────────────────────────────────
 interface AreaRow {
   admin_pcode: string;
@@ -41,7 +41,7 @@ export default function InstancePage() {
   const [loading, setLoading] = useState(false);
 
   // ─────────────────────────────────────────────────────────────
-  // Color scale for numeric datasets / overall
+  // Color scale (1–5)
   // ─────────────────────────────────────────────────────────────
   const getColor = (score: number | null | undefined) => {
     if (score == null || isNaN(score)) return "#cccccc"; // grey fallback
@@ -53,7 +53,7 @@ export default function InstancePage() {
   };
 
   // ─────────────────────────────────────────────────────────────
-  // Fetch geometry + scores depending on selected layer
+  // Fetch and prepare data
   // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
@@ -73,7 +73,7 @@ export default function InstancePage() {
         error = res.error;
       }
 
-      // ───── 2️⃣ DATASET LAYER ─────
+      // ───── 2️⃣ DATASET ─────
       else if (layerType === "dataset") {
         const datasetRes = await supabase
           .from("datasets")
@@ -92,7 +92,7 @@ export default function InstancePage() {
         }
       }
 
-      // ───── 3️⃣ CATEGORY (future aggregation placeholder) ─────
+      // ───── 3️⃣ CATEGORY (placeholder for later) ─────
       else if (layerType === "category") {
         const res = await supabase
           .from("v_instance_admin_scores_geojson")
@@ -109,45 +109,64 @@ export default function InstancePage() {
         return;
       }
 
+      // ───── 4️⃣ Fallback if no data ─────
       if (!data || data.length === 0) {
         console.warn("No rows found — rendering grey boundaries.");
-
-        // fallback: just show ADM3 boundaries
         const { data: geo, error: geoErr } = await supabase
           .from("admin_boundaries_geojson")
           .select("admin_pcode,name,geom")
           .eq("admin_level", "ADM3");
         if (!geoErr && geo) {
-          setAdm3(geo.map((g: any) => ({
-            admin_pcode: g.admin_pcode,
-            name: g.name,
-            geom_json: g.geom,
-            score: null,
-          })));
+          setAdm3(
+            geo.map((g: any) => ({
+              admin_pcode: g.admin_pcode,
+              name: g.name,
+              geom_json:
+                typeof g.geom === "string" ? JSON.parse(g.geom) : g.geom,
+              score: null,
+            }))
+          );
         }
         setStats({ affected: geo?.length || 0, avg: "-", min: "-", max: "-" });
         setLoading(false);
         return;
       }
 
-      // Normalize dataset into ADM3 + compute stats
-      const parsed = data.map((d: any) => ({
-        admin_pcode: d.admin_pcode,
-        name: d.name ?? d.admin_name ?? "",
-        score: d.score ? Number(d.score) : null,
-        geom_json: d.geom_json ?? null,
-      }));
+      // ───── 5️⃣ Parse JSON safely ─────
+      const parsed = data.map((d: any) => {
+        let geomObj = null;
+        try {
+          geomObj =
+            typeof d.geom_json === "string"
+              ? JSON.parse(d.geom_json)
+              : d.geom_json;
+        } catch (e) {
+          console.warn("Invalid GeoJSON skipped:", d.admin_pcode);
+        }
+        return {
+          admin_pcode: d.admin_pcode,
+          name: d.name ?? d.admin_name ?? "",
+          score: d.score ? Number(d.score) : null,
+          geom_json: geomObj,
+        };
+      });
 
-      setAdm3(parsed);
+      const filtered = parsed.filter((d) => d.geom_json);
+      setAdm3(filtered);
 
-      const validScores = parsed.map(d => d.score).filter((s): s is number => s !== null && !isNaN(s));
+      // ───── 6️⃣ Compute stats ─────
+      const validScores = filtered
+        .map((d) => d.score)
+        .filter((s): s is number => s !== null && !isNaN(s));
       if (validScores.length > 0) {
-        const avg = (validScores.reduce((a, b) => a + b, 0) / validScores.length).toFixed(2);
+        const avg = (
+          validScores.reduce((a, b) => a + b, 0) / validScores.length
+        ).toFixed(2);
         const min = Math.min(...validScores).toFixed(2);
         const max = Math.max(...validScores).toFixed(2);
-        setStats({ affected: parsed.length, avg, min, max });
+        setStats({ affected: filtered.length, avg, min, max });
       } else {
-        setStats({ affected: parsed.length, avg: "-", min: "-", max: "-" });
+        setStats({ affected: filtered.length, avg: "-", min: "-", max: "-" });
       }
 
       setLoading(false);
@@ -157,7 +176,7 @@ export default function InstancePage() {
   }, [id, selectedLayer, layerType]);
 
   // ─────────────────────────────────────────────────────────────
-  // Handler from ScoreLayerSelector
+  // Handler for layer selector
   // ─────────────────────────────────────────────────────────────
   const handleSelect = (value: string, type: string) => {
     setSelectedLayer(value);
@@ -169,7 +188,6 @@ export default function InstancePage() {
   // ─────────────────────────────────────────────────────────────
   return (
     <div className="flex">
-      {/* Left main content */}
       <div className="flex-1 p-6 space-y-4">
         <h1 className="text-xl font-semibold">Instance: Cebu EQ–Typhoon</h1>
         <p className="text-gray-600">
@@ -217,7 +235,6 @@ export default function InstancePage() {
         </div>
       </div>
 
-      {/* Right selector panel */}
       <ScoreLayerSelector
         instanceId={id}
         selected={selectedLayer}
@@ -228,7 +245,7 @@ export default function InstancePage() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Subcomponent
+// Helper component
 // ─────────────────────────────────────────────────────────────
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
