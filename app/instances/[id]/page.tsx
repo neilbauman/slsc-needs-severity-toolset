@@ -31,7 +31,7 @@ export default function InstancePage() {
     const loadData = async () => {
       setLoading(true);
 
-      // --- Load ADM3 data and scores ---
+      // --- Load ADM3 data ---
       const { data: adm3, error: adm3Err } = await supabase
         .from("v_instance_affected_adm3")
         .select("admin_pcode, name, geom_json, score")
@@ -44,29 +44,29 @@ export default function InstancePage() {
         setAdm3Data(adm3 || []);
       }
 
-      // --- Load stats (safe & alias-cast) ---
-      const { data: rawStatData, error: statErr } = await supabase
+      // --- Load all scores and compute stats client-side ---
+      const { data: scoreRows, error: statErr } = await supabase
         .from("scored_instance_values_adm3")
-        .select(`
-          total:count(*),
-          min:min(score),
-          max:max(score),
-          avg:avg(score)
-        `)
-        .eq("instance_id", instanceId)
-        .single();
-
-      const statData: any = rawStatData || {}; // ✅ prevents build parser issues
+        .select("score")
+        .eq("instance_id", instanceId);
 
       if (statErr) {
         console.error("Stat query error:", statErr);
-      } else {
+      } else if (scoreRows && scoreRows.length > 0) {
+        const scores = scoreRows.map((r: any) => r.score).filter((v: any) => v != null);
+        const total = scores.length;
+        const min = Math.min(...scores);
+        const max = Math.max(...scores);
+        const avg = scores.reduce((a, b) => a + b, 0) / total;
+
         setStats({
-          affected: statData.total ?? 0,
-          avg: statData.avg ? Number(statData.avg).toFixed(2) : "-",
-          min: statData.min ? Number(statData.min).toFixed(2) : "-",
-          max: statData.max ? Number(statData.max).toFixed(2) : "-"
+          affected: total,
+          avg: avg.toFixed(2),
+          min: min.toFixed(2),
+          max: max.toFixed(2)
         });
+      } else {
+        setStats({ affected: 0, avg: "-", min: "-", max: "-" });
       }
 
       setLoading(false);
