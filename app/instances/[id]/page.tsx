@@ -7,15 +7,6 @@ import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
-// Modal imports
-import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
-import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
-import InstanceScoringModal from "@/components/InstanceScoringModal";
-import FrameworkScoringModal from "@/components/FrameworkScoringModal";
-
-// ─────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────
 interface AreaRow {
   admin_pcode: string;
   name: string;
@@ -30,9 +21,6 @@ interface Stats {
   max: string | number;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────
 export default function InstancePage() {
   const { id } = useParams();
   const [adm3, setAdm3] = useState<AreaRow[]>([]);
@@ -46,15 +34,20 @@ export default function InstancePage() {
   const [selectedLayer, setSelectedLayer] = useState<string>("overall");
   const [loading, setLoading] = useState(false);
 
-  // Modal controls (local fallback)
-  const [showDefineArea, setShowDefineArea] = useState(false);
-  const [showDatasetConfig, setShowDatasetConfig] = useState(false);
-  const [showCalibrate, setShowCalibrate] = useState(false);
-  const [showRecompute, setShowRecompute] = useState(false);
+  // ─────────────────────────────────────────────
+  // Safe global modal invoker
+  // ─────────────────────────────────────────────
+  const openModalSafe = (name: string, props: any = {}) => {
+    if (typeof (window as any)?.openModal === "function") {
+      (window as any).openModal(name, props);
+    } else {
+      console.warn(`Modal system not detected: ${name}`, props);
+    }
+  };
 
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
   // Color scale 1–5
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
   const getColor = (score: number | null | undefined) => {
     if (score == null || isNaN(score)) return "#cccccc";
     if (score >= 4.5) return "#800026";
@@ -64,9 +57,9 @@ export default function InstancePage() {
     return "#FFEDA0";
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Fetch data (affected ADM3 only)
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
+  // Fetch affected ADM3 geometries + scores
+  // ─────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
     const fetchData = async () => {
@@ -79,7 +72,6 @@ export default function InstancePage() {
 
       const affectedCodes = affected?.map((a) => a.admin_pcode) ?? [];
       if (affectedCodes.length === 0) {
-        console.warn("No affected ADM3 found.");
         setAdm3([]);
         setStats({ affected: 0, avg: "-", min: "-", max: "-" });
         setLoading(false);
@@ -137,17 +129,17 @@ export default function InstancePage() {
     fetchData();
   }, [id, layerType, selectedLayer]);
 
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
   // Handlers
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
   const handleSelect = (value: string, type: string) => {
     setSelectedLayer(value);
     setLayerType(type as any);
   };
 
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
   // Render
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
   return (
     <div className="flex flex-row h-[calc(100vh-4rem)]">
       {/* Left Section: Map + Stats */}
@@ -217,52 +209,38 @@ export default function InstancePage() {
 
         <div className="space-y-2">
           <button
-            onClick={() => setShowDefineArea(true)}
+            onClick={() => openModalSafe("DefineAffectedAreaModal", { instanceId: id })}
             className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
           >
             🗺 Define Affected Area
           </button>
           <button
-            onClick={() => setShowDatasetConfig(true)}
+            onClick={() => openModalSafe("InstanceDatasetConfigModal", { instanceId: id })}
             className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-700"
           >
             🧩 Configure Datasets
           </button>
           <button
-            onClick={() => setShowCalibrate(true)}
+            onClick={() => openModalSafe("InstanceScoringModal", { instanceId: id })}
             className="w-full bg-teal-600 text-white py-2 rounded hover:bg-teal-700"
           >
             🎚 Calibrate Scores
           </button>
           <button
-            onClick={() => setShowRecompute(true)}
+            onClick={() => openModalSafe("FrameworkScoringModal", { instanceId: id })}
             className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700"
           >
             🔁 Recompute Framework Scores
           </button>
         </div>
       </div>
-
-      {/* Modals */}
-      {showDefineArea && (
-        <DefineAffectedAreaModal open={true} onClose={() => setShowDefineArea(false)} />
-      )}
-      {showDatasetConfig && (
-        <InstanceDatasetConfigModal open={true} onClose={() => setShowDatasetConfig(false)} />
-      )}
-      {showCalibrate && (
-        <InstanceScoringModal open={true} onClose={() => setShowCalibrate(false)} />
-      )}
-      {showRecompute && (
-        <FrameworkScoringModal open={true} onClose={() => setShowRecompute(false)} />
-      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 // Helper Component
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="p-3 rounded-lg shadow bg-white text-center">
