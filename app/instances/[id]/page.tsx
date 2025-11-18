@@ -7,7 +7,7 @@ import InstanceDatasetConfigModal from '@/components/InstanceDatasetConfigModal'
 import DefineAffectedAreaModal from '@/components/DefineAffectedAreaModal';
 import InstanceScoringModal from '@/components/InstanceScoringModal';
 
-// Dynamic Leaflet imports
+// --- Dynamic Leaflet imports
 const MapContainer = dynamic(() => import('react-leaflet').then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then((m) => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import('react-leaflet').then((m) => m.GeoJSON), { ssr: false });
@@ -16,7 +16,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
   const [adm3Features, setAdm3Features] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
-  const [populationMetrics, setPopulationMetrics] = useState<any>({});
+  const [populationMetrics, setPopulationMetrics] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
@@ -34,64 +34,80 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return '#ff0000';
   };
 
-  // --- Load instance metadata
+  // --- Load instance
   useEffect(() => {
     const loadInstance = async () => {
-      const { data, error } = await supabase.from('instances').select('*').eq('id', params.id).single();
+      const { data, error } = await supabase
+        .from('instances')
+        .select('*')
+        .eq('id', params.id)
+        .single();
       if (error) console.error('Error loading instance:', error);
       else setInstance(data);
     };
     loadInstance();
   }, [params.id]);
 
-  // --- Load ADM3 polygons with scores
-  const loadAdm3 = async (id: string) => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('v_instance_affected_adm3')
-      .select('admin_pcode,name,geom_json,score')
-      .eq('instance_id', id);
-    if (error) console.error('Error loading ADM3 features:', error);
-    else setAdm3Features(data || []);
-    setLoading(false);
-  };
+  // --- Load ADM3 polygons
+  useEffect(() => {
+    const loadAdm3 = async () => {
+      if (!instance?.id) return;
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('v_instance_affected_adm3')
+        .select('admin_pcode,name,geom_json,score')
+        .eq('instance_id', instance.id);
+      if (error) console.error('Error loading ADM3 features:', error);
+      else setAdm3Features(data || []);
+      setLoading(false);
+    };
+    loadAdm3();
+  }, [instance]);
 
   // --- Load category breakdown
-  const loadCategories = async (id: string) => {
-    const { data, error } = await supabase.from('v_category_scores').select('*').eq('instance_id', id);
-    if (error) console.error('Error loading category scores:', error);
-    else setCategories(data || []);
-  };
+  useEffect(() => {
+    const loadCategories = async () => {
+      if (!instance?.id) return;
+      const { data, error } = await supabase
+        .from('v_category_scores')
+        .select('*')
+        .eq('instance_id', instance.id);
+      if (error) console.error('Error loading category scores:', error);
+      else setCategories(data || []);
+    };
+    loadCategories();
+  }, [instance]);
 
-  // --- Load population metrics
-  const loadPopulationMetrics = async (id: string) => {
-    const { data, error } = await supabase
-      .from('v_instance_population_metrics_v2')
-      .select('*')
-      .eq('instance_id', id)
-      .single();
-    if (error) console.error('Error loading population metrics:', error);
-    else setPopulationMetrics(data || {});
-  };
+  // --- Load population metrics (RPC)
+  useEffect(() => {
+    const loadPopulationMetrics = async () => {
+      if (!instance?.id) return;
+      const { data, error } = await supabase
+        .rpc('get_population_metrics_fast', { in_instance_id: instance.id })
+        .single();
+      if (error) console.error('Error loading population metrics:', error);
+      else setPopulationMetrics(data);
+    };
+    loadPopulationMetrics();
+  }, [instance]);
 
-  // --- Recompute scores and refresh data
+  // --- Recompute all scores
   const recomputeScores = async () => {
     if (!instance?.id) return;
     await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
-    await loadAdm3(instance.id);
-    await loadPopulationMetrics(instance.id);
-    await loadCategories(instance.id);
+    const { data, error } = await supabase
+      .from('v_instance_affected_adm3')
+      .select('admin_pcode,name,geom_json,score')
+      .eq('instance_id', instance.id);
+    if (!error) setAdm3Features(data || []);
+    // refresh metrics after recomputation
+    const { data: metrics, error: metricsError } = await supabase
+      .rpc('get_population_metrics_fast', { in_instance_id: instance.id })
+      .single();
+    if (!metricsError) setPopulationMetrics(metrics);
   };
 
-  // --- Initial data loads
-  useEffect(() => {
-    if (!instance?.id) return;
-    loadAdm3(instance.id);
-    loadCategories(instance.id);
-    loadPopulationMetrics(instance.id);
-  }, [instance]);
-
-  // --- Derived metrics for ADM3
+  // --- Derived metrics
   const validScores = adm3Features.filter(f => f.score !== null);
   const avgScore = validScores.length
     ? (validScores.reduce((a, f) => a + f.score, 0) / validScores.length).toFixed(2)
@@ -120,61 +136,25 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <button onClick={() => setShowScoring(true)} className="px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">
                 Calibration
               </button>
-              <button
-                onClick={recomputeScores}
-                className="px-3 py-1 border rounded bg-blue-600 text-white hover:bg-blue-700"
-              >
+              <button onClick={recomputeScores} className="px-3 py-1 border rounded bg-blue-600 text-white hover:bg-blue-700">
                 Recompute
               </button>
             </div>
           </div>
 
-          {/* Population and Risk Panels */}
-          <div className="grid grid-cols-3 gap-2 mt-2">
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Total Population</p>
-              <p className="text-base font-semibold">
-                {populationMetrics.total_population
-                  ? populationMetrics.total_population.toLocaleString()
-                  : '—'}
-              </p>
-            </div>
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">People of Concern (≥3)</p>
-              <p className="text-base font-semibold text-orange-600">
-                {populationMetrics.people_of_concern
-                  ? populationMetrics.people_of_concern.toLocaleString()
-                  : '—'}
-              </p>
-            </div>
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Poverty-Exposed Population</p>
-              <p className="text-base font-semibold text-red-600">
-                {populationMetrics.poverty_exposed
-                  ? populationMetrics.poverty_exposed.toLocaleString()
-                  : '—'}
-              </p>
-            </div>
+          {/* New Population Metrics */}
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            <StatCard title="Total Population" value={populationMetrics?.total_population ?? '—'} />
+            <StatCard title="People of Concern (≥3)" value={populationMetrics?.people_of_concern ?? '—'} />
+            <StatCard title="Poverty-Exposed Population" value={populationMetrics?.poverty_exposed ?? '—'} />
           </div>
 
-          {/* ADM3 Score Panels */}
+          {/* Summary analytics */}
           <div className="grid grid-cols-4 gap-2 mt-2">
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Affected ADM3 Areas</p>
-              <p className="text-base font-semibold">{adm3Features.length}</p>
-            </div>
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Average Score</p>
-              <p className="text-base font-semibold">{avgScore}</p>
-            </div>
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Highest</p>
-              <p className="text-base font-semibold">{maxScore}</p>
-            </div>
-            <div className="bg-white border rounded-lg p-2 shadow-sm">
-              <p className="text-xs text-gray-500">Lowest</p>
-              <p className="text-base font-semibold">{minScore}</p>
-            </div>
+            <StatCard title="Affected ADM3 Areas" value={adm3Features.length} />
+            <StatCard title="Average Score" value={avgScore} />
+            <StatCard title="Highest" value={maxScore} />
+            <StatCard title="Lowest" value={minScore} />
           </div>
 
           {/* Map */}
@@ -214,7 +194,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
 
-          {/* Category Breakdown */}
+          {/* Category breakdown */}
           <div className="bg-white border rounded-lg shadow-sm p-3">
             <h3 className="font-semibold mb-2">Category Breakdown</h3>
             {categories.length === 0 ? (
@@ -240,64 +220,20 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               </table>
             )}
           </div>
-
-          {/* Most Affected ADM3 Areas */}
-          <div className="bg-white border rounded-lg shadow-sm p-3">
-            <h3 className="font-semibold mb-2">Most Affected ADM3 Areas</h3>
-            <table className="w-full text-xs border">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-1 text-left">Area</th>
-                  <th className="p-1 text-left">Pcode</th>
-                  <th className="p-1 text-left">Score</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mostAffected.map((f, i) => (
-                  <tr key={i} className="border-t hover:bg-gray-50">
-                    <td className="p-1">{f.name || '—'}</td>
-                    <td className="p-1">{f.admin_pcode}</td>
-                    <td className="p-1 font-medium">{f.score?.toFixed(2) || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {adm3Features.length > 5 && (
-              <div className="text-center mt-2">
-                <button
-                  onClick={() => setExpanded(!expanded)}
-                  className="text-blue-600 text-xs hover:underline"
-                >
-                  {expanded ? 'Show less' : 'Show more'}
-                </button>
-              </div>
-            )}
-          </div>
         </>
       )}
 
       {/* Modals */}
-      {showConfig && (
-        <InstanceDatasetConfigModal
-          instance={instance}
-          onClose={() => setShowConfig(false)}
-          onSaved={recomputeScores}
-        />
-      )}
-      {showAreaModal && (
-        <DefineAffectedAreaModal
-          instance={instance}
-          onClose={() => setShowAreaModal(false)}
-          onSaved={recomputeScores}
-        />
-      )}
-      {showScoring && (
-        <InstanceScoringModal
-          instance={instance}
-          onClose={() => setShowScoring(false)}
-          onSaved={recomputeScores}
-        />
-      )}
+      {showConfig && <InstanceDatasetConfigModal instance={instance} onClose={() => setShowConfig(false)} onSaved={recomputeScores} />}
+      {showAreaModal && <DefineAffectedAreaModal instance={instance} onClose={() => setShowAreaModal(false)} onSaved={recomputeScores} />}
+      {showScoring && <InstanceScoringModal instance={instance} onClose={() => setShowScoring(false)} onSaved={recomputeScores} />}
     </div>
   );
 }
+
+const StatCard = ({ title, value }: { title: string; value: any }) => (
+  <div className="bg-white border rounded-lg p-3 shadow-sm text-center">
+    <p className="text-xs text-gray-500">{title}</p>
+    <p className="text-lg font-semibold">{value ?? '—'}</p>
+  </div>
+);
