@@ -24,7 +24,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showConfig, setShowConfig] = useState(false);
   const [showAreaModal, setShowAreaModal] = useState(false);
   const [showScoring, setShowScoring] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
   // --- Color scale
   const colorForScore = (score: number | null) => {
@@ -66,7 +65,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadMapData('overall');
   }, [instance]);
 
-  // --- Load population metrics from the materialized view
+  // --- Load population metrics from materialized view
   useEffect(() => {
     if (!instance?.id) return;
     const loadPop = async () => {
@@ -81,7 +80,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadPop();
   }, [instance]);
 
-  // --- Helper: Load map data based on layer
+  // --- Load map data
   const loadMapData = async (layer: string) => {
     if (!instance?.id) return;
     setLoading(true);
@@ -94,8 +93,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (!error) setAdm3Features(data || []);
         else console.error('ADM3 load error:', error);
       } else {
-        const { data, error } = await supabase
-          .rpc('get_dataset_scores_for_instance', { in_instance_id: instance.id, in_dataset_name: layer });
+        const { data, error } = await supabase.rpc('get_dataset_scores_for_instance', {
+          in_instance_id: instance.id,
+          in_dataset_name: layer,
+        });
         if (!error) setAdm3Features(data || []);
         else console.error('Dataset layer load error:', error);
       }
@@ -104,19 +105,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
-  // --- Recompute everything (now includes materialized view refresh)
+  // --- Recompute scores + refresh materialized view
   const recomputeScores = async () => {
     if (!instance?.id) return;
     try {
-      // Step 1 – Run scoring function
       const { error: scoreErr } = await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
       if (scoreErr) throw scoreErr;
 
-      // Step 2 – Refresh the materialized view
       const { error: refreshErr } = await supabase.rpc('refresh_instance_population_metrics', { in_instance_id: instance.id });
       if (refreshErr) throw refreshErr;
 
-      // Step 3 – Reload map and metrics
       await loadMapData(selectedLayer);
 
       const { data, error } = await supabase
@@ -129,6 +127,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     } catch (err) {
       console.error('Recompute failed:', err);
     }
+  };
+
+  const formatNumber = (val: any) => {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+    return Math.round(val).toLocaleString();
   };
 
   // --- Derived metrics
@@ -170,12 +173,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
           {/* Population Metrics */}
           <div className="grid grid-cols-3 gap-2 mt-3">
-            <StatCard title="Total Population" value={populationMetrics?.total_population ?? '—'} />
-            <StatCard title="People of Concern (≥3)" value={populationMetrics?.people_of_concern ?? '—'} />
-            <StatCard title="Poverty-Exposed Population" value={populationMetrics?.poverty_exposed ?? '—'} />
+            <StatCard title="Total Population" value={formatNumber(populationMetrics?.total_population)} />
+            <StatCard title="People of Concern (≥3)" value={formatNumber(populationMetrics?.people_of_concern)} />
+            <StatCard title="Poverty-Exposed Population" value={formatNumber(populationMetrics?.poverty_exposed)} />
           </div>
 
-          {/* Summary Analytics */}
+          {/* Summary */}
           <div className="grid grid-cols-4 gap-2 mt-2">
             <StatCard title="Affected ADM3 Areas" value={adm3Features.length} />
             <StatCard title="Average Score" value={avgScore} />
@@ -183,7 +186,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <StatCard title="Lowest" value={minScore} />
           </div>
 
-          {/* Map + Selector */}
+          {/* Map */}
           <div className="flex bg-white border rounded-lg shadow-sm">
             <div className="flex-1 p-2 relative">
               <div className="absolute right-3 top-3 z-10">
