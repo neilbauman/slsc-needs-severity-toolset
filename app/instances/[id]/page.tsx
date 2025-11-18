@@ -6,12 +6,12 @@ import { supabase } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-type AreaRow = {
+interface AreaRow {
   admin_pcode: string;
   name: string;
   score: number;
   geom_json: any;
-};
+}
 
 export default function InstancePage() {
   const { id } = useParams();
@@ -23,6 +23,7 @@ export default function InstancePage() {
     max: "-",
   });
 
+  // 🔹 Fetch the scores + geometry
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -36,21 +37,27 @@ export default function InstancePage() {
         return;
       }
 
-      setAdm3(data || []);
-      if (data && data.length > 0) {
-        const scores = data.map((d) => Number(d.score)).filter(Boolean);
-        const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
-        setStats({
-          affected: data.length,
-          avg,
-          min: Math.min(...scores).toFixed(2),
-          max: Math.max(...scores).toFixed(2),
-        });
-      }
+      if (!data || data.length === 0) return;
+
+      setAdm3(data);
+
+      const scores = data.map((d) => Number(d.score)).filter((s) => !isNaN(s));
+      const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
+      const min = Math.min(...scores).toFixed(2);
+      const max = Math.max(...scores).toFixed(2);
+
+      setStats({
+        affected: data.length,
+        avg,
+        min,
+        max,
+      });
     })();
   }, [id]);
 
+  // 🔹 Color scale
   const getColor = (score: number) => {
+    if (!score) return "#d3d3d3";
     if (score >= 4.5) return "#800026";
     if (score >= 3.5) return "#BD0026";
     if (score >= 2.5) return "#E31A1C";
@@ -58,6 +65,7 @@ export default function InstancePage() {
     return "#FFEDA0";
   };
 
+  // 🔹 Map rendering
   return (
     <div className="p-6 space-y-4">
       <h1 className="text-xl font-semibold">Cebu EQ–Typhoon</h1>
@@ -94,7 +102,7 @@ export default function InstancePage() {
               color: "#333",
               weight: 0.5,
               fillColor: getColor(area.score),
-              fillOpacity: 0.7,
+              fillOpacity: 0.75,
             })}
           >
             <Tooltip sticky>
