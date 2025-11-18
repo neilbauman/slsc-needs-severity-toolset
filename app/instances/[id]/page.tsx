@@ -25,7 +25,6 @@ export default function InstancePage({ params }: any) {
   const [loading, setLoading] = useState(true);
   const [recomputing, setRecomputing] = useState(false);
 
-  // Load all instance data
   useEffect(() => {
     loadInstanceData();
   }, [instanceId]);
@@ -60,22 +59,32 @@ export default function InstancePage({ params }: any) {
       return;
     }
 
-    // 3️⃣ Compute stats (✅ using aliases to fix TS type error)
-    const { data: statRows, error: statErr } = await supabase
+    // 3️⃣ Compute stats (safe version with explicit casting)
+    type StatRow = {
+      count: number | null;
+      min: number | null;
+      max: number | null;
+      avg: number | null;
+    };
+
+    const { data: statData, error: statErr } = await supabase
       .from("scored_instance_values_adm3")
-      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
+      .select(
+        "count:count(*), min:min(score), max:max(score), avg:avg(score)"
+      )
       .eq("instance_id", instanceId)
       .maybeSingle();
 
-    if (statErr) console.error("Stat query error:", statErr);
-
-    if (statRows) {
+    if (statErr) {
+      console.error("Stat query error:", statErr);
+    } else {
+      const statRows = statData as StatRow;
       setStats((prev: any) => ({
         ...prev,
-        affected: statRows.count ?? 0,
-        avg: statRows.avg ? Number(statRows.avg).toFixed(2) : "-",
-        min: statRows.min ? Number(statRows.min).toFixed(2) : "-",
-        max: statRows.max ? Number(statRows.max).toFixed(2) : "-",
+        affected: statRows?.count ?? 0,
+        avg: statRows?.avg ? Number(statRows.avg).toFixed(2) : "-",
+        min: statRows?.min ? Number(statRows.min).toFixed(2) : "-",
+        max: statRows?.max ? Number(statRows.max).toFixed(2) : "-",
       }));
     }
 
