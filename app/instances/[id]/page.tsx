@@ -49,7 +49,7 @@ export default function InstancePage() {
   const [showFrameworkScoring, setShowFrameworkScoring] = useState(false);
 
   // ------------------------------------------------------------
-  // Fetch instance info (to get admin_scope, dataset refs, etc.)
+  // Fetch instance info (admin_scope, dataset refs, etc.)
   // ------------------------------------------------------------
   useEffect(() => {
     if (!id) return;
@@ -76,42 +76,41 @@ export default function InstancePage() {
     (async () => {
       setLoading(true);
 
-      const { data, error } = await supabase.rpc("exec_filtered_instance_scores", {
-        in_instance_id: instance.id,
-      });
+      // Get all ADM3 scores for instance
+      const { data: allScores, error: errScores } = await supabase
+        .from("v_instance_admin_scores_geojson")
+        .select("admin_pcode,name,score,geom_json")
+        .eq("instance_id", instance.id);
 
-      // if RPC not present fallback to manual filtering
-      let results = data;
-      if (error || !results) {
-        const { data: manual, error: errManual } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode,name,score,geom_json")
-          .eq("instance_id", instance.id);
-        if (errManual) {
-          console.error("ADM3 fetch error:", errManual);
-          setLoading(false);
-          return;
-        }
-
-        // We'll fetch all ADM3 under admin_scope manually
-        const { data: adm3list } = await supabase
-          .from("admin_boundaries")
-          .select("admin_pcode,parent_pcode,admin_level")
-          .eq("admin_level", "ADM3");
-
-        const validParents = new Set(instance.admin_scope);
-        const filtered = manual.filter((row) =>
-          adm3list.some(
-            (ab) =>
-              ab.admin_pcode === row.admin_pcode &&
-              validParents.has(ab.parent_pcode)
-          )
-        );
-
-        results = filtered;
+      if (errScores) {
+        console.error("ADM3 fetch error:", errScores);
+        setLoading(false);
+        return;
       }
 
-      setAdm3(results);
+      // Get all ADM3 boundary metadata
+      const { data: boundaries, error: errBound } = await supabase
+        .from("admin_boundaries")
+        .select("admin_pcode,parent_pcode,admin_level")
+        .eq("admin_level", "ADM3");
+
+      if (errBound) {
+        console.error("Boundary fetch error:", errBound);
+        setLoading(false);
+        return;
+      }
+
+      // Filter only ADM3s whose parent ADM2 is in admin_scope
+      const validParents = new Set(instance.admin_scope);
+      const filtered = allScores.filter((row) =>
+        boundaries.some(
+          (b) =>
+            b.admin_pcode === row.admin_pcode &&
+            validParents.has(b.parent_pcode)
+        )
+      );
+
+      setAdm3(filtered);
       setLoading(false);
     })();
   }, [instance]);
@@ -123,13 +122,29 @@ export default function InstancePage() {
     if (!adm3.length) return;
     const scores = adm3.map((a) => a.score || 0);
     const concern = scores.filter((s) => s >= 3).length;
-    const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
     setStats({
-      totalPopulation: "–", // placeholder until population dataset integrated
+      totalPopulation: "–",
       peopleConcern: concern.toString(),
-      peopleNeed: "–", // will multiply concern × poverty rate later
+      peopleNeed: "–",
     });
   }, [adm3]);
+
+  // ------------------------------------------------------------
+  // GeoJSON Normalization (supports Polygon & MultiPolygon)
+  // ------------------------------------------------------------
+  const normalizeGeometry = (geom: any) => {
+    if (!geom) return null;
+    if (geom.type === "FeatureCollection") return geom;
+    if (geom.type === "Feature") return geom;
+    if (geom.type === "Polygon" || geom.type === "MultiPolygon") {
+      return {
+        type: "Feature",
+        properties: {},
+        geometry: geom,
+      };
+    }
+    return null;
+  };
 
   // ------------------------------------------------------------
   // Color scale
@@ -144,7 +159,7 @@ export default function InstancePage() {
   };
 
   // ------------------------------------------------------------
-  // Map Rendering
+  // Render
   // ------------------------------------------------------------
   return (
     <div className="p-4 flex flex-col gap-3 text-sm">
@@ -204,37 +219,40 @@ export default function InstancePage() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution="&copy; OpenStreetMap contributors"
               />
-              {adm3.map((area, i) => (
-                <GeoJSON
-                  key={i}
-                  data={area.geom_json}
-                  style={() => ({
-                    color: "#555",
-                    weight: 0.6,
-                    fillColor: getColor(area.score),
-                    fillOpacity: 0.8,
-                  })}
-                >
-                  <Tooltip sticky>
-                    <div>
-                      <strong>{area.name}</strong>
-                      <br />
-                      Score: {Number(area.score).toFixed(2)}
-                    </div>
-                  </Tooltip>
-                </GeoJSON>
-              ))}
+              {adm3.map((area, i) => {
+                const feature = normalizeGeometry(area.geom_json);
+                if (!feature) return null;
+                return (
+                  <GeoJSON
+                    key={i}
+                    data={feature}
+                    style={() => ({
+                      color: "#555",
+                      weight: 0.6,
+                      fillColor: getColor(area.score),
+                      fillOpacity: 0.8,
+                    })}
+                  >
+                    <Tooltip sticky>
+                      <div>
+                        <strong>{area.name}</strong>
+                        <br />
+                        Score: {Number(area.score).toFixed(2)}
+                      </div>
+                    </Tooltip>
+                  </GeoJSON>
+                );
+              })}
             </MapContainer>
           )}
         </div>
 
-        {/* Right-hand layer selector placeholder */}
+        {/* Sidebar */}
         <div className="w-72 bg-white rounded border p-3 flex flex-col gap-2 h-[600px] overflow-y-auto">
           <h3 className="text-sm font-semibold mb-1">Map Layers</h3>
           <p className="text-xs text-gray-600">
             Select dataset layers or switch to overall score.
           </p>
-          {/* TODO: Integrate ScoreLayerSelector */}
           <div className="p-2 text-xs text-gray-500 border-t mt-2">
             (Layer selector coming soon)
           </div>
@@ -274,9 +292,9 @@ export default function InstancePage() {
   );
 }
 
-// ------------------------------------------------------------
-// Reusable Compact Stat Card
-// ------------------------------------------------------------
+// ------------------------------------------
+// Stat Card
+// ------------------------------------------
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="bg-white rounded border p-3 shadow-sm text-center">
