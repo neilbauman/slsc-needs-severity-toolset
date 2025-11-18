@@ -7,9 +7,6 @@ import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
-// ─────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────
 interface AreaRow {
   admin_pcode: string;
   name: string;
@@ -24,9 +21,6 @@ interface Stats {
   max: string | number;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────
 export default function InstancePage() {
   const { id } = useParams();
   const [layerType, setLayerType] = useState<"overall" | "category" | "dataset">("overall");
@@ -40,11 +34,8 @@ export default function InstancePage() {
   });
   const [loading, setLoading] = useState(false);
 
-  // ─────────────────────────────────────────────────────────────
-  // Color scale (1–5)
-  // ─────────────────────────────────────────────────────────────
   const getColor = (score: number | null | undefined) => {
-    if (score == null || isNaN(score)) return "#cccccc"; // grey fallback
+    if (score == null || isNaN(score)) return "#cccccc";
     if (score >= 4.5) return "#800026";
     if (score >= 3.5) return "#BD0026";
     if (score >= 2.5) return "#E31A1C";
@@ -52,36 +43,42 @@ export default function InstancePage() {
     return "#FFEDA0";
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Fetch and prepare data
-  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
+
     const fetchData = async () => {
       setLoading(true);
-
       let data: any[] | null = null;
       let error: any = null;
 
-      // ───── 1️⃣ OVERALL ─────
+      // 🔹 1️⃣ OVERALL SCORE
       if (layerType === "overall") {
+        const { data: affected } = await supabase
+          .from("v_instance_affected_adm3")
+          .select("admin_pcode")
+          .eq("instance_id", id);
+
+        const affectedCodes = affected?.map((a) => a.admin_pcode) ?? [];
+
         const res = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("admin_pcode,name,score,geom_json")
-          .eq("instance_id", id);
+          .eq("instance_id", id)
+          .in("admin_pcode", affectedCodes);
+
         data = res.data;
         error = res.error;
       }
 
-      // ───── 2️⃣ DATASET ─────
+      // 🔹 2️⃣ DATASET MODE
       else if (layerType === "dataset") {
         const datasetRes = await supabase
           .from("datasets")
           .select("id")
           .ilike("name", selectedLayer)
           .limit(1);
-        const datasetId = datasetRes.data?.[0]?.id;
 
+        const datasetId = datasetRes.data?.[0]?.id;
         if (datasetId) {
           const res = await supabase
             .from("dataset_values_numeric_normalized")
@@ -92,7 +89,7 @@ export default function InstancePage() {
         }
       }
 
-      // ───── 3️⃣ CATEGORY (placeholder for later) ─────
+      // 🔹 3️⃣ CATEGORY (placeholder)
       else if (layerType === "category") {
         const res = await supabase
           .from("v_instance_admin_scores_geojson")
@@ -109,7 +106,6 @@ export default function InstancePage() {
         return;
       }
 
-      // ───── 4️⃣ Fallback if no data ─────
       if (!data || data.length === 0) {
         console.warn("No rows found — rendering grey boundaries.");
         const { data: geo, error: geoErr } = await supabase
@@ -132,17 +128,24 @@ export default function InstancePage() {
         return;
       }
 
-      // ───── 5️⃣ Parse JSON safely ─────
+      // 🔹 Parse + handle Polygon & MultiPolygon
       const parsed = data.map((d: any) => {
         let geomObj = null;
         try {
-          geomObj =
-            typeof d.geom_json === "string"
-              ? JSON.parse(d.geom_json)
-              : d.geom_json;
-        } catch (e) {
+          const raw = typeof d.geom_json === "string" ? JSON.parse(d.geom_json) : d.geom_json;
+          if (!raw) throw new Error("Empty geometry");
+
+          if (raw.type === "Polygon" || raw.type === "MultiPolygon") {
+            geomObj = raw;
+          } else if (raw.geometry?.type === "Polygon" || raw.geometry?.type === "MultiPolygon") {
+            geomObj = raw.geometry;
+          } else {
+            console.warn("Unrecognized geometry:", raw);
+          }
+        } catch {
           console.warn("Invalid GeoJSON skipped:", d.admin_pcode);
         }
+
         return {
           admin_pcode: d.admin_pcode,
           name: d.name ?? d.admin_name ?? "",
@@ -154,10 +157,10 @@ export default function InstancePage() {
       const filtered = parsed.filter((d) => d.geom_json);
       setAdm3(filtered);
 
-      // ───── 6️⃣ Compute stats ─────
       const validScores = filtered
         .map((d) => d.score)
         .filter((s): s is number => s !== null && !isNaN(s));
+
       if (validScores.length > 0) {
         const avg = (
           validScores.reduce((a, b) => a + b, 0) / validScores.length
@@ -175,17 +178,11 @@ export default function InstancePage() {
     fetchData();
   }, [id, selectedLayer, layerType]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Handler for layer selector
-  // ─────────────────────────────────────────────────────────────
   const handleSelect = (value: string, type: string) => {
     setSelectedLayer(value);
     setLayerType(type as any);
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────
   return (
     <div className="flex">
       <div className="flex-1 p-6 space-y-4">
@@ -244,9 +241,6 @@ export default function InstancePage() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Helper component
-// ─────────────────────────────────────────────────────────────
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="p-3 rounded-lg shadow bg-white text-center">
