@@ -7,7 +7,7 @@ interface NumericScoringModalProps {
   dataset: any;
   instance: any;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved?: () => void;
 }
 
 export default function NumericScoringModal({
@@ -16,16 +16,15 @@ export default function NumericScoringModal({
   onClose,
   onSaved,
 }: NumericScoringModalProps) {
-  const [method, setMethod] = useState<"Normalization" | "Thresholds">("Normalization");
-  const [scaleMax, setScaleMax] = useState<number>(5);
-  const [inverse, setInverse] = useState<boolean>(false);
-  const [useNational, setUseNational] = useState<boolean>(false);
+  const [method, setMethod] = useState("Normalization");
+  const [scaleMax, setScaleMax] = useState(5);
+  const [inverse, setInverse] = useState(false);
   const [thresholds, setThresholds] = useState<any[]>([]);
-  const [saving, setSaving] = useState<boolean>(false);
-  const [preview, setPreview] = useState<any | null>(null);
-  const [message, setMessage] = useState<string>("");
+  const [preview, setPreview] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
 
-  // ✅ Load saved config
+  // ✅ Load existing config
   useEffect(() => {
     const loadConfig = async () => {
       const { data, error } = await supabase
@@ -36,26 +35,23 @@ export default function NumericScoringModal({
         .single();
 
       if (error) {
-        console.warn("No config found:", error.message);
+        console.warn("No existing score config found:", error.message);
         return;
       }
 
-      const cfg = data?.score_config;
-      if (cfg) {
-        if (cfg.method) setMethod(cfg.method);
-        if (cfg.scaleMax) setScaleMax(cfg.scaleMax);
-        if (cfg.inverse !== undefined) setInverse(cfg.inverse);
-        if (cfg.useNational !== undefined) setUseNational(cfg.useNational);
-        if (Array.isArray(cfg.thresholds)) setThresholds(cfg.thresholds);
-      }
+      const cfg = data?.score_config || {};
+      if (cfg.method) setMethod(cfg.method);
+      if (cfg.scaleMax) setScaleMax(cfg.scaleMax);
+      if (cfg.inverse !== undefined) setInverse(cfg.inverse);
+      if (cfg.thresholds?.length) setThresholds(cfg.thresholds);
     };
     loadConfig();
   }, [instance.id, dataset.id]);
 
-  // ✅ Save configuration JSON
+  // ✅ Save config
   const saveConfig = async () => {
     setSaving(true);
-    const config = { method, scaleMax, inverse, useNational, thresholds };
+    const config = { method, scaleMax, inverse, thresholds };
 
     const { error } = await supabase
       .from("instance_dataset_config")
@@ -64,140 +60,101 @@ export default function NumericScoringModal({
       .eq("dataset_id", dataset.id);
 
     if (error) {
-      console.error(error);
-      setMessage(`❌ ${error.message}`);
+      setMessage(`❌ Error saving config: ${error.message}`);
     } else {
-      setMessage("✅ Configuration saved");
-      await onSaved();
+      setMessage("✅ Config saved!");
+      if (onSaved) onSaved();
     }
     setSaving(false);
   };
 
-  // ✅ Preview scoring summary
-  const previewScoring = async () => {
-    setMessage("Generating preview...");
-    setPreview(null);
+  // ✅ Apply scoring
+  const applyScoring = async () => {
+    setSaving(true);
+    setMessage("Running scoring...");
 
-    const rpc =
-      method === "Normalization"
-        ? "score_numeric_normalized"
-        : "score_numeric_thresholds";
-
-    const params: any =
-      method === "Normalization"
-        ? {
-            in_instance_id: instance.id,
-            in_dataset_id: dataset.id,
-            in_scale_max: scaleMax,
-            in_inverse: inverse,
-            in_use_national: useNational,
-          }
-        : {
-            in_instance_id: instance.id,
-            in_dataset_id: dataset.id,
-            in_rules: thresholds,
-            in_use_national: useNational,
-          };
-
-    const { error } = await supabase.rpc(rpc, params);
-    if (error) {
-      console.error(error);
-      setMessage(`❌ Preview failed: ${error.message}`);
-      return;
+    let rpcResponse;
+    if (method === "Normalization") {
+      rpcResponse = await supabase.rpc("score_numeric_normalized", {
+        in_instance_id: instance.id,
+        in_dataset_id: dataset.id,
+        in_scale_max: scaleMax,
+        in_inverse: inverse,
+      });
+    } else {
+      rpcResponse = await supabase.rpc("score_numeric_thresholds", {
+        in_instance_id: instance.id,
+        in_dataset_id: dataset.id,
+        in_rules: thresholds,
+      });
     }
 
-    const { data, error: statsErr } = await supabase
+    if (rpcResponse.error) {
+      setMessage(`❌ Error running scoring: ${rpcResponse.error.message}`);
+    } else {
+      setMessage("✅ Scoring complete!");
+      if (onSaved) onSaved();
+    }
+
+    setSaving(false);
+  };
+
+  // ✅ Preview scoring results safely
+  const previewScores = async () => {
+    type StatRow = {
+      count: number | null;
+      min: number | null;
+      max: number | null;
+      avg: number | null;
+    };
+
+    const { data, error } = await supabase
       .from("scored_instance_values_adm3")
-      .select("count(*), min(score), max(score), avg(score)")
+      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
       .eq("instance_id", instance.id)
       .eq("dataset_id", dataset.id)
       .maybeSingle();
 
-    if (statsErr) {
-      setMessage(`❌ Error loading preview: ${statsErr.message}`);
-      return;
-    }
-
-    if (!data) {
-      setMessage("⚠️ No data available for preview.");
-      return;
-    }
-
-    setPreview({
-      count: data.count,
-      min: Number(data.min)?.toFixed(2),
-      max: Number(data.max)?.toFixed(2),
-      avg: Number(data.avg)?.toFixed(2),
-    });
-
-    setMessage("✅ Preview generated successfully");
-  };
-
-  // ✅ Apply scoring (persist to scored_instance_values_adm3)
-  const applyScoring = async () => {
-    setSaving(true);
-    setMessage("Applying scoring...");
-
-    const rpc =
-      method === "Normalization"
-        ? "score_numeric_normalized"
-        : "score_numeric_thresholds";
-
-    const params: any =
-      method === "Normalization"
-        ? {
-            in_instance_id: instance.id,
-            in_dataset_id: dataset.id,
-            in_scale_max: scaleMax,
-            in_inverse: inverse,
-            in_use_national: useNational,
-          }
-        : {
-            in_instance_id: instance.id,
-            in_dataset_id: dataset.id,
-            in_rules: thresholds,
-            in_use_national: useNational,
-          };
-
-    const { error } = await supabase.rpc(rpc, params);
-
     if (error) {
-      setMessage(`❌ Scoring failed: ${error.message}`);
-    } else {
-      setMessage("✅ Scoring applied successfully");
-      await onSaved();
+      console.error("Preview error:", error);
+      setMessage("❌ Error generating preview.");
+      return;
     }
 
-    setSaving(false);
+    const safeData = data as unknown as StatRow;
+    setPreview({
+      count: safeData?.count ?? 0,
+      min: safeData?.min ? safeData.min.toFixed(2) : "-",
+      max: safeData?.max ? safeData.max.toFixed(2) : "-",
+      avg: safeData?.avg ? safeData.avg.toFixed(2) : "-",
+    });
   };
 
-  // ✅ Manage thresholds
   const addRange = () =>
     setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
+
   const updateRange = (idx: number, key: string, value: any) => {
     const updated = [...thresholds];
     updated[idx][key] = value;
     setThresholds(updated);
   };
+
   const removeRange = (idx: number) =>
     setThresholds(thresholds.filter((_, i) => i !== idx));
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-lg w-[700px] max-h-[90vh] overflow-y-auto p-6 text-sm">
-        <h2 className="text-lg font-semibold mb-2 text-gray-800">
-          Configure Scoring – {dataset.name}
-        </h2>
-        <p className="text-gray-500 mb-4">
-          Adjust scoring settings for this dataset within the instance.
-        </p>
+      <div className="bg-white rounded-lg shadow-xl w-[650px] p-6 relative text-gray-800">
+        <h2 className="text-lg font-semibold mb-3">{dataset.name}</h2>
 
         <div className="mb-4">
-          <label className="block text-xs font-medium mb-1">Scoring Method</label>
+          <label className="block text-sm font-medium mb-1">
+            Scoring Method:
+          </label>
           <select
             value={method}
-            onChange={(e) => setMethod(e.target.value as any)}
-            className="border border-gray-300 rounded px-2 py-1 w-full"
+            onChange={(e) => setMethod(e.target.value)}
+            className="border rounded p-2 w-full text-sm"
           >
             <option value="Normalization">Normalization</option>
             <option value="Thresholds">Thresholds</option>
@@ -206,98 +163,89 @@ export default function NumericScoringModal({
 
         {method === "Normalization" && (
           <>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="block text-xs font-medium mb-1">
-                  Scale (max score)
-                </label>
-                <select
-                  value={scaleMax}
-                  onChange={(e) => setScaleMax(Number(e.target.value))}
-                  className="border border-gray-300 rounded px-2 py-1 w-full"
-                >
-                  {[3, 4, 5].map((v) => (
-                    <option key={v} value={v}>
-                      1–{v}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center mt-5">
-                <input
-                  type="checkbox"
-                  checked={inverse}
-                  onChange={(e) => setInverse(e.target.checked)}
-                  className="mr-2"
-                />
-                <span className="text-sm">Higher values = worse (inverse)</span>
-              </div>
+            <div className="mb-3">
+              <label className="block text-sm font-medium mb-1">
+                Scale (max score):
+              </label>
+              <select
+                value={scaleMax}
+                onChange={(e) => setScaleMax(Number(e.target.value))}
+                className="border rounded p-2 w-full text-sm"
+              >
+                {[3, 4, 5].map((v) => (
+                  <option key={v} value={v}>
+                    1–{v}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="flex items-center mb-4">
+            <label className="inline-flex items-center mt-2 text-sm">
               <input
                 type="checkbox"
-                checked={useNational}
-                onChange={(e) => setUseNational(e.target.checked)}
+                checked={inverse}
+                onChange={(e) => setInverse(e.target.checked)}
                 className="mr-2"
               />
-              <span className="text-sm text-gray-700">
-                Normalize based on <b>national</b> dataset
-              </span>
-            </div>
+              Higher values mean more vulnerability
+            </label>
           </>
         )}
 
         {method === "Thresholds" && (
-          <>
-            <div className="mb-2 flex justify-between items-center">
-              <label className="font-medium text-xs text-gray-700">
-                Define Threshold Ranges
-              </label>
+          <div className="mb-4">
+            <div className="flex justify-between items-center mb-2">
+              <label className="text-sm font-medium">Threshold Ranges</label>
               <button
                 onClick={addRange}
-                className="text-xs px-2 py-1 border rounded bg-gray-50 hover:bg-gray-100"
+                className="px-2 py-1 border text-sm rounded hover:bg-gray-100"
               >
                 + Add Range
               </button>
             </div>
-            <table className="w-full text-xs border border-gray-200 mb-4">
-              <thead className="bg-gray-100 text-gray-600">
+            <table className="w-full text-sm border border-gray-200">
+              <thead className="bg-gray-100">
                 <tr>
-                  <th className="p-2 text-left">Min</th>
-                  <th className="p-2 text-left">Max</th>
-                  <th className="p-2 text-left">Score</th>
-                  <th className="p-2 text-center"></th>
+                  <th className="p-1 text-left">Min</th>
+                  <th className="p-1 text-left">Max</th>
+                  <th className="p-1 text-left">Score</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {thresholds.map((t, i) => (
                   <tr key={i} className="border-t">
-                    <td className="p-2">
+                    <td className="p-1">
                       <input
                         type="number"
                         value={t.min}
-                        onChange={(e) => updateRange(i, "min", e.target.value)}
-                        className="border rounded px-2 py-1 w-full"
+                        onChange={(e) =>
+                          updateRange(i, "min", Number(e.target.value))
+                        }
+                        className="w-full border rounded p-1"
                       />
                     </td>
-                    <td className="p-2">
+                    <td className="p-1">
                       <input
                         type="number"
                         value={t.max}
-                        onChange={(e) => updateRange(i, "max", e.target.value)}
-                        className="border rounded px-2 py-1 w-full"
+                        onChange={(e) =>
+                          updateRange(i, "max", Number(e.target.value))
+                        }
+                        className="w-full border rounded p-1"
                       />
                     </td>
-                    <td className="p-2">
+                    <td className="p-1">
                       <input
                         type="number"
                         value={t.score}
-                        onChange={(e) => updateRange(i, "score", e.target.value)}
-                        className="border rounded px-2 py-1 w-full"
+                        onChange={(e) =>
+                          updateRange(i, "score", Number(e.target.value))
+                        }
+                        className="w-full border rounded p-1"
                       />
                     </td>
-                    <td className="p-2 text-center">
+                    <td className="p-1 text-center">
                       <button
                         onClick={() => removeRange(i)}
                         className="text-red-500 hover:text-red-700"
@@ -309,54 +257,72 @@ export default function NumericScoringModal({
                 ))}
               </tbody>
             </table>
-          </>
+          </div>
         )}
 
+        {/* ✅ Preview */}
         {preview && (
-          <div className="bg-gray-50 border rounded p-3 text-xs mt-3">
-            <div className="font-semibold mb-1">Preview Summary:</div>
-            <p>ADM3 Count: {preview.count}</p>
-            <p>Score Range: {preview.min} – {preview.max}</p>
-            <p>Average: {preview.avg}</p>
+          <div className="mt-3 p-3 border rounded bg-gray-50 text-sm">
+            <h4 className="font-medium mb-1">Preview Summary</h4>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <div>
+                <div className="text-gray-500 text-xs">Count</div>
+                <div className="font-semibold">{preview.count}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs">Min</div>
+                <div className="font-semibold">{preview.min}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs">Max</div>
+                <div className="font-semibold">{preview.max}</div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs">Avg</div>
+                <div className="font-semibold">{preview.avg}</div>
+              </div>
+            </div>
           </div>
         )}
 
         {message && (
-          <div
-            className={`mt-3 text-sm ${
+          <p
+            className={`mt-2 text-sm ${
               message.startsWith("✅") ? "text-green-600" : "text-red-600"
             }`}
           >
             {message}
-          </div>
+          </p>
         )}
 
-        <div className="flex justify-end gap-2 mt-5">
+        {/* Buttons */}
+        <div className="flex justify-end mt-4 gap-2">
           <button
             onClick={onClose}
-            className="px-3 py-1 border rounded text-gray-700 hover:bg-gray-100"
+            className="px-4 py-2 border rounded hover:bg-gray-100 text-sm"
           >
-            Cancel
+            Close
           </button>
           <button
             onClick={saveConfig}
             disabled={saving}
-            className="px-3 py-1 border rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
           >
             Save Config
           </button>
           <button
-            onClick={previewScoring}
-            className="px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200"
-          >
-            Preview
-          </button>
-          <button
             onClick={applyScoring}
             disabled={saving}
-            className="px-3 py-1 border rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+            className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
           >
             Apply Scoring
+          </button>
+          <button
+            onClick={previewScores}
+            disabled={saving}
+            className="px-4 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 disabled:opacity-50"
+          >
+            Preview
           </button>
         </div>
       </div>
