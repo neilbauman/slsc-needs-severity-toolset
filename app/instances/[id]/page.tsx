@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabaseClient";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
@@ -42,8 +44,7 @@ export default function InstancePage() {
               geometry: f.geom,
               properties: f,
             })),
-          };
-          const L = require("leaflet");
+          } as GeoJSON.FeatureCollection;
           const bounds = L.geoJSON(geojson).getBounds();
           mapRef.current.fitBounds(bounds);
         }
@@ -56,11 +57,11 @@ export default function InstancePage() {
   }, [id]);
 
   const getColor = (score: number) => {
-    if (score >= 4.5) return "#006400"; // Dark Green
+    if (score >= 4.5) return "#006400";
     if (score >= 3.5) return "#66A80F";
     if (score >= 2.5) return "#FFD43B";
     if (score >= 1.5) return "#FF922B";
-    return "#C92A2A"; // Red
+    return "#C92A2A";
   };
 
   if (loading) return <div className="p-4 text-sm text-gray-600">Loading instance...</div>;
@@ -83,10 +84,10 @@ export default function InstancePage() {
       <div className="flex space-x-4">
         <div className="flex-1">
           <MapContainer
-            center={[12.8797, 121.774]} // Default center Philippines
+            center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: "70vh", width: "100%" }}
-            whenCreated={(mapInstance) => {
+            whenCreated={(mapInstance: any) => {
               mapRef.current = mapInstance;
             }}
           >
@@ -100,7 +101,7 @@ export default function InstancePage() {
                     geometry: f.geom,
                     properties: f,
                   })),
-                }}
+                } as GeoJSON.FeatureCollection}
                 style={(feature: any) => ({
                   color: getColor(feature.properties.score),
                   weight: 1,
