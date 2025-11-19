@@ -19,13 +19,13 @@ export default function NumericScoringModal({
   const [method, setMethod] = useState("Normalization");
   const [scaleMax, setScaleMax] = useState(5);
   const [inverse, setInverse] = useState(false);
-  const [limitToAffected, setLimitToAffected] = useState(true);
   const [thresholds, setThresholds] = useState<any[]>([]);
+  const [scope, setScope] = useState("affected"); // "affected" or "country"
   const [preview, setPreview] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  // ✅ Load saved config from Supabase
+  // ✅ Load existing config
   useEffect(() => {
     const loadConfig = async () => {
       const { data, error } = await supabase
@@ -33,10 +33,10 @@ export default function NumericScoringModal({
         .select("score_config")
         .eq("instance_id", instance.id)
         .eq("dataset_id", dataset.id)
-        .maybeSingle();
+        .single();
 
       if (error) {
-        console.warn("No existing config:", error.message);
+        console.warn("No existing score config found:", error.message);
         return;
       }
 
@@ -44,8 +44,8 @@ export default function NumericScoringModal({
       if (cfg.method) setMethod(cfg.method);
       if (cfg.scaleMax) setScaleMax(cfg.scaleMax);
       if (cfg.inverse !== undefined) setInverse(cfg.inverse);
-      if (cfg.limitToAffected !== undefined) setLimitToAffected(cfg.limitToAffected);
       if (cfg.thresholds?.length) setThresholds(cfg.thresholds);
+      if (cfg.scope) setScope(cfg.scope);
     };
     loadConfig();
   }, [instance.id, dataset.id]);
@@ -53,7 +53,7 @@ export default function NumericScoringModal({
   // ✅ Save config
   const saveConfig = async () => {
     setSaving(true);
-    const config = { method, scaleMax, inverse, thresholds, limitToAffected };
+    const config = { method, scaleMax, inverse, thresholds, scope };
 
     const { error } = await supabase
       .from("instance_dataset_config")
@@ -61,108 +61,95 @@ export default function NumericScoringModal({
       .eq("instance_id", instance.id)
       .eq("dataset_id", dataset.id);
 
-    if (error) setMessage(`❌ ${error.message}`);
-    else {
+    if (error) {
+      setMessage(`❌ Error saving config: ${error.message}`);
+    } else {
       setMessage("✅ Config saved!");
-      onSaved?.();
+      if (onSaved) onSaved();
     }
-
     setSaving(false);
   };
 
-  // ✅ Apply scoring logic
+  // ✅ Apply scoring (calls unified RPC)
   const applyScoring = async () => {
     setSaving(true);
     setMessage("Running scoring...");
 
-    const rpcName =
-      method === "Normalization"
-        ? "score_numeric_normalized_adm4_to_adm3"
-        : "score_numeric_thresholds_adm4_to_adm3";
+    const limitToAffected = scope === "affected";
 
-    const params =
-      method === "Normalization"
-        ? {
-            in_instance_id: instance.id,
-            in_dataset_id: dataset.id,
-            in_scale_max: scaleMax,
-            in_inverse: inverse,
-            in_limit_to_affected: limitToAffected,
-          }
-        : {
-            in_instance_id: instance.id,
-            in_dataset_id: dataset.id,
-            in_thresholds: thresholds,
-            in_inverse: inverse,
-            in_limit_to_affected: limitToAffected,
-          };
+    const { error } = await supabase.rpc("score_numeric_auto", {
+      in_instance_id: instance.id,
+      in_dataset_id: dataset.id,
+      in_method: method,
+      in_thresholds: thresholds,
+      in_scale_max: scaleMax,
+      in_inverse: inverse,
+      in_limit_to_affected: limitToAffected,
+    });
 
-    const { error } = await supabase.rpc(rpcName, params);
-
-    if (error) setMessage(`❌ Error: ${error.message}`);
-    else {
+    if (error) {
+      setMessage(`❌ Error running scoring: ${error.message}`);
+      console.error(error);
+    } else {
       setMessage("✅ Scoring complete!");
-      onSaved?.();
+      await previewScores(); // auto-refresh preview
+      if (onSaved) onSaved();
     }
 
     setSaving(false);
   };
 
-  // ✅ Safe preview logic (no SQL parser issues)
+  // ✅ Preview stats
   const previewScores = async () => {
+    setMessage("Loading preview...");
     const { data, error } = await supabase
-      .from("scored_instance_values_adm3")
+      .from("instance_dataset_scores")
       .select("score")
       .eq("instance_id", instance.id)
       .eq("dataset_id", dataset.id);
 
-    if (error) {
-      console.error("Preview error:", error);
-      setMessage("❌ Error generating preview.");
+    if (error || !data?.length) {
+      setMessage("❌ Error generating preview or no data found.");
       return;
     }
 
-    if (!data || data.length === 0) {
-      setMessage("No scores available to preview.");
-      return;
-    }
-
-    const scores = data.map((d: any) => d.score ?? 0);
+    const scores = data.map((d: any) => d.score);
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
     const avg =
-      scores.length > 0
-        ? scores.reduce((sum, v) => sum + v, 0) / scores.length
-        : 0;
+      scores.reduce((sum: number, val: number) => sum + val, 0) / scores.length;
 
     setPreview({
       count: scores.length,
-      min: Math.min(...scores).toFixed(2),
-      max: Math.max(...scores).toFixed(2),
+      min: min.toFixed(2),
+      max: max.toFixed(2),
       avg: avg.toFixed(2),
     });
+
+    setMessage("✅ Preview updated.");
   };
 
-  // ✅ Threshold editing helpers
   const addRange = () =>
     setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
-  const updateRange = (i: number, key: string, val: any) => {
+
+  const updateRange = (idx: number, key: string, value: any) => {
     const updated = [...thresholds];
-    updated[i][key] = val;
+    updated[idx][key] = value;
     setThresholds(updated);
   };
-  const removeRange = (i: number) =>
-    setThresholds(thresholds.filter((_, idx) => idx !== i));
+
+  const removeRange = (idx: number) =>
+    setThresholds(thresholds.filter((_, i) => i !== idx));
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-[650px] p-6 text-gray-800">
-        <h2 className="text-lg font-semibold mb-4">
-          Scoring: {dataset.name}
-        </h2>
+      <div className="bg-white rounded-lg shadow-xl w-[650px] p-6 relative text-gray-800">
+        <h2 className="text-lg font-semibold mb-3">{dataset.name}</h2>
 
-        {/* Scoring Method */}
+        {/* Method Selection */}
         <div className="mb-4">
           <label className="block text-sm font-medium mb-1">
-            Scoring Method
+            Scoring Method:
           </label>
           <select
             value={method}
@@ -174,12 +161,24 @@ export default function NumericScoringModal({
           </select>
         </div>
 
-        {/* Normalization Options */}
+        {/* Scope Selection */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-1">Scope:</label>
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            className="border rounded p-2 w-full text-sm"
+          >
+            <option value="affected">Affected Area Only</option>
+            <option value="country">Entire Country</option>
+          </select>
+        </div>
+
         {method === "Normalization" && (
           <>
             <div className="mb-3">
               <label className="block text-sm font-medium mb-1">
-                Scale (max score)
+                Scale (max score):
               </label>
               <select
                 value={scaleMax}
@@ -187,41 +186,25 @@ export default function NumericScoringModal({
                 className="border rounded p-2 w-full text-sm"
               >
                 {[3, 4, 5].map((v) => (
-                  <option key={v} value={v}>{`1–${v}`}</option>
+                  <option key={v} value={v}>
+                    1–{v}
+                  </option>
                 ))}
               </select>
             </div>
 
-            <label className="inline-flex items-center text-sm mb-3">
+            <label className="inline-flex items-center mt-2 text-sm">
               <input
                 type="checkbox"
                 checked={inverse}
                 onChange={(e) => setInverse(e.target.checked)}
                 className="mr-2"
               />
-              Higher values indicate{" "}
-              <b>{inverse ? "less" : "more"}</b> vulnerability
+              Higher values mean more vulnerability
             </label>
-
-            <div className="mt-3">
-              <label className="block text-sm font-medium mb-1">
-                Normalization Scope
-              </label>
-              <select
-                value={limitToAffected ? "affected" : "national"}
-                onChange={(e) =>
-                  setLimitToAffected(e.target.value === "affected")
-                }
-                className="border rounded p-2 w-full text-sm"
-              >
-                <option value="affected">Affected Area Only</option>
-                <option value="national">Entire Country</option>
-              </select>
-            </div>
           </>
         )}
 
-        {/* Thresholds Options */}
         {method === "Thresholds" && (
           <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
@@ -290,9 +273,9 @@ export default function NumericScoringModal({
           </div>
         )}
 
-        {/* Preview Summary */}
+        {/* ✅ Preview */}
         {preview && (
-          <div className="mt-4 p-3 border rounded bg-gray-50 text-sm">
+          <div className="mt-3 p-3 border rounded bg-gray-50 text-sm">
             <h4 className="font-medium mb-1">Preview Summary</h4>
             <div className="grid grid-cols-4 gap-2 text-center">
               <div>
@@ -315,7 +298,6 @@ export default function NumericScoringModal({
           </div>
         )}
 
-        {/* Status Message */}
         {message && (
           <p
             className={`mt-2 text-sm ${
@@ -326,7 +308,7 @@ export default function NumericScoringModal({
           </p>
         )}
 
-        {/* Footer Buttons */}
+        {/* Buttons */}
         <div className="flex justify-end mt-4 gap-2">
           <button
             onClick={onClose}
