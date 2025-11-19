@@ -7,6 +7,9 @@ import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Feature } from "geojson";
 
+// ======================================================
+// Interfaces
+// ======================================================
 interface SummaryRow {
   adm3_pcode: string;
   adm3_name: string;
@@ -18,6 +21,9 @@ interface SummaryRow {
   geom: any;
 }
 
+// ======================================================
+// Main Component
+// ======================================================
 export default function InstancePage() {
   const { id } = useParams();
   const supabase = createClient();
@@ -36,7 +42,7 @@ export default function InstancePage() {
   const [showScoringConfig, setShowScoringConfig] = useState(false);
 
   // ======================================================
-  // Fetch summary data joined with geometry
+  // Fetch summary data with geometry
   // ======================================================
   useEffect(() => {
     if (!id) return;
@@ -79,7 +85,7 @@ export default function InstancePage() {
   }, [id]);
 
   // ======================================================
-  // Color scale for vulnerability scores
+  // Color scale for vulnerability
   // ======================================================
   const getColor = (score: number) => {
     if (!score) return "#d3d3d3";
@@ -91,7 +97,7 @@ export default function InstancePage() {
   };
 
   // ======================================================
-  // Main render
+  // Render
   // ======================================================
   return (
     <div className="p-6 space-y-4">
@@ -123,7 +129,7 @@ export default function InstancePage() {
             Calibrate Scores
           </button>
           <button
-            onClick={() => alert('Recomputing all scores...')}
+            onClick={() => alert("Recomputing all scores...")}
             className="px-3 py-1 bg-gray-800 text-white text-sm rounded hover:bg-gray-900"
           >
             Recompute Scores
@@ -194,7 +200,7 @@ export default function InstancePage() {
           )}
         </div>
 
-        {/* Right-hand Layer Panel */}
+        {/* Layer Panel */}
         <div className="w-64 bg-white shadow rounded-lg p-3 text-sm space-y-2">
           <h3 className="font-semibold text-gray-700 mb-2">Map Layers</h3>
           <div className="flex flex-col gap-1">
@@ -216,7 +222,9 @@ export default function InstancePage() {
         <DefineAffectedAreaModal
           instance={{ id }}
           onClose={() => setShowDefineArea(false)}
-          onSaved={() => window.location.reload()}
+          onSaved={async () => {
+            window.location.reload();
+          }}
         />
       )}
       {showDatasetConfig && (
@@ -229,9 +237,9 @@ export default function InstancePage() {
   );
 }
 
-// ---------------------------------------------
-// Stat Card
-// ---------------------------------------------
+// ======================================================
+// StatCard Component
+// ======================================================
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="p-3 bg-white rounded-lg shadow text-center">
@@ -241,9 +249,9 @@ function StatCard({ title, value }: { title: string; value: string }) {
   );
 }
 
-// ---------------------------------------------
-// Modals (from your repo)
-// ---------------------------------------------
+// ======================================================
+// Modal Imports
+// ======================================================
 import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 import InstanceScoringModal from "@/components/InstanceScoringModal";
