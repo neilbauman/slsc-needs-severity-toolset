@@ -24,7 +24,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Instance summary
+        // Fetch instance summary
         const { data: instanceData, error: instanceError } = await supabase
           .from("v_instance_affected_summary")
           .select("*")
@@ -34,7 +34,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (instanceError) throw instanceError;
         setInstance(instanceData);
 
-        // Dataset configuration
+        // Fetch datasets from new view
         const { data: dsData, error: dsError } = await supabase
           .from("v_instance_datasets_view")
           .select("*")
@@ -43,7 +43,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (dsError) throw dsError;
         setDatasets(dsData || []);
 
-        // GeoJSON data
+        // Fetch affected area geojson
         const { data: geoData, error: geoError } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("geojson")
@@ -51,14 +51,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
         if (geoError) throw geoError;
 
-        // Parse geojson safely
-        const parsed = geoData.map((g: any) =>
-          typeof g.geojson === "string" ? JSON.parse(g.geojson) : g.geojson
-        );
-
+        const parsed = geoData.map((g: any) => JSON.parse(g.geojson));
         setFeatures(parsed);
 
-        // Zoom to affected area
+        // Zoom map to affected area
         if (mapRef.current && parsed.length > 0) {
           const bounds = L.geoJSON(parsed).getBounds();
           mapRef.current.fitBounds(bounds);
@@ -73,39 +69,31 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     fetchData();
   }, [params.id]);
 
-  // Score color scale (1–5)
   const getColor = (score: number) => {
-    if (score <= 1) return "#00FF00";
-    if (score <= 2) return "#CCFF00";
-    if (score <= 3) return "#FFCC00";
-    if (score <= 4) return "#FF6600";
-    return "#FF0000";
+    if (score <= 1) return "#00FF00"; // green
+    if (score <= 2) return "#CCFF00"; // yellow-green
+    if (score <= 3) return "#FFCC00"; // yellow
+    if (score <= 4) return "#FF6600"; // orange
+    return "#FF0000"; // red
   };
 
   const onEachFeature = (feature: any, layer: any) => {
     if (feature.properties && feature.properties.score !== undefined) {
-      const score = Math.round(feature.properties.score);
-      const color = getColor(score);
-      layer.setStyle({
-        color,
-        fillColor: color,
-        fillOpacity: 0.6,
-        weight: 1,
-      });
+      const color = getColor(Math.round(feature.properties.score));
+      layer.setStyle({ color, fillColor: color, fillOpacity: 0.6 });
       layer.bindPopup(
         `${feature.properties.admin_name}: ${feature.properties.score.toFixed(2)}`
       );
     }
   };
 
-  if (loading) return <div className="p-4 text-sm">Loading...</div>;
+  if (loading) return <div className="p-4">Loading...</div>;
 
   return (
     <div className="flex p-2 space-x-2 text-sm">
-      {/* Map */}
       <div className="flex-1 border rounded-lg overflow-hidden">
         <MapContainer
-          center={[12.8797, 121.774]}
+          center={[12.8797, 121.774]} // Philippines center
           zoom={6}
           style={{ height: "80vh", width: "100%" }}
           ref={mapRef}
@@ -117,7 +105,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </MapContainer>
       </div>
 
-      {/* Right Panel */}
       <div className="w-72 space-y-2">
         <div className="space-y-1">
           <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1 rounded text-sm">
