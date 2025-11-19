@@ -6,10 +6,10 @@ import { supabase } from "@/lib/supabaseClient";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 
-// ✅ Dynamic imports for react-leaflet
-const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
+// ✅ Dynamic imports for Leaflet (no SSR)
+const MapContainer = dynamic(() => import("react-leaflet").then((m) => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import("react-leaflet").then((m) => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import("react-leaflet").then((m) => m.GeoJSON), { ssr: false });
 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const instanceId = params.id;
@@ -21,7 +21,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
 
-  // Load instance
+  // Load instance details
   useEffect(() => {
     const loadInstance = async () => {
       const { data } = await supabase.from("instances").select("*").eq("id", instanceId).single();
@@ -30,7 +30,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [instanceId]);
 
-  // Load affected area geometries
+  // Load affected area polygons
   useEffect(() => {
     const loadAffected = async () => {
       setLoading(true);
@@ -52,7 +52,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadAffected();
   }, [instanceId]);
 
-  // Auto-zoom map to affected area
+  // Auto zoom to affected area
   useEffect(() => {
     if (mapRef.current && features.length > 0) {
       const L = require("leaflet");
@@ -97,17 +97,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </button>
       </div>
 
-      {/* Main content */}
+      {/* Main layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Map */}
         <div className="flex-1 relative">
           <MapContainer
-            center={[12.8797, 121.7740]}
+            center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: "100%", width: "100%" }}
-            whenReady={(event) => {
-              mapRef.current = event.target;
-            }}
+            ref={mapRef}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: any, idx: number) => (
@@ -157,7 +155,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   );
 }
 
-// Color scale 1–5
+// Green → Red color scale
 function getColor(score: number) {
   if (score <= 1) return "#2ECC71";
   if (score <= 2) return "#A3E048";
