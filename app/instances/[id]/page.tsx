@@ -18,7 +18,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
 
-  // ✅ Load instance metadata
+  // Load instance metadata
   useEffect(() => {
     const loadInstance = async () => {
       const { data, error } = await supabase
@@ -31,13 +31,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [instanceId]);
 
-  // ✅ Load affected area geometries from correct view
+  // Load affected area geometries (matches schema exactly)
   useEffect(() => {
     const loadAffected = async () => {
       setLoading(true);
       const { data, error } = await supabase
-        .from("v_instance_affected_adm3") // use the actual view name
-        .select("admin_pcode, name, admin_level, geom")
+        .from("v_instance_affected_adm3")
+        .select("instance_id, admin_pcode, admin_level, geom")
         .eq("instance_id", instanceId);
 
       if (error) {
@@ -55,7 +55,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               geometry: geom,
               properties: {
                 admin_pcode: r.admin_pcode,
-                name: r.name,
                 admin_level: r.admin_level,
               },
             };
@@ -71,7 +70,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadAffected();
   }, [instanceId]);
 
-  // ✅ Auto zoom once features load
+  // Auto zoom
   useEffect(() => {
     if (mapRef.current && features.length > 0) {
       const L = require("leaflet");
@@ -90,7 +89,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   return (
     <div className="flex flex-col h-[calc(100vh-80px)]">
-      {/* Header */}
       <div className="flex justify-between items-center p-2 border-b text-sm">
         <h1 className="font-semibold text-gray-800">
           {instance?.name || "Instance"} Overview
@@ -103,9 +101,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </button>
       </div>
 
-      {/* Layout */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Map */}
         <div className="flex-1 relative">
           <MapContainer
             center={[12.8797, 121.774]}
@@ -129,14 +125,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           </MapContainer>
         </div>
 
-        {/* Sidebar */}
         <div className="w-64 border-l p-2 text-xs bg-white overflow-y-auto">
           <h3 className="font-semibold mb-2 text-gray-700">Score Layers</h3>
           <ScoreLayerSelector instanceId={instanceId} />
         </div>
       </div>
 
-      {/* Config Modal */}
       {showConfigModal && instance && (
         <InstanceDatasetConfigModal
           instance={instance}
