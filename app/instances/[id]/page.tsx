@@ -31,7 +31,6 @@ export default function InstancePage() {
         const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
         const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
-        // Summary stats
         const summaryRes = await fetch(
           `${base}/rest/v1/v_instance_affected_summary?select=*&instance_id=eq.${id}`,
           { headers }
@@ -39,7 +38,6 @@ export default function InstancePage() {
         const summaryJson = await summaryRes.json();
         setSummary(summaryJson[0] || null);
 
-        // GeoJSON features (limited to affected area)
         const geoRes = await fetch(
           `${base}/rest/v1/v_instance_admin_scores_geojson?select=*&instance_id=eq.${id}`,
           { headers }
@@ -55,13 +53,11 @@ export default function InstancePage() {
     fetchData();
   }, [params?.id]);
 
-  // --- RENDER FEATURES ON MAP ---
+  // --- RENDER FEATURES ---
   useEffect(() => {
     if (loading || !mapRef.current || features.length === 0) return;
-
     const map = mapRef.current;
 
-    // Clear existing non-tile layers
     map.eachLayer((layer: any) => {
       if (!(layer instanceof L.TileLayer)) map.removeLayer(layer);
     });
@@ -83,7 +79,6 @@ export default function InstancePage() {
       },
     }).addTo(map);
 
-    // Fit map to affected bounds
     const bounds = geoLayer.getBounds();
     if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
   }, [features, loading]);
@@ -97,8 +92,12 @@ export default function InstancePage() {
           center={[11, 122]}
           zoom={6}
           style={{ height: "70vh", width: "100%" }}
-          whenReady={(e: any) => {
-            mapRef.current = e.target;
+          whenReady={() => {
+            // Explicitly tell TS this callback doesn't need arguments
+            if (!mapRef.current) return;
+          }}
+          ref={(map: any) => {
+            if (map && !mapRef.current) mapRef.current = map;
           }}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -118,7 +117,7 @@ export default function InstancePage() {
         <h2 className="text-lg font-semibold">Cebu EQ–Typhoon</h2>
       </div>
 
-      {/* SUMMARY STATS */}
+      {/* SUMMARY */}
       <div className="grid grid-cols-4 gap-4">
         <div className="p-4 border rounded shadow-sm text-center bg-white">
           <p className="text-gray-500 text-sm">Total Areas</p>
@@ -146,7 +145,7 @@ export default function InstancePage() {
         </div>
       </div>
 
-      {/* ACTIONS + MAP */}
+      {/* BUTTONS + MAP */}
       <div className="flex gap-4">
         <div className="flex flex-col gap-2 w-56">
           <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
