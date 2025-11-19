@@ -42,7 +42,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       if (geoError) {
         console.error('GeoJSON fetch error:', geoError);
       } else if (geoData) {
-        const parsed = geoData.map((d: any) => JSON.parse(d.geojson));
+        const parsed = geoData
+          .map((d: any) => {
+            try {
+              return typeof d.geojson === 'string' ? JSON.parse(d.geojson) : d.geojson;
+            } catch (err) {
+              console.warn('Invalid GeoJSON skipped:', d, err);
+              return null;
+            }
+          })
+          .filter(Boolean);
         setFeatures(parsed);
       }
 
@@ -53,8 +62,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .maybeSingle();
 
       if (!areaError && areaData?.geom) {
-        const geom = JSON.parse(areaData.geom);
-        setAffectedBounds(geom);
+        try {
+          const geom =
+            typeof areaData.geom === 'string' ? JSON.parse(areaData.geom) : areaData.geom;
+          setAffectedBounds(geom);
+        } catch (err) {
+          console.warn('Invalid area geometry skipped:', areaData, err);
+        }
       }
 
       setLoading(false);
