@@ -5,7 +5,7 @@ import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabaseClient";
-import InstanceDatasetConfigModal from "./InstanceDatasetConfigModal";
+import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
@@ -23,44 +23,41 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     "Underlying Vulnerability",
   ];
 
-  // ✅ Load instance, datasets, and geojson
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Instance info
-        const { data: instanceData, error: instErr } = await supabase
+        // Load instance record
+        const { data: inst, error: instErr } = await supabase
           .from("instances")
           .select("*")
           .eq("id", params.id)
           .single();
         if (instErr) throw instErr;
-        setInstance(instanceData);
+        setInstance(inst);
 
-        // Dataset configs
-        const { data: dsData, error: dsErr } = await supabase
+        // Load datasets for instance
+        const { data: ds, error: dsErr } = await supabase
           .from("v_instance_datasets_view")
           .select("*")
           .eq("instance_id", params.id);
         if (dsErr) throw dsErr;
-        setDatasets(dsData || []);
+        setDatasets(ds || []);
 
-        // GeoJSONs
-        const { data: geoData, error: geoErr } = await supabase
+        // Load geojson
+        const { data: gj, error: gjErr } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("geojson")
           .eq("instance_id", params.id);
-        if (geoErr) throw geoErr;
+        if (gjErr) throw gjErr;
 
-        // ✅ Defensive parsing
-        const parsed = (geoData || [])
-          .map((g: any) => {
+        const parsed = (gj || [])
+          .map((g) => {
             try {
               if (!g.geojson) return null;
               if (typeof g.geojson === "string") return JSON.parse(g.geojson);
               if (typeof g.geojson === "object") return g.geojson;
               return null;
-            } catch (err) {
-              console.warn("Invalid geojson record:", g, err);
+            } catch {
               return null;
             }
           })
@@ -68,22 +65,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
         setFeatures(parsed);
 
-        // ✅ Zoom map to affected area (delay ensures render)
+        // Fit map to bounds after features load
         setTimeout(() => {
           if (mapRef.current && parsed.length > 0) {
             const bounds = L.geoJSON(parsed).getBounds();
-            if (bounds.isValid()) {
-              mapRef.current.fitBounds(bounds, { padding: [20, 20] });
-            }
+            if (bounds.isValid()) mapRef.current.fitBounds(bounds, { padding: [20, 20] });
           }
-        }, 400);
+        }, 300);
       } catch (err) {
-        console.error("Error loading instance page:", err);
+        console.error("Error loading instance:", err);
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [params.id]);
 
@@ -113,18 +107,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   const handleConfigSaved = async () => {
     setShowConfig(false);
-    const { data: dsData } = await supabase
+    const { data: ds } = await supabase
       .from("v_instance_datasets_view")
       .select("*")
       .eq("instance_id", params.id);
-    setDatasets(dsData || []);
+    setDatasets(ds || []);
   };
 
   if (loading) return <div className="p-4 text-sm">Loading instance data…</div>;
 
   return (
     <div className="flex p-2 space-x-2 text-sm">
-      {/* Map Section */}
       <div className="flex-1 border rounded-lg overflow-hidden">
         <MapContainer
           center={[12.8797, 121.774]}
@@ -133,23 +126,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           ref={mapRef}
         >
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {features.map((f, idx) => (
-            <GeoJSON key={idx} data={f} onEachFeature={onEachFeature} />
+          {features.map((f, i) => (
+            <GeoJSON key={i} data={f} onEachFeature={onEachFeature} />
           ))}
         </MapContainer>
       </div>
 
-      {/* Right Panel */}
       <div className="w-72 space-y-2">
         <div className="space-y-1">
           <button
             onClick={() => setShowConfig(true)}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white py-1 rounded text-sm"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1 rounded text-sm"
           >
             Configure Datasets
-          </button>
-          <button className="w-full bg-blue-700 hover:bg-blue-800 text-white py-1 rounded text-sm">
-            Adjust Scoring
           </button>
           <button
             onClick={() => window.location.reload()}
@@ -173,16 +162,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                     </div>
                   ))
               ) : (
-                <div className="text-gray-400 italic text-xs ml-2">
-                  No datasets
-                </div>
+                <div className="text-gray-400 italic text-xs ml-2">No datasets</div>
               )}
             </div>
           ))}
         </div>
       </div>
 
-      {/* Dataset Config Modal */}
       {showConfig && (
         <InstanceDatasetConfigModal
           instance={instance}
