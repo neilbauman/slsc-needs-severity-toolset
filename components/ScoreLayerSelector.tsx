@@ -8,82 +8,128 @@ interface ScoreLayerSelectorProps {
   onToggleLayer: (dataset: any, visible: boolean) => void;
 }
 
+interface DatasetGroup {
+  id: string;
+  name: string;
+  category: string;
+  dataset_id: string;
+}
+
 export default function ScoreLayerSelector({
   instanceId,
   onToggleLayer,
 }: ScoreLayerSelectorProps) {
-  const [datasets, setDatasets] = useState<any[]>([]);
+  const [datasets, setDatasets] = useState<DatasetGroup[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [activeLayers, setActiveLayers] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
 
+  // 🧩 Load datasets for the given instance
   useEffect(() => {
     const loadDatasets = async () => {
-      setLoading(true);
-
       const { data, error } = await supabase
-        .from("instance_datasets_view") // or instance_datasets
-        .select("dataset_id, dataset_name, category, subcategory, description")
-        .eq("instance_id", instanceId)
-        .order("category, dataset_name");
+        .from("instance_datasets_view")
+        .select("dataset_id, name, category");
 
       if (error) {
-        console.error("Error loading datasets for layer selector:", error);
+        console.error("Error loading datasets:", error);
       } else {
         setDatasets(data || []);
       }
-
       setLoading(false);
     };
-
     loadDatasets();
   }, [instanceId]);
 
-  const grouped = datasets.reduce((acc, d) => {
-    const cat = d.category || "Other";
+  // 🧭 Group by SSC Framework category
+  const grouped = datasets.reduce((acc: Record<string, DatasetGroup[]>, d) => {
+    const cat = d.category || "Uncategorized";
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(d);
     return acc;
-  }, {} as Record<string, any[]>);
+  }, {});
 
-  const toggleCategory = (cat: string) =>
-    setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  // 🗂️ Category ordering
+  const categoryOrder = [
+    "P1 - People",
+    "P2 - Systems",
+    "P3 - Enabling Environment",
+    "Hazards",
+    "Underlying Vulnerability",
+    "Uncategorized",
+  ];
 
-  if (loading)
+  // 🔄 Toggle dataset visibility
+  const handleToggleDataset = (dataset: DatasetGroup) => {
+    const isActive = activeLayers[dataset.dataset_id];
+    const newState = !isActive;
+
+    setActiveLayers((prev) => ({
+      ...prev,
+      [dataset.dataset_id]: newState,
+    }));
+
+    onToggleLayer(dataset, newState);
+  };
+
+  if (loading) {
     return (
-      <div className="text-sm text-gray-500 p-3">Loading map layers...</div>
+      <div className="bg-white border rounded-lg shadow-sm p-4 text-sm text-gray-500">
+        Loading datasets...
+      </div>
     );
+  }
 
   return (
-    <div className="border rounded-lg bg-white shadow-sm p-3">
-      <h4 className="text-sm font-semibold mb-2 text-gray-700">
-        Map Layers
-      </h4>
+    <div className="bg-white border rounded-lg shadow-sm p-4 h-[75vh] overflow-y-auto text-sm">
+      <h2 className="text-lg font-semibold mb-3">Map Layers</h2>
+      <p className="text-gray-500 text-xs mb-3">
+        Toggle datasets below to visualize scores on the map.
+      </p>
 
-      {Object.entries(grouped).map(([cat, items]) => (
-        <div key={cat} className="mb-2 border-t pt-2">
-          <button
-            onClick={() => toggleCategory(cat)}
-            className="w-full text-left font-semibold text-sm text-blue-700"
-          >
-            {cat} {expanded[cat] ? "▲" : "▼"}
-          </button>
+      {categoryOrder.map((cat) => {
+        const group = grouped[cat];
+        if (!group) return null;
 
-          {expanded[cat] && (
-            <div className="pl-2 mt-1 space-y-1">
-              {items.map((d) => (
-                <label key={d.dataset_id} className="flex items-center text-sm">
-                  <input
-                    type="checkbox"
-                    onChange={(e) => onToggleLayer(d, e.target.checked)}
-                    className="mr-2"
-                  />
-                  {d.dataset_name}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+        const isOpen = expanded[cat] ?? true;
+
+        return (
+          <div key={cat} className="mb-3 border-b border-gray-200 pb-2">
+            <button
+              onClick={() =>
+                setExpanded((prev) => ({ ...prev, [cat]: !isOpen }))
+              }
+              className="w-full flex justify-between items-center text-left font-medium text-gray-700 hover:text-blue-600 transition"
+            >
+              <span>{cat}</span>
+              <span className="text-gray-400">{isOpen ? "▾" : "▸"}</span>
+            </button>
+
+            {isOpen && (
+              <div className="mt-2 space-y-1">
+                {group.map((dataset) => (
+                  <label
+                    key={dataset.dataset_id}
+                    className="flex items-center justify-between cursor-pointer hover:bg-gray-50 rounded p-1"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={activeLayers[dataset.dataset_id] || false}
+                        onChange={() => handleToggleDataset(dataset)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                      />
+                      <span className="text-gray-800 text-sm">
+                        {dataset.name}
+                      </span>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
