@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 
-// ✅ Dynamic Leaflet imports to avoid SSR issues
+// ✅ Dynamic imports for react-leaflet
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
@@ -21,20 +21,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
 
-  // ✅ Load instance basic info
+  // Load instance
   useEffect(() => {
     const loadInstance = async () => {
-      const { data, error } = await supabase
-        .from("instances")
-        .select("*")
-        .eq("id", instanceId)
-        .single();
-      if (!error && data) setInstance(data);
+      const { data } = await supabase.from("instances").select("*").eq("id", instanceId).single();
+      if (data) setInstance(data);
     };
     loadInstance();
   }, [instanceId]);
 
-  // ✅ Load affected area geometries
+  // Load affected area geometries
   useEffect(() => {
     const loadAffected = async () => {
       setLoading(true);
@@ -56,7 +52,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadAffected();
   }, [instanceId]);
 
-  // ✅ Auto zoom to affected area
+  // Auto-zoom map to affected area
   useEffect(() => {
     if (mapRef.current && features.length > 0) {
       const L = require("leaflet");
@@ -65,7 +61,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   }, [features]);
 
-  // ✅ Load dataset list (for ScoreLayerSelector)
+  // Load dataset list for ScoreLayerSelector
   useEffect(() => {
     const loadDatasets = async () => {
       const { data, error } = await supabase
@@ -93,14 +89,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <h1 className="font-semibold text-gray-800">
           {instance?.name || "Instance"} Overview
         </h1>
-        <div className="space-x-2">
-          <button
-            onClick={() => setShowConfigModal(true)}
-            className="px-2 py-1 text-xs border rounded bg-white hover:bg-gray-100"
-          >
-            Configure Datasets
-          </button>
-        </div>
+        <button
+          onClick={() => setShowConfigModal(true)}
+          className="px-2 py-1 text-xs border rounded bg-white hover:bg-gray-100"
+        >
+          Configure Datasets
+        </button>
       </div>
 
       {/* Main content */}
@@ -111,7 +105,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             center={[12.8797, 121.7740]}
             zoom={6}
             style={{ height: "100%", width: "100%" }}
-            whenCreated={(mapInstance) => (mapRef.current = mapInstance)}
+            whenReady={(event) => {
+              mapRef.current = event.target;
+            }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: any, idx: number) => (
@@ -148,12 +144,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           onClose={() => setShowConfigModal(false)}
           onSaved={async () => {
             setShowConfigModal(false);
-            const { data, error } = await supabase
+            const { data } = await supabase
               .from("v_dataset_scores")
               .select("dataset_id, dataset_name, category")
               .eq("instance_id", instanceId)
               .order("category, dataset_name");
-            if (!error && data) setDatasets(data);
+            if (data) setDatasets(data);
           }}
         />
       )}
@@ -161,11 +157,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   );
 }
 
-// ✅ Helper: consistent green→red scale (1–5)
+// Color scale 1–5
 function getColor(score: number) {
-  if (score <= 1) return "#2ECC71"; // Green
+  if (score <= 1) return "#2ECC71";
   if (score <= 2) return "#A3E048";
   if (score <= 3) return "#FFD93B";
   if (score <= 4) return "#FF9F43";
-  return "#E74C3C"; // Red
+  return "#E74C3C";
 }
