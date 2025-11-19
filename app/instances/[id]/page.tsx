@@ -1,266 +1,186 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { createClient } from "@/lib/supabaseClient";
-import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
-import type { Feature } from "geojson";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { supabase } from "@/lib/supabaseClient";
+import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
-import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
-import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
-import InstanceScoringModal from "@/components/InstanceScoringModal";
+const MapContainer = dynamic(() => import("react-leaflet").then((m) => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import("react-leaflet").then((m) => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import("react-leaflet").then((m) => m.GeoJSON), { ssr: false });
 
-// ======================================================
-// Interfaces
-// ======================================================
-interface SummaryRow {
-  adm3_pcode: string;
-  adm3_name: string;
-  pop: number;
-  score: number;
-  pov_rate: number;
-  pop_concern: number;
-  pop_need: number;
-  geom: any;
-}
-
-// ======================================================
-// Main Component
-// ======================================================
-export default function InstancePage() {
-  const { id } = useParams();
-  const supabase = createClient();
-
-  const [summary, setSummary] = useState<SummaryRow[]>([]);
-  const [stats, setStats] = useState({
-    totalPop: "-",
-    peopleConcern: "-",
-    peopleNeed: "-",
-  });
+export default function InstancePage({ params }: { params: { id: string } }) {
+  const instanceId = params.id;
+  const [instance, setInstance] = useState<any>(null);
+  const [summary, setSummary] = useState<any>(null);
+  const [layers, setLayers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const mapRef = useRef<any>(null);
 
-  // Modal state
-  const [showDefineArea, setShowDefineArea] = useState(false);
-  const [showDatasetConfig, setShowDatasetConfig] = useState(false);
-  const [showScoringConfig, setShowScoringConfig] = useState(false);
-
-  // ======================================================
-  // Fetch summary data with geometry
-  // ======================================================
+  // 🧩 Load instance info
   useEffect(() => {
-    if (!id) return;
+    const loadInstance = async () => {
+      const { data, error } = await supabase
+        .from("instances")
+        .select("*")
+        .eq("id", instanceId)
+        .single();
+      if (!error && data) setInstance(data);
+    };
+    loadInstance();
+  }, [instanceId]);
 
-    (async () => {
-      setLoading(true);
-
-      const { data, error } = await supabase.rpc("get_instance_summary_map", {
-        in_instance_id: id,
+  // 🧮 Load summary (population, concern, need)
+  useEffect(() => {
+    const loadSummary = async () => {
+      const { data, error } = await supabase.rpc("get_instance_summary", {
+        in_instance_id: instanceId,
       });
-
       if (error) {
-        console.error("Error loading summary map data:", error);
-        setLoading(false);
-        return;
+        console.error("Summary load error:", error);
+      } else {
+        setSummary(data?.[0] || null);
       }
-
-      if (!data || data.length === 0) {
-        console.warn("No affected data found for this instance");
-        setSummary([]);
-        setLoading(false);
-        return;
-      }
-
-      setSummary(data);
-
-      // Aggregate stats
-      const totalPop = data.reduce((a, b) => a + Number(b.pop || 0), 0);
-      const peopleConcern = data.reduce((a, b) => a + Number(b.pop_concern || 0), 0);
-      const peopleNeed = data.reduce((a, b) => a + Number(b.pop_need || 0), 0);
-
-      setStats({
-        totalPop: totalPop.toLocaleString(),
-        peopleConcern: peopleConcern.toLocaleString(),
-        peopleNeed: Math.round(peopleNeed).toLocaleString(),
-      });
-
       setLoading(false);
-    })();
-  }, [id]);
+    };
+    loadSummary();
+  }, [instanceId]);
 
-  // ======================================================
-  // Color scale for vulnerability
-  // ======================================================
-  const getColor = (score: number) => {
-    if (!score) return "#d3d3d3";
-    if (score >= 4.5) return "#800026";
-    if (score >= 3.5) return "#BD0026";
-    if (score >= 2.5) return "#E31A1C";
-    if (score >= 1.5) return "#FC4E2A";
-    return "#FFEDA0";
+  // 🧭 Add/remove map layers
+  const handleToggleLayer = async (dataset: any, visible: boolean) => {
+    if (!mapRef.current) return;
+
+    // Remove layer if turning off
+    if (!visible) {
+      if (layers[dataset.dataset_id]) {
+        mapRef.current.removeLayer(layers[dataset.dataset_id]);
+        setLayers((prev) => {
+          const newLayers = { ...prev };
+          delete newLayers[dataset.dataset_id];
+          return newLayers;
+        });
+      }
+      return;
+    }
+
+    // Load GeoJSON for this dataset
+    const { data, error } = await supabase
+      .from("v_instance_admin_scores_geojson")
+      .select("geojson")
+      .eq("instance_id", instanceId)
+      .eq("dataset_id", dataset.dataset_id)
+      .single();
+
+    if (error) {
+      console.error("GeoJSON load error:", error);
+      return;
+    }
+
+    if (data?.geojson) {
+      const geojson = JSON.parse(data.geojson);
+      const L = (await import("leaflet")).default;
+      const layer = L.geoJSON(geojson, {
+        style: (f) => {
+          const score = f.properties?.score || 0;
+          const colorScale = ["#fef0d9", "#fdcc8a", "#fc8d59", "#e34a33", "#b30000"];
+          const idx = Math.min(4, Math.max(0, Math.floor(score - 1)));
+          return {
+            color: "#555",
+            weight: 0.8,
+            fillColor: colorScale[idx],
+            fillOpacity: 0.7,
+          };
+        },
+        onEachFeature: (feature, layer) => {
+          const props = feature.properties;
+          layer.bindPopup(
+            `<strong>${props.adm3_name}</strong><br>
+             Score: ${props.score ?? "-"}<br>
+             Pop: ${props.pop?.toLocaleString() ?? "-"}`
+          );
+        },
+      });
+      layer.addTo(mapRef.current);
+
+      setLayers((prev) => ({ ...prev, [dataset.dataset_id]: layer }));
+    }
   };
 
-  // ======================================================
-  // Render
-  // ======================================================
+  if (loading || !instance) {
+    return (
+      <div className="flex items-center justify-center h-[80vh] text-gray-500">
+        Loading instance...
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-4">
       {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-xl font-semibold">Cebu EQ–Typhoon</h1>
-          <p className="text-gray-600 text-sm">
-            Overview of scoring and affected administrative areas.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowDefineArea(true)}
-            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-          >
-            Define Affected Area
-          </button>
-          <button
-            onClick={() => setShowDatasetConfig(true)}
-            className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700"
-          >
-            Configure Datasets
-          </button>
-          <button
-            onClick={() => setShowScoringConfig(true)}
-            className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
-          >
-            Calibrate Scores
-          </button>
-          <button
-            onClick={() => alert("Recomputing all scores...")}
-            className="px-3 py-1 bg-gray-800 text-white text-sm rounded hover:bg-gray-900"
-          >
-            Recompute Scores
-          </button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-semibold">
+          {instance.name || "Unnamed Instance"}
+        </h1>
+        <p className="text-gray-500 text-sm">
+          Overview of scoring and affected administrative areas.
+        </p>
       </div>
 
-      {/* Stats Summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard title="Total Population" value={stats.totalPop} />
-        <StatCard title="People of Concern (Score ≥ 3)" value={stats.peopleConcern} />
-        <StatCard title="People in Need" value={stats.peopleNeed} />
-      </div>
-
-      {/* Map + Layer Panel */}
-      <div className="flex flex-row gap-4 mt-6">
-        <div className="flex-1 border rounded-lg overflow-hidden">
-          {loading ? (
-            <div className="p-6 text-gray-500 text-sm">Loading map data...</div>
-          ) : (
-            <MapContainer
-              style={{ height: "650px", width: "100%" }}
-              center={[10.3, 123.9]}
-              zoom={8}
-              zoomControl={false}
-              dragging={false}
-              scrollWheelZoom={false}
-              doubleClickZoom={false}
-              boxZoom={false}
-            >
-              <TileLayer
-                attribution='&copy; OpenStreetMap contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {summary.map((area, i) => {
-                const feature: Feature = {
-                  type: "Feature",
-                  geometry: area.geom as any,
-                  properties: { name: area.adm3_name },
-                };
-
-                return (
-                  <GeoJSON
-                    key={i}
-                    data={feature}
-                    style={() => ({
-                      color: "#333",
-                      weight: 0.4,
-                      fillColor: getColor(area.score),
-                      fillOpacity: 0.75,
-                    })}
-                  >
-                    <Tooltip sticky>
-                      <div>
-                        <strong>{area.adm3_name}</strong>
-                        <br />
-                        Score: {Number(area.score).toFixed(2)}
-                        <br />
-                        Pop: {Number(area.pop).toLocaleString()}
-                        <br />
-                        Pov: {Number(area.pov_rate).toFixed(1)}%
-                      </div>
-                    </Tooltip>
-                  </GeoJSON>
-                );
-              })}
-            </MapContainer>
-          )}
+      {/* Summary Cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white border rounded-lg shadow-sm p-4">
+          <div className="text-sm text-gray-500">Total Population</div>
+          <div className="text-xl font-semibold">
+            {summary?.total_population
+              ? summary.total_population.toLocaleString()
+              : "-"}
+          </div>
         </div>
-
-        {/* Layer Panel */}
-        <div className="w-64 bg-white shadow rounded-lg p-3 text-sm space-y-2">
-          <h3 className="font-semibold text-gray-700 mb-2">Map Layers</h3>
-          <div className="flex flex-col gap-1">
-            <button className="border rounded px-2 py-1 hover:bg-gray-50">
-              Overall Score
-            </button>
-            <button className="border rounded px-2 py-1 hover:bg-gray-50">
-              Poverty Rate
-            </button>
-            <button className="border rounded px-2 py-1 hover:bg-gray-50">
-              Population Density
-            </button>
+        <div className="bg-white border rounded-lg shadow-sm p-4">
+          <div className="text-sm text-gray-500">
+            People of Concern (Score ≥ 3)
+          </div>
+          <div className="text-xl font-semibold">
+            {summary?.people_concern
+              ? summary.people_concern.toLocaleString()
+              : "-"}
+          </div>
+        </div>
+        <div className="bg-white border rounded-lg shadow-sm p-4">
+          <div className="text-sm text-gray-500">People in Need</div>
+          <div className="text-xl font-semibold">
+            {summary?.people_need
+              ? summary.people_need.toLocaleString()
+              : "-"}
           </div>
         </div>
       </div>
 
-      {/* Modals */}
-      {showDefineArea && (
-        <DefineAffectedAreaModal
-          instance={{ id }}
-          onClose={() => setShowDefineArea(false)}
-          onSaved={async () => {
-            window.location.reload();
-          }}
-        />
-      )}
-      {showDatasetConfig && (
-        <InstanceDatasetConfigModal
-          instance={{ id }}
-          onClose={() => setShowDatasetConfig(false)}
-          onSaved={async () => {
-            window.location.reload();
-          }}
-        />
-      )}
-      {showScoringConfig && (
-        <InstanceScoringModal
-          instance={{ id }}
-          onClose={() => setShowScoringConfig(false)}
-          onSaved={async () => {
-            window.location.reload();
-          }}
-        />
-      )}
-    </div>
-  );
-}
+      {/* Map & Layers */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="col-span-3 border rounded-lg overflow-hidden">
+          <MapContainer
+            center={[10.3, 123.9]}
+            zoom={8}
+            style={{ height: "75vh", width: "100%" }}
+            whenCreated={(mapInstance) => {
+              mapRef.current = mapInstance;
+            }}
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+          </MapContainer>
+        </div>
 
-// ======================================================
-// StatCard Component
-// ======================================================
-function StatCard({ title, value }: { title: string; value: string }) {
-  return (
-    <div className="p-3 bg-white rounded-lg shadow text-center">
-      <div className="text-gray-500 text-sm">{title}</div>
-      <div className="text-xl font-semibold mt-1">{value}</div>
+        <div>
+          <ScoreLayerSelector
+            instanceId={instanceId}
+            onToggleLayer={handleToggleLayer}
+          />
+        </div>
+      </div>
     </div>
   );
 }
