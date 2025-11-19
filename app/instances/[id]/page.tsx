@@ -3,19 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const Page = () => {
+export default function InstancePage() {
   const params = useParams();
   const mapRef = useRef<L.Map | null>(null);
   const [summary, setSummary] = useState<any>(null);
   const [features, setFeatures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Utility: score → color
+  // --- SCORE COLOR RAMP ---
   const getColor = (score: number) => {
     if (score >= 4.5) return "#D32F2F"; // red
     if (score >= 4.0) return "#FF8C00"; // orange
@@ -24,39 +22,32 @@ const Page = () => {
     return "#00A65A"; // green
   };
 
-  // Fetch summary and map data
+  // --- FETCH DATA ---
   useEffect(() => {
     const fetchData = async () => {
       try {
         const id = params?.id;
+        const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+        const headers = { apikey: key, Authorization: `Bearer ${key}` };
 
-        // Summary
+        // Summary stats
         const summaryRes = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/v_instance_affected_summary?select=*&instance_id=eq.${id}`,
-          {
-            headers: {
-              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-            },
-          }
+          `${base}/rest/v1/v_instance_affected_summary?select=*&instance_id=eq.${id}`,
+          { headers }
         );
         const summaryJson = await summaryRes.json();
         setSummary(summaryJson[0] || null);
 
-        // GeoJSON data
+        // GeoJSON features (limited to affected area)
         const geoRes = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/v_instance_admin_scores_geojson?select=*&instance_id=eq.${id}`,
-          {
-            headers: {
-              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
-            },
-          }
+          `${base}/rest/v1/v_instance_admin_scores_geojson?select=*&instance_id=eq.${id}`,
+          { headers }
         );
         const geoJson = await geoRes.json();
         setFeatures(geoJson || []);
-      } catch (e) {
-        console.error("Error loading data:", e);
+      } catch (err) {
+        console.error("Error loading data:", err);
       } finally {
         setLoading(false);
       }
@@ -64,41 +55,40 @@ const Page = () => {
     fetchData();
   }, [params?.id]);
 
-  // Initialize map and draw polygons
+  // --- RENDER FEATURES ON MAP ---
   useEffect(() => {
-    if (loading || !mapRef.current) return;
+    if (loading || !mapRef.current || features.length === 0) return;
 
     const map = mapRef.current;
+
+    // Clear existing non-tile layers
     map.eachLayer((layer: any) => {
       if (!(layer instanceof L.TileLayer)) map.removeLayer(layer);
     });
 
-    const layerGroup = L.geoJSON(
-      features.map((f) => f.geojson),
-      {
-        style: (feature: any) => ({
-          color: "#555",
-          weight: 1,
-          fillColor: getColor(feature?.properties?.score),
-          fillOpacity: 0.6,
-        }),
-        onEachFeature: (feature: any, layer: any) => {
-          layer.bindTooltip(
-            `${feature.properties.admin_name}<br><strong>Score:</strong> ${Number(feature.properties.score).toFixed(2)}`,
-            { direction: "top" }
-          );
-        },
-      }
-    ).addTo(map);
+    const geoLayer = L.geoJSON(features.map((f) => f.geojson), {
+      style: (feature: any) => ({
+        color: "#555",
+        weight: 1,
+        fillColor: getColor(feature?.properties?.score),
+        fillOpacity: 0.65,
+      }),
+      onEachFeature: (feature: any, layer: any) => {
+        const name = feature.properties.admin_name || "Unknown";
+        const score = Number(feature.properties.score).toFixed(1);
+        layer.bindTooltip(
+          `<strong>${name}</strong><br>Score: ${score}`,
+          { direction: "top" }
+        );
+      },
+    }).addTo(map);
 
-    // Fit map to bounds of affected features
-    const bounds = layerGroup.getBounds();
-    if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [40, 40] });
-    }
+    // Fit map to affected bounds
+    const bounds = geoLayer.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
   }, [features, loading]);
 
-  // Create map
+  // --- DYNAMIC MAP ---
   const MapContainer = dynamic(
     async () => {
       const { MapContainer, TileLayer } = await import("react-leaflet");
@@ -119,58 +109,64 @@ const Page = () => {
     { ssr: false }
   );
 
-  if (loading) {
-    return <div className="p-4">Loading...</div>;
-  }
+  if (loading) return <div className="p-4">Loading...</div>;
 
   return (
     <div className="p-4 space-y-4">
+      {/* HEADER */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Cebu EQ–Typhoon</h2>
       </div>
 
-      {/* Summary Cards */}
+      {/* SUMMARY STATS */}
       <div className="grid grid-cols-4 gap-4">
-        <Card className="p-4 text-center">
-          <p className="text-gray-500">Total Areas</p>
+        <div className="p-4 border rounded shadow-sm text-center bg-white">
+          <p className="text-gray-500 text-sm">Total Areas</p>
           <p className="text-2xl font-semibold">
             {summary ? summary.total_areas.toLocaleString() : "-"}
           </p>
-        </Card>
-        <Card className="p-4 text-center">
-          <p className="text-gray-500">Min Score</p>
+        </div>
+        <div className="p-4 border rounded shadow-sm text-center bg-white">
+          <p className="text-gray-500 text-sm">Min Score</p>
           <p className="text-2xl font-semibold">
-            {summary ? Number(summary.min_score).toFixed(2) : "-"}
+            {summary ? Number(summary.min_score).toFixed(1) : "-"}
           </p>
-        </Card>
-        <Card className="p-4 text-center">
-          <p className="text-gray-500">Max Score</p>
+        </div>
+        <div className="p-4 border rounded shadow-sm text-center bg-white">
+          <p className="text-gray-500 text-sm">Max Score</p>
           <p className="text-2xl font-semibold">
-            {summary ? Number(summary.max_score).toFixed(2) : "-"}
+            {summary ? Number(summary.max_score).toFixed(1) : "-"}
           </p>
-        </Card>
-        <Card className="p-4 text-center">
-          <p className="text-gray-500">Average Score</p>
+        </div>
+        <div className="p-4 border rounded shadow-sm text-center bg-white">
+          <p className="text-gray-500 text-sm">Average Score</p>
           <p className="text-2xl font-semibold">
-            {summary ? Number(summary.avg_score).toFixed(2) : "-"}
+            {summary ? Number(summary.avg_score).toFixed(1) : "-"}
           </p>
-        </Card>
+        </div>
       </div>
 
+      {/* ACTIONS + MAP */}
       <div className="flex gap-4">
-        <div className="flex flex-col gap-2">
-          <Button className="bg-blue-600 hover:bg-blue-700">Define Affected Area</Button>
-          <Button className="bg-green-600 hover:bg-green-700">Configure Datasets</Button>
-          <Button className="bg-orange-600 hover:bg-orange-700">Calibrate Scores</Button>
-          <Button className="bg-gray-800 hover:bg-gray-900">Recompute Scores</Button>
+        <div className="flex flex-col gap-2 w-56">
+          <button className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+            Define Affected Area
+          </button>
+          <button className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">
+            Configure Datasets
+          </button>
+          <button className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700">
+            Calibrate Scores
+          </button>
+          <button className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-900">
+            Recompute Scores
+          </button>
         </div>
 
-        <div className="flex-1">
+        <div className="flex-1 border rounded shadow-sm overflow-hidden">
           <MapContainer />
         </div>
       </div>
     </div>
   );
-};
-
-export default Page;
+}
