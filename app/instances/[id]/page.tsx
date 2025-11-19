@@ -15,11 +15,21 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const CATEGORY_ORDER = [
+  'SSC Framework P1',
+  'SSC Framework P2',
+  'SSC Framework P3',
+  'Hazards',
+  'Underlying Vulnerability'
+];
+
 export default function InstancePage({ params }: { params: { id: string } }) {
   const instanceId = params.id;
   const mapRef = useRef<Map | null>(null);
+
   const [features, setFeatures] = useState<any[]>([]);
   const [affectedBounds, setAffectedBounds] = useState<any>(null);
+  const [datasetsByCategory, setDatasetsByCategory] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
 
   const getColor = (score: number) => {
@@ -30,10 +40,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return '#E74C3C';
   };
 
+  // Load map features and affected bounds
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchGeoData = async () => {
       setLoading(true);
 
+      // GeoJSON scores
       const { data: geoData, error: geoError } = await supabase
         .from('v_instance_admin_scores_geojson')
         .select('geojson')
@@ -55,6 +67,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         setFeatures(parsed);
       }
 
+      // Affected bounds
       const { data: areaData, error: areaError } = await supabase
         .from('v_instance_affected_areas')
         .select('geom')
@@ -74,9 +87,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       setLoading(false);
     };
 
-    fetchData();
+    fetchGeoData();
   }, [instanceId]);
 
+  // Zoom to affected area
   useEffect(() => {
     if (mapRef.current && affectedBounds) {
       const bounds = L.geoJSON(affectedBounds).getBounds();
@@ -84,12 +98,49 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   }, [affectedBounds]);
 
+  // Load datasets and group by category
+  useEffect(() => {
+    const fetchDatasets = async () => {
+      const { data, error } = await supabase
+        .from('instance_datasets')
+        .select(`
+          id,
+          dataset_id,
+          category,
+          datasets (
+            id,
+            name
+          )
+        `)
+        .eq('instance_id', instanceId);
+
+      if (error) {
+        console.error('Dataset fetch error:', error);
+        return;
+      }
+
+      const grouped: Record<string, any[]> = {};
+      CATEGORY_ORDER.forEach(c => (grouped[c] = []));
+
+      data?.forEach((row: any) => {
+        const category = row.category || 'Uncategorized';
+        const datasetName = row.datasets?.name || 'Unnamed Dataset';
+        if (!grouped[category]) grouped[category] = [];
+        grouped[category].push(datasetName);
+      });
+
+      setDatasetsByCategory(grouped);
+    };
+
+    fetchDatasets();
+  }, [instanceId]);
+
   if (loading) return <div className="p-4 text-sm text-gray-500">Loading...</div>;
 
   return (
-    <div className="flex flex-col h-screen p-2 space-y-2 bg-gray-50">
+    <div className="flex flex-col h-screen p-2 bg-gray-50">
       <div className="flex flex-row space-x-2 h-[85vh]">
-        {/* Map Section */}
+        {/* Map */}
         <div className="flex-1 relative rounded-md overflow-hidden border border-gray-200">
           <MapContainer
             center={[12.8797, 121.774]}
@@ -121,20 +172,26 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </div>
 
         {/* Sidebar */}
-        <div className="w-64 flex flex-col space-y-2 p-2 border-l border-gray-200 bg-white rounded-md">
+        <div className="w-64 flex flex-col space-y-2 p-2 border-l border-gray-200 bg-white rounded-md text-xs">
           <h3 className="text-sm font-semibold text-gray-700 mb-1">Score Layers</h3>
 
-          <div className="text-xs text-gray-600 space-y-1 overflow-y-auto">
-            {['SSC Framework P1', 'SSC Framework P2', 'SSC Framework P3', 'Hazards', 'Underlying Vulnerability'].map((cat) => (
+          <div className="overflow-y-auto space-y-2">
+            {CATEGORY_ORDER.map(cat => (
               <div key={cat} className="border-b border-gray-100 pb-1">
                 <p className="font-medium text-gray-700">{cat}</p>
                 <div className="flex flex-col mt-1 space-y-1">
-                  <button className="text-left px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 text-[11px]">
-                    Dataset 1
-                  </button>
-                  <button className="text-left px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 text-[11px]">
-                    Dataset 2
-                  </button>
+                  {(datasetsByCategory[cat] ?? []).map((ds, i) => (
+                    <button
+                      key={i}
+                      className="text-left px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 truncate"
+                      title={ds}
+                    >
+                      {ds}
+                    </button>
+                  ))}
+                  {(!datasetsByCategory[cat] || datasetsByCategory[cat].length === 0) && (
+                    <p className="text-gray-400 italic pl-2">No datasets</p>
+                  )}
                 </div>
               </div>
             ))}
