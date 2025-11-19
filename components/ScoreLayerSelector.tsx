@@ -13,29 +13,38 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
   const [activeDataset, setActiveDataset] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ✅ Load datasets linked to this instance
   useEffect(() => {
     const loadDatasets = async () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("v_dataset_scores")
-        .select("dataset_id, dataset_name, category")
+        .select("dataset_id, dataset_name, category, avg_score")
         .eq("instance_id", instanceId)
         .order("category, dataset_name");
-      if (!error && data) setDatasets(data);
+
+      if (error) {
+        console.error("Error loading datasets:", error.message);
+        setDatasets([]);
+      } else {
+        setDatasets(data || []);
+      }
       setLoading(false);
     };
     loadDatasets();
   }, [instanceId]);
 
+  // ✅ Handle selection of dataset
   const handleSelect = (dataset: any) => {
     setActiveDataset(dataset.dataset_id);
     if (onSelect) onSelect(dataset);
   };
 
-  // ✅ Properly typed grouping
+  // ✅ Group datasets by category
   const grouped: Record<string, any[]> = datasets.reduce((acc: Record<string, any[]>, d: any) => {
-    if (!acc[d.category]) acc[d.category] = [];
-    acc[d.category].push(d);
+    const cat = d.category || "Uncategorized";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(d);
     return acc;
   }, {});
 
@@ -43,6 +52,10 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
 
   return (
     <div className="text-sm text-gray-800">
+      {Object.keys(grouped).length === 0 && (
+        <p className="text-gray-400 italic text-xs">No datasets configured.</p>
+      )}
+
       {Object.entries(grouped).map(([cat, list]) => (
         <div key={cat} className="mb-3">
           <h4 className="font-semibold text-gray-700 mb-1">{cat}</h4>
@@ -58,6 +71,11 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                 }`}
               >
                 {d.dataset_name}
+                {d.avg_score !== null && (
+                  <span className="float-right text-xs text-gray-500">
+                    {Number(d.avg_score).toFixed(1)}
+                  </span>
+                )}
               </button>
             ))}
           </div>
