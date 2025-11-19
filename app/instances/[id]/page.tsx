@@ -36,13 +36,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   const instanceId = params.id;
 
-  // Load summary + geojson data
+  // Load data from Supabase
   useEffect(() => {
     async function loadData() {
       try {
         setLoading(true);
 
-        // Summary stats
         const { data: summaryData, error: summaryError } = await supabase
           .from('v_instance_affected_summary')
           .select('*')
@@ -52,7 +51,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (summaryError) throw summaryError;
         setSummary(summaryData as SummaryData);
 
-        // GeoJSON polygons
         const { data: geoData, error: geoError } = await supabase
           .from('v_instance_admin_scores_geojson')
           .select('*')
@@ -63,7 +61,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const parsed = geoData.map((d: any) => JSON.parse(JSON.stringify(d.geojson)));
         setFeatures(parsed);
       } catch (err) {
-        console.error('Error loading data:', err);
+        console.error('Error loading instance data:', err);
       } finally {
         setLoading(false);
       }
@@ -74,28 +72,25 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   // Color scale
   const getColor = (score: number) => {
-    if (score <= 1) return '#2ECC71'; // green
-    if (score <= 2) return '#F1C40F'; // yellow
-    if (score <= 3) return '#E67E22'; // orange
-    if (score <= 4) return '#E74C3C'; // red-orange
-    return '#C0392B'; // deep red
+    if (score <= 1) return '#2ECC71';
+    if (score <= 2) return '#F1C40F';
+    if (score <= 3) return '#E67E22';
+    if (score <= 4) return '#E74C3C';
+    return '#C0392B';
   };
 
-  // GeoJSON interactivity
+  // Feature interactivity
   const onEachFeature = (feature: any, layer: L.Layer) => {
     const f = feature as any;
     layer.on({
       mouseover: (e: any) => {
-        const layer = e.target;
-        layer.setStyle({ weight: 2, color: '#000', fillOpacity: 0.9 });
-        setHoverInfo({
-          name: f.properties.admin_name,
-          score: f.properties.score,
-        });
+        const l = e.target;
+        l.setStyle({ weight: 2, color: '#000', fillOpacity: 0.9 });
+        setHoverInfo({ name: f.properties.admin_name, score: f.properties.score });
       },
       mouseout: (e: any) => {
-        const layer = e.target;
-        layer.setStyle({ weight: 1, color: '#666', fillOpacity: 0.7 });
+        const l = e.target;
+        l.setStyle({ weight: 1, color: '#666', fillOpacity: 0.7 });
         setHoverInfo(null);
       },
       click: () => {
@@ -111,7 +106,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     fillOpacity: 0.7,
   });
 
-  if (loading) return <div className="p-4">Loading...</div>;
+  if (loading) {
+    return <div className="p-4">Loading...</div>;
+  }
 
   return (
     <div className="p-4 space-y-4">
@@ -119,7 +116,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <h2 className="text-lg font-semibold">Cebu EQ–Typhoon</h2>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary */}
       <div className="grid grid-cols-4 gap-3">
         <div className="border rounded-md p-3 text-center">
           <p className="text-sm text-gray-500">Total Areas</p>
@@ -141,40 +138,25 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      {/* Map and controls layout */}
+      {/* Map and sidebar */}
       <div className="grid grid-cols-[1fr_250px] gap-4">
         <div className="h-[75vh] border rounded-lg overflow-hidden relative">
           <MapContainer
             center={[11.0, 122.0]}
             zoom={6}
             style={{ height: '100%', width: '100%' }}
-            whenReady={(event) => {
-              mapRef.current = event.target;
+            whenReady={() => {
+              if (!mapRef.current) {
+                const map = (document.querySelector('.leaflet-container') as any)?._leaflet_map;
+                if (map) mapRef.current = map;
+              }
             }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: GeoFeature, idx) => (
-              <GeoJSON
-                key={idx}
-                data={f as any}
-                style={styleFeature}
-                onEachFeature={onEachFeature}
-              />
+              <GeoJSON key={idx} data={f as any} style={styleFeature} onEachFeature={onEachFeature} />
             ))}
-         <MapContainer
-  center={[11.0, 122.0]}
-  zoom={6}
-  style={{ height: '100%', width: '100%' }}
-  whenReady={() => {
-    // Capture map instance safely without type errors
-    const mapInstance = (mapRef.current = (mapRef.current ??
-      (document.querySelector('.leaflet-container') as any)?._leaflet_map) ||
-      null);
-    if (!mapInstance && typeof window !== 'undefined') {
-      console.warn('Map reference not initialized immediately — will be set on first feature render.');
-    }
-  }}
->
+          </MapContainer>
 
           {hoverInfo && (
             <div className="absolute bottom-4 left-4 bg-white border rounded px-2 py-1 shadow text-sm">
@@ -183,7 +165,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           )}
         </div>
 
-        {/* Sidebar */}
         <div className="space-y-3">
           <button
             onClick={() => router.push(`/instances/${instanceId}/define-affected`)}
@@ -208,7 +189,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               try {
                 await supabase.rpc('recompute_scores', { instance_id: instanceId });
                 alert('Scores recomputed successfully.');
-              } catch (e) {
+              } catch {
                 alert('Failed to recompute scores.');
               }
             }}
