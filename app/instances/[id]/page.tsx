@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@supabase/supabase-js';
+import L from 'leaflet'; // ✅ FIX: import leaflet
 import 'leaflet/dist/leaflet.css';
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
@@ -34,7 +35,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     const fetchData = async () => {
       setLoading(true);
 
-      // Get polygons with scores
       const { data: geoData, error: geoError } = await supabase
         .from('v_instance_admin_scores_geojson')
         .select('geojson')
@@ -46,7 +46,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         setFeatures(parsed);
       }
 
-      // Get affected area geometry
       const { data: areaData, error: areaError } = await supabase
         .from('v_instance_affected_areas')
         .select('geom')
@@ -82,7 +81,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: '100%', width: '100%' }}
-            whenReady={(map) => (mapRef.current = map.target)}
+            whenReady={(e) => (mapRef.current = e.target)}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: any, idx: number) => (
