@@ -1,60 +1,89 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+"use client";
 
-export default function ScoreLayerSelector({ instanceId, selected, onSelect }: any) {
-  const [categories, setCategories] = useState<any[]>([]);
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+
+interface ScoreLayerSelectorProps {
+  instanceId: string;
+  onToggleLayer: (dataset: any, visible: boolean) => void;
+}
+
+export default function ScoreLayerSelector({
+  instanceId,
+  onToggleLayer,
+}: ScoreLayerSelectorProps) {
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const load = async () => {
+    const loadDatasets = async () => {
+      setLoading(true);
+
       const { data, error } = await supabase
-        .from('v_category_scores')
-        .select('*')
-        .eq('instance_id', instanceId);
-      if (!error) setCategories(data || []);
+        .from("instance_datasets_view") // or instance_datasets
+        .select("dataset_id, dataset_name, category, subcategory, description")
+        .eq("instance_id", instanceId)
+        .order("category, dataset_name");
+
+      if (error) {
+        console.error("Error loading datasets for layer selector:", error);
+      } else {
+        setDatasets(data || []);
+      }
+
+      setLoading(false);
     };
-    load();
+
+    loadDatasets();
   }, [instanceId]);
 
-  const ordered = ['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3', 'Hazard', 'Underlying Vulnerability'];
+  const grouped = datasets.reduce((acc, d) => {
+    const cat = d.category || "Other";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(d);
+    return acc;
+  }, {} as Record<string, any[]>);
+
+  const toggleCategory = (cat: string) =>
+    setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
+
+  if (loading)
+    return (
+      <div className="text-sm text-gray-500 p-3">Loading map layers...</div>
+    );
 
   return (
-    <div className="w-64 bg-white border-l rounded-lg shadow-sm overflow-y-auto p-3 space-y-2">
-      <h3 className="font-semibold mb-2">Map Layer</h3>
-      <button
-        className={`w-full text-left p-1 rounded ${selected === 'overall' ? 'bg-blue-100' : ''}`}
-        onClick={() => onSelect('overall', 'overall')}
-      >
-        Overall Score
-      </button>
+    <div className="border rounded-lg bg-white shadow-sm p-3">
+      <h4 className="text-sm font-semibold mb-2 text-gray-700">
+        Map Layers
+      </h4>
 
-      {ordered.map(cat => {
-        const c = categories.find(x => x.category === cat);
-        if (!c) return null;
-        const datasets = c.dataset_list?.split(',').map(d => d.trim()) || [];
-        return (
-          <div key={cat}>
-            <button
-              className={`block w-full text-left font-medium text-xs mt-2 ${
-                selected === cat ? 'bg-blue-100 rounded' : ''
-              }`}
-              onClick={() => onSelect(cat, 'category')}
-            >
-              {cat}
-            </button>
-            {datasets.map(ds => (
-              <button
-                key={ds}
-                className={`block w-full text-left pl-4 p-1 text-xs rounded ${
-                  selected === ds ? 'bg-blue-100' : ''
-                }`}
-                onClick={() => onSelect(ds, 'dataset')}
-              >
-                {ds}
-              </button>
-            ))}
-          </div>
-        );
-      })}
+      {Object.entries(grouped).map(([cat, items]) => (
+        <div key={cat} className="mb-2 border-t pt-2">
+          <button
+            onClick={() => toggleCategory(cat)}
+            className="w-full text-left font-semibold text-sm text-blue-700"
+          >
+            {cat} {expanded[cat] ? "▲" : "▼"}
+          </button>
+
+          {expanded[cat] && (
+            <div className="pl-2 mt-1 space-y-1">
+              {items.map((d) => (
+                <label key={d.dataset_id} className="flex items-center text-sm">
+                  <input
+                    type="checkbox"
+                    onChange={(e) => onToggleLayer(d, e.target.checked)}
+                    className="mr-2"
+                  />
+                  {d.dataset_name}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
