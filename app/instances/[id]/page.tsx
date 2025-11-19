@@ -1,169 +1,159 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
-import dynamic from "next/dynamic";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import dynamic from "next/dynamic";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
+import NumericScoringModal from "@/components/NumericScoringModal";
 
-const MapContainer = dynamic(
-  () => import("react-leaflet").then((mod) => mod.MapContainer),
-  { ssr: false }
-);
-const TileLayer = dynamic(
-  () => import("react-leaflet").then((mod) => mod.TileLayer),
-  { ssr: false }
-);
-const GeoJSON = dynamic(
-  () => import("react-leaflet").then((mod) => mod.GeoJSON),
-  { ssr: false }
-);
+const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
+const Tooltip = dynamic(() => import("react-leaflet").then(m => m.Tooltip), { ssr: false });
 
-interface Dataset {
-  dataset_id: string;
-  name: string;
-  category: string;
-}
-
-export default function InstancePage() {
-  const params = useParams();
-  const instanceId = params?.id as string;
-
+export default function InstancePage({ params }: { params: { id: string } }) {
+  const [summary, setSummary] = useState<any>(null);
+  const [geojson, setGeojson] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedDataset, setSelectedDataset] = useState<any>(null);
+  const [showModal, setShowModal] = useState(false);
   const mapRef = useRef<any>(null);
-  const [geojsonLayers, setGeojsonLayers] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // ✅ Fetch GeoJSON for a given dataset
-  const fetchGeoJSON = async (dataset: Dataset) => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase.rpc(
-        "get_instance_admin_scores_geojson",
-        {
-          in_instance_id: instanceId,
-          in_dataset_id: dataset.dataset_id,
-        }
-      );
+  useEffect(() => {
+    loadSummary();
+    loadGeojson();
+  }, [params.id, selectedDataset]);
 
-      if (error) throw error;
-      if (!data) {
-        setError(`No data for dataset: ${dataset.name}`);
-        return null;
-      }
-      return data;
-    } catch (err: any) {
-      console.error("Error loading GeoJSON:", err);
-      setError(err.message);
-      return null;
-    } finally {
-      setLoading(false);
-    }
+  const loadSummary = async () => {
+    const { data, error } = await supabase
+      .from("v_instance_affected_summary")
+      .select("total_population, people_concern, people_need, avg_score")
+      .eq("instance_id", params.id)
+      .single();
+    if (!error) setSummary(data);
   };
 
-  // ✅ Toggle layer visibility
-  const handleToggleLayer = async (dataset: Dataset, visible: boolean) => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (visible) {
-      // Fetch new GeoJSON for this dataset
-      const geojsonData = await fetchGeoJSON(dataset);
-      if (!geojsonData) return;
-
-      const layer = new (await import("leaflet")).GeoJSON(geojsonData, {
-        style: (feature) => ({
-          color: "#333",
-          weight: 1,
-          fillColor: getColor(feature?.properties?.score ?? 0),
-          fillOpacity: 0.6,
-        }),
-        onEachFeature: (feature, layer) => {
-          const name = feature.properties?.adm3_name || "Unknown area";
-          const score = feature.properties?.score?.toFixed(2) ?? "–";
-          layer.bindPopup(`<strong>${name}</strong><br/>Score: ${score}`);
-        },
-      });
-
-      layer.addTo(map);
-      setGeojsonLayers((prev) => ({ ...prev, [dataset.dataset_id]: layer }));
-    } else {
-      // Remove from map
-      const layer = geojsonLayers[dataset.dataset_id];
-      if (layer && map.hasLayer(layer)) {
-        map.removeLayer(layer);
-        setGeojsonLayers((prev) => {
-          const updated = { ...prev };
-          delete updated[dataset.dataset_id];
-          return updated;
-        });
-      }
-    }
+  const loadGeojson = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("v_instance_admin_scores_geojson")
+      .select("geojson, score, dataset_name, category, adm3_name")
+      .eq("instance_id", params.id);
+    if (!error) setGeojson(data || []);
+    setLoading(false);
   };
 
-  // ✅ Color scale helper
   const getColor = (score: number) => {
-    return score >= 4.5
-      ? "#800026"
-      : score >= 3.5
-      ? "#BD0026"
-      : score >= 2.5
-      ? "#E31A1C"
-      : score >= 1.5
-      ? "#FC4E2A"
-      : "#FFEDA0";
+    if (score >= 4.5) return "#d73027";
+    if (score >= 3.5) return "#fc8d59";
+    if (score >= 2.5) return "#fee08b";
+    if (score >= 1.5) return "#d9ef8b";
+    return "#1a9850";
   };
 
-  // ✅ Map initialization (build-safe)
-  const handleMapReady = async () => {
-    try {
-      const L = await import("leaflet");
-      const mapEl = document.querySelector(".leaflet-container") as HTMLElement;
-      if (mapEl) {
-        const map = L.map(mapEl);
-        if (map) mapRef.current = map;
-      }
-    } catch (err) {
-      console.error("Error initializing map:", err);
-    }
+  const onEachFeature = (feature: any, layer: any) => {
+    const s = feature.properties.score;
+    const name = feature.properties.adm3_name;
+    const dataset = feature.properties.dataset_name;
+    const category = feature.properties.category;
+    layer.setStyle({
+      color: "#555",
+      weight: 0.8,
+      fillOpacity: 0.8,
+      fillColor: getColor(s),
+    });
+    layer.bindTooltip(
+      `<div><b>${name}</b><br/>Score: ${s.toFixed(2)}<br/>${category} / ${dataset}</div>`
+    );
   };
 
   return (
-    <div className="flex flex-row gap-4 p-4">
-      {/* Sidebar */}
-      <div className="w-[300px] flex-shrink-0">
-        <ScoreLayerSelector
-          instanceId={instanceId}
-          onToggleLayer={handleToggleLayer}
+    <div className="flex flex-col h-screen w-full">
+      {/* Summary Stats */}
+      <div className="grid grid-cols-4 gap-3 p-4 bg-white shadow z-10">
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">Total Population</div>
+            <div className="text-lg font-semibold">{summary?.total_population?.toLocaleString() || "-"}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">People Concerned</div>
+            <div className="text-lg font-semibold">{summary?.people_concern?.toLocaleString() || "-"}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">People in Need</div>
+            <div className="text-lg font-semibold text-red-600">{summary?.people_need?.toLocaleString() || "-"}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 text-center">
+            <div className="text-xs text-gray-500">Average Score</div>
+            <div className="text-lg font-semibold text-blue-600">{summary?.avg_score?.toFixed(2) || "-"}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Side Map */}
+        <div className="flex-1 relative">
+          <MapContainer
+            center={[12.8797, 121.774]} // Center of PH
+            zoom={6}
+            style={{ height: "100%", width: "100%" }}
+            whenReady={(map) => (mapRef.current = map.target)}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {!loading && geojson.map((g, i) => (
+              <GeoJSON
+                key={i}
+                data={g.geojson}
+                onEachFeature={onEachFeature}
+              />
+            ))}
+          </MapContainer>
+
+          {/* Legend */}
+          <div className="absolute bottom-4 right-4 bg-white bg-opacity-90 rounded shadow p-2 text-xs">
+            <div className="font-semibold mb-1">Score Legend</div>
+            {[5, 4, 3, 2, 1].map((v) => (
+              <div key={v} className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded" style={{ backgroundColor: getColor(v) }}></div>
+                <span>{v}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Buttons */}
+          <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
+            <Button variant="outline" className="bg-white" onClick={() => alert("Define Affected Area")}>Define Affected Area</Button>
+            <Button variant="outline" className="bg-white" onClick={() => alert("Configure Datasets")}>Configure Datasets</Button>
+            <Button variant="outline" className="bg-white" onClick={() => setShowModal(true)}>Calibrate Scores</Button>
+            <Button variant="outline" className="bg-white" onClick={loadGeojson}>Recompute Scores</Button>
+          </div>
+        </div>
+
+        {/* Right Sidebar */}
+        <div className="w-80 bg-gray-50 border-l overflow-y-auto p-4">
+          <h3 className="font-semibold text-gray-800 mb-2">Score Layers</h3>
+          <ScoreLayerSelector instanceId={params.id} onSelect={setSelectedDataset} />
+        </div>
+      </div>
+
+      {showModal && selectedDataset && (
+        <NumericScoringModal
+          dataset={selectedDataset}
+          instance={{ id: params.id }}
+          onClose={() => setShowModal(false)}
+          onSaved={loadGeojson}
         />
-      </div>
-
-      {/* Map View */}
-      <div className="flex-grow relative">
-        <MapContainer
-          center={[10.3, 123.9]}
-          zoom={8}
-          style={{ height: "75vh", width: "100%" }}
-          whenReady={handleMapReady}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-        </MapContainer>
-
-        {loading && (
-          <div className="absolute inset-0 bg-white/50 flex items-center justify-center text-gray-700 text-sm">
-            Loading map data...
-          </div>
-        )}
-
-        {error && (
-          <div className="absolute bottom-2 left-2 bg-red-100 text-red-700 px-3 py-2 rounded text-xs shadow">
-            {error}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
