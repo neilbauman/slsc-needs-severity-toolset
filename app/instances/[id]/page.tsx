@@ -3,15 +3,12 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import dynamic from "next/dynamic";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import NumericScoringModal from "@/components/NumericScoringModal";
 
 const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
-const Tooltip = dynamic(() => import("react-leaflet").then(m => m.Tooltip), { ssr: false });
 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [summary, setSummary] = useState<any>(null);
@@ -73,30 +70,22 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     <div className="flex flex-col h-screen w-full">
       {/* Summary Stats */}
       <div className="grid grid-cols-4 gap-3 p-4 bg-white shadow z-10">
-        <Card>
-          <CardContent className="p-3 text-center">
-            <div className="text-xs text-gray-500">Total Population</div>
-            <div className="text-lg font-semibold">{summary?.total_population?.toLocaleString() || "-"}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <div className="text-xs text-gray-500">People Concerned</div>
-            <div className="text-lg font-semibold">{summary?.people_concern?.toLocaleString() || "-"}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <div className="text-xs text-gray-500">People in Need</div>
-            <div className="text-lg font-semibold text-red-600">{summary?.people_need?.toLocaleString() || "-"}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <div className="text-xs text-gray-500">Average Score</div>
-            <div className="text-lg font-semibold text-blue-600">{summary?.avg_score?.toFixed(2) || "-"}</div>
-          </CardContent>
-        </Card>
+        <div className="text-center">
+          <div className="text-xs text-gray-500">Total Population</div>
+          <div className="text-lg font-semibold">{summary?.total_population?.toLocaleString() || "-"}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-xs text-gray-500">People Concerned</div>
+          <div className="text-lg font-semibold">{summary?.people_concern?.toLocaleString() || "-"}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-xs text-gray-500">People in Need</div>
+          <div className="text-lg font-semibold text-red-600">{summary?.people_need?.toLocaleString() || "-"}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-xs text-gray-500">Average Score</div>
+          <div className="text-lg font-semibold text-blue-600">{summary?.avg_score?.toFixed(2) || "-"}</div>
+        </div>
       </div>
 
       {/* Main Content */}
@@ -104,18 +93,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         {/* Left Side Map */}
         <div className="flex-1 relative">
           <MapContainer
-            center={[12.8797, 121.774]} // Center of PH
+            center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: "100%", width: "100%" }}
-            whenReady={(map) => (mapRef.current = map.target)}
+            whenReady={(mapEvent) => (mapRef.current = mapEvent.target)}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {!loading && geojson.map((g, i) => (
-              <GeoJSON
-                key={i}
-                data={g.geojson}
-                onEachFeature={onEachFeature}
-              />
+              <GeoJSON key={i} data={g.geojson} onEachFeature={onEachFeature} />
             ))}
           </MapContainer>
 
@@ -132,10 +117,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
           {/* Buttons */}
           <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-            <Button variant="outline" className="bg-white" onClick={() => alert("Define Affected Area")}>Define Affected Area</Button>
-            <Button variant="outline" className="bg-white" onClick={() => alert("Configure Datasets")}>Configure Datasets</Button>
-            <Button variant="outline" className="bg-white" onClick={() => setShowModal(true)}>Calibrate Scores</Button>
-            <Button variant="outline" className="bg-white" onClick={loadGeojson}>Recompute Scores</Button>
+            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={() => alert("Define Affected Area")}>Define Affected Area</button>
+            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={() => alert("Configure Datasets")}>Configure Datasets</button>
+            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={() => setShowModal(true)}>Calibrate Scores</button>
+            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={loadGeojson}>Recompute Scores</button>
           </div>
         </div>
 
