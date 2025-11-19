@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import supabase from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 
 interface SummaryData {
   total_areas: number;
@@ -36,12 +36,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   const instanceId = params.id;
 
+  // Load summary + geojson data
   useEffect(() => {
     async function loadData() {
       try {
         setLoading(true);
 
-        // --- Fetch summary data ---
+        // Summary stats
         const { data: summaryData, error: summaryError } = await supabase
           .from('v_instance_affected_summary')
           .select('*')
@@ -51,7 +52,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (summaryError) throw summaryError;
         setSummary(summaryData as SummaryData);
 
-        // --- Fetch GeoJSON data ---
+        // GeoJSON polygons
         const { data: geoData, error: geoError } = await supabase
           .from('v_instance_admin_scores_geojson')
           .select('*')
@@ -71,7 +72,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadData();
   }, [instanceId]);
 
-  // --- Color scale for scores 1–5 ---
+  // Color scale
   const getColor = (score: number) => {
     if (score <= 1) return '#2ECC71'; // green
     if (score <= 2) return '#F1C40F'; // yellow
@@ -80,7 +81,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return '#C0392B'; // deep red
   };
 
-  // --- GeoJSON style ---
+  // GeoJSON interactivity
   const onEachFeature = (feature: any, layer: L.Layer) => {
     const f = feature as any;
     layer.on({
@@ -142,12 +143,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       {/* Map and controls layout */}
       <div className="grid grid-cols-[1fr_250px] gap-4">
-        <div className="h-[75vh] border rounded-lg overflow-hidden">
+        <div className="h-[75vh] border rounded-lg overflow-hidden relative">
           <MapContainer
             center={[11.0, 122.0]}
             zoom={6}
             style={{ height: '100%', width: '100%' }}
-            whenCreated={(mapInstance) => (mapRef.current = mapInstance)}
+            whenReady={(event) => {
+              mapRef.current = event.target;
+            }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: GeoFeature, idx) => (
@@ -159,6 +162,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               />
             ))}
           </MapContainer>
+
           {hoverInfo && (
             <div className="absolute bottom-4 left-4 bg-white border rounded px-2 py-1 shadow text-sm">
               <b>{hoverInfo.name}</b>: {hoverInfo.score.toFixed(2)}
