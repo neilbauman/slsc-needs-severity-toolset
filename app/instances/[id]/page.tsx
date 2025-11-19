@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@supabase/supabase-js';
-import L from 'leaflet';
+import L, { Map } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
@@ -17,11 +17,12 @@ const supabase = createClient(
 
 export default function InstancePage({ params }: { params: { id: string } }) {
   const instanceId = params.id;
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<Map | null>(null);
   const [features, setFeatures] = useState<any[]>([]);
   const [affectedBounds, setAffectedBounds] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  // Green → Red gradient (1–5)
   const getColor = (score: number) => {
     if (score <= 1) return '#2ECC71';
     if (score <= 2) return '#A2D56E';
@@ -74,19 +75,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   return (
     <div className="flex flex-col h-screen p-2 space-y-2 bg-gray-50">
       <div className="flex flex-row space-x-2 h-[85vh]">
-        {/* Map Section */}
+        {/* Map */}
         <div className="flex-1 relative rounded-md overflow-hidden border border-gray-200">
           <MapContainer
             center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: '100%', width: '100%' }}
-            whenReady={() => {
-              // ✅ Safe assignment, avoids TS type complaint
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (mapRef.current as any) = (window as any).leafletMapInstance ?? null;
-            }}
-            ref={(ref) => {
-              if (ref && ref.target) mapRef.current = ref.target;
+            whenReady={(event) => {
+              mapRef.current = event.target;
             }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -110,7 +106,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           </MapContainer>
         </div>
 
-        {/* Sidebar Controls */}
+        {/* Sidebar */}
         <div className="w-64 flex flex-col space-y-2 p-2 border-l border-gray-200 bg-white rounded-md">
           <h3 className="text-sm font-semibold text-gray-700 mb-1">Layers</h3>
 
