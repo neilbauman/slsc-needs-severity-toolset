@@ -1,131 +1,140 @@
-"use client";
+'use client';
 
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
-import dynamic from "next/dynamic";
+import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabaseClient";
-import ScoreLayerSelector from "@/components/ScoreLayerSelector";
-import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 
-const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
-
-export default function InstancePage() {
-  const { id } = useParams();
+export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [features, setFeatures] = useState<any[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<any | null>(null);
-  const [showConfigModal, setShowConfigModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const mapRef = useRef<any>(null);
+  const mapRef = useRef<L.Map | null>(null);
+
+  const categories = [
+    "SSC Framework P1",
+    "SSC Framework P2",
+    "SSC Framework P3",
+    "Hazards",
+    "Underlying Vulnerability",
+  ];
 
   useEffect(() => {
-    const loadInstance = async () => {
-      const { data, error } = await supabase.from("instances").select("*").eq("id", id).single();
-      if (!error && data) setInstance(data);
-    };
+    const fetchData = async () => {
+      try {
+        // Fetch instance summary
+        const { data: instanceData, error: instanceError } = await supabase
+          .from("v_instance_affected_summary")
+          .select("*")
+          .eq("instance_id", params.id)
+          .single();
 
-    const loadFeatures = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("v_instance_affected_adm3")
-        .select("geom, admin_pcode, admin_name, score, dataset_id")
-        .eq("instance_id", id);
-      if (!error && data) {
-        setFeatures(data);
-        if (data.length && mapRef.current) {
-          const geojson = {
-            type: "FeatureCollection",
-            features: data.map((f: any) => ({
-              type: "Feature",
-              geometry: f.geom,
-              properties: f,
-            })),
-          } as GeoJSON.FeatureCollection;
-          const bounds = L.geoJSON(geojson).getBounds();
+        if (instanceError) throw instanceError;
+        setInstance(instanceData);
+
+        // Fetch datasets from new view
+        const { data: dsData, error: dsError } = await supabase
+          .from("v_instance_datasets_view")
+          .select("*")
+          .eq("instance_id", params.id);
+
+        if (dsError) throw dsError;
+        setDatasets(dsData || []);
+
+        // Fetch affected area geojson
+        const { data: geoData, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("geojson")
+          .eq("instance_id", params.id);
+
+        if (geoError) throw geoError;
+
+        const parsed = geoData.map((g: any) => JSON.parse(g.geojson));
+        setFeatures(parsed);
+
+        // Zoom map to affected area
+        if (mapRef.current && parsed.length > 0) {
+          const bounds = L.geoJSON(parsed).getBounds();
           mapRef.current.fitBounds(bounds);
         }
+      } catch (err) {
+        console.error("Error loading instance page:", err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
-    loadInstance();
-    loadFeatures();
-  }, [id]);
+    fetchData();
+  }, [params.id]);
 
   const getColor = (score: number) => {
-    if (score >= 4.5) return "#006400";
-    if (score >= 3.5) return "#66A80F";
-    if (score >= 2.5) return "#FFD43B";
-    if (score >= 1.5) return "#FF922B";
-    return "#C92A2A";
+    if (score <= 1) return "#00FF00"; // green
+    if (score <= 2) return "#CCFF00"; // yellow-green
+    if (score <= 3) return "#FFCC00"; // yellow
+    if (score <= 4) return "#FF6600"; // orange
+    return "#FF0000"; // red
   };
 
-  if (loading) return <div className="p-4 text-sm text-gray-600">Loading instance...</div>;
-  if (!instance) return <div className="p-4 text-sm text-gray-600">Instance not found.</div>;
+  const onEachFeature = (feature: any, layer: any) => {
+    if (feature.properties && feature.properties.score !== undefined) {
+      const color = getColor(Math.round(feature.properties.score));
+      layer.setStyle({ color, fillColor: color, fillOpacity: 0.6 });
+      layer.bindPopup(
+        `${feature.properties.admin_name}: ${feature.properties.score.toFixed(2)}`
+      );
+    }
+  };
+
+  if (loading) return <div className="p-4">Loading...</div>;
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">{instance.name}</h2>
-        <div className="flex space-x-2">
-          <button
-            onClick={() => setShowConfigModal(true)}
-            className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
-          >
-            Configure Datasets
+    <div className="flex p-2 space-x-2 text-sm">
+      <div className="flex-1 border rounded-lg overflow-hidden">
+        <MapContainer
+          center={[12.8797, 121.774]} // Philippines center
+          zoom={6}
+          style={{ height: "80vh", width: "100%" }}
+          ref={mapRef}
+        >
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          {features.map((f, idx) => (
+            <GeoJSON key={idx} data={f} onEachFeature={onEachFeature} />
+          ))}
+        </MapContainer>
+      </div>
+
+      <div className="w-72 space-y-2">
+        <div className="space-y-1">
+          <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1 rounded text-sm">
+            Adjust Scoring
+          </button>
+          <button className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded text-sm">
+            Refresh Data
           </button>
         </div>
-      </div>
 
-      <div className="flex space-x-4">
-        <div className="flex-1">
-          <MapContainer
-            center={[12.8797, 121.774]}
-            zoom={6}
-            style={{ height: "70vh", width: "100%" }}
-            whenCreated={(mapInstance: any) => {
-              mapRef.current = mapInstance;
-            }}
-          >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {features.length > 0 && (
-              <GeoJSON
-                data={{
-                  type: "FeatureCollection",
-                  features: features.map((f) => ({
-                    type: "Feature",
-                    geometry: f.geom,
-                    properties: f,
-                  })),
-                } as GeoJSON.FeatureCollection}
-                style={(feature: any) => ({
-                  color: getColor(feature.properties.score),
-                  weight: 1,
-                  fillOpacity: 0.6,
-                })}
-              />
-            )}
-          </MapContainer>
-        </div>
-
-        <div className="w-72 border rounded p-2 bg-white shadow-sm text-sm overflow-y-auto max-h-[70vh]">
-          <ScoreLayerSelector instanceId={id as string} onSelect={setSelectedDataset} />
+        <div className="mt-2 border-t pt-2">
+          <h3 className="font-semibold mb-1">Score Layers</h3>
+          {categories.map((cat) => (
+            <div key={cat} className="mb-2">
+              <div className="font-medium">{cat}</div>
+              {datasets.filter((d) => d.score_config?.category === cat).length > 0 ? (
+                datasets
+                  .filter((d) => d.score_config?.category === cat)
+                  .map((d) => (
+                    <div key={d.id} className="text-gray-700 ml-2">
+                      Dataset {d.dataset_id}
+                    </div>
+                  ))
+              ) : (
+                <div className="text-gray-400 italic text-xs ml-2">No datasets</div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
-
-      {showConfigModal && (
-        <InstanceDatasetConfigModal
-          instance={instance}
-          onClose={() => setShowConfigModal(false)}
-          onSaved={async () => {
-            setShowConfigModal(false);
-          }}
-        />
-      )}
     </div>
   );
 }
