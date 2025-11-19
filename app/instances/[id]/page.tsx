@@ -161,7 +161,20 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 onEachFeature={onEachFeature}
               />
             ))}
-          </MapContainer>
+         <MapContainer
+  center={[11.0, 122.0]}
+  zoom={6}
+  style={{ height: '100%', width: '100%' }}
+  whenReady={() => {
+    // Capture map instance safely without type errors
+    const mapInstance = (mapRef.current = (mapRef.current ??
+      (document.querySelector('.leaflet-container') as any)?._leaflet_map) ||
+      null);
+    if (!mapInstance && typeof window !== 'undefined') {
+      console.warn('Map reference not initialized immediately — will be set on first feature render.');
+    }
+  }}
+>
 
           {hoverInfo && (
             <div className="absolute bottom-4 left-4 bg-white border rounded px-2 py-1 shadow text-sm">
