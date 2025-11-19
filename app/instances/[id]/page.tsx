@@ -7,6 +7,10 @@ import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Feature } from "geojson";
 
+import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
+import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
+import InstanceScoringModal from "@/components/InstanceScoringModal";
+
 // ======================================================
 // Interfaces
 // ======================================================
@@ -228,10 +232,22 @@ export default function InstancePage() {
         />
       )}
       {showDatasetConfig && (
-        <InstanceDatasetConfigModal onClose={() => setShowDatasetConfig(false)} />
+        <InstanceDatasetConfigModal
+          instance={{ id }}
+          onClose={() => setShowDatasetConfig(false)}
+          onSaved={async () => {
+            window.location.reload();
+          }}
+        />
       )}
       {showScoringConfig && (
-        <InstanceScoringModal onClose={() => setShowScoringConfig(false)} />
+        <InstanceScoringModal
+          instance={{ id }}
+          onClose={() => setShowScoringConfig(false)}
+          onSaved={async () => {
+            window.location.reload();
+          }}
+        />
       )}
     </div>
   );
@@ -248,10 +264,3 @@ function StatCard({ title, value }: { title: string; value: string }) {
     </div>
   );
 }
-
-// ======================================================
-// Modal Imports
-// ======================================================
-import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
-import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
-import InstanceScoringModal from "@/components/InstanceScoringModal";
