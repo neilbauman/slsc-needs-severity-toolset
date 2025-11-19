@@ -93,31 +93,46 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   }, [affectedBounds]);
 
-  // Load datasets grouped by category
+  // Load datasets grouped by category (manual join)
   useEffect(() => {
     const fetchDatasets = async () => {
-      const { data, error } = await supabase
+      const { data: datasets, error: dsError } = await supabase
         .from('instance_datasets')
         .select(`
           id,
           dataset_id,
-          datasets ( name ),
-          instance_category_config ( category_name )
+          instance_category_config_id,
+          datasets ( name )
         `)
         .eq('instance_id', instanceId);
 
-      if (error) {
-        console.error('Dataset fetch error:', error);
+      if (dsError) {
+        console.error('Dataset fetch error:', dsError);
         return;
       }
+
+      const { data: categories, error: catError } = await supabase
+        .from('instance_category_config')
+        .select('id, category_name')
+        .eq('instance_id', instanceId);
+
+      if (catError) {
+        console.error('Category fetch error:', catError);
+        return;
+      }
+
+      const catMap: Record<string, string> = {};
+      categories?.forEach((c: any) => {
+        catMap[c.id] = c.category_name;
+      });
 
       const grouped: Record<string, any[]> = {};
       CATEGORY_ORDER.forEach(c => (grouped[c] = []));
 
-      data?.forEach((row: any) => {
-        const category = row.instance_category_config?.category_name;
+      datasets?.forEach((row: any) => {
+        const categoryName = catMap[row.instance_category_config_id];
         const datasetName = row.datasets?.name || 'Unnamed Dataset';
-        if (category && grouped[category]) grouped[category].push(datasetName);
+        if (categoryName && grouped[categoryName]) grouped[categoryName].push(datasetName);
       });
 
       setDatasetsByCategory(grouped);
