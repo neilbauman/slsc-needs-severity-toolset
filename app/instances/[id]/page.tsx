@@ -1,183 +1,183 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import { supabase } from "@/lib/supabaseClient";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
-import NumericScoringModal from "@/components/NumericScoringModal";
 
-const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
+const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), {
+  ssr: false,
+});
+const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), {
+  ssr: false,
+});
+const GeoJSON = dynamic(() => import("react-leaflet").then((mod) => mod.GeoJSON), {
+  ssr: false,
+});
+import L from "leaflet";
 
-export default function InstancePage({ params }: { params: { id: string } }) {
-  const [summary, setSummary] = useState<any>(null);
+export default function InstancePage() {
+  const params = useParams();
+  const instanceId = params?.id as string;
+
+  const mapRef = useRef<L.Map | null>(null);
+
   const [geojson, setGeojson] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedDataset, setSelectedDataset] = useState<any>(null);
-  const [showModal, setShowModal] = useState(false);
-  const mapRef = useRef<any>(null);
+  const [stats, setStats] = useState({ pop: "-", concern: "-", need: "-", avg: "-" });
+  const [loading, setLoading] = useState(true);
 
+  // ✅ Load overall summary stats
   useEffect(() => {
+    const loadSummary = async () => {
+      const { data, error } = await supabase
+        .from("v_instance_affected_summary")
+        .select("total_population, people_concern, people_need, avg_score")
+        .eq("instance_id", instanceId)
+        .single();
+
+      if (!error && data) {
+        setStats({
+          pop: Number(data.total_population).toLocaleString(),
+          concern: Number(data.people_concern).toLocaleString(),
+          need: Number(data.people_need).toLocaleString(),
+          avg: Number(data.avg_score).toFixed(2),
+        });
+      }
+    };
     loadSummary();
-    loadGeojson();
-  }, [params.id, selectedDataset]);
+  }, [instanceId]);
 
-  const loadSummary = async () => {
-    const { data, error } = await supabase
-      .from("v_instance_affected_summary")
-      .select("total_population, people_concern, people_need, avg_score")
-      .eq("instance_id", params.id)
-      .single();
-    if (!error) setSummary(data);
-  };
+  // ✅ Load map data (affected ADM3 areas or all)
+  useEffect(() => {
+    const loadMap = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("v_instance_admin_scores_geojson")
+        .select("admin_pcode, adm3_name, geojson, score, dataset_id")
+        .eq("instance_id", instanceId);
 
-  const loadGeojson = async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("v_instance_admin_scores_geojson")
-      .select("geojson, score, dataset_name, category, adm3_name")
-      .eq("instance_id", params.id);
-    if (!error) setGeojson(data || []);
-    setLoading(false);
-  };
+      if (!error && data) setGeojson(data);
+      setLoading(false);
+    };
+    loadMap();
+  }, [instanceId]);
 
+  // ✅ Auto-fit bounds when geojson loads
+  useEffect(() => {
+    if (mapRef.current && geojson.length > 0) {
+      const bounds = L.geoJSON(geojson.map((g) => g.geojson)).getBounds();
+      mapRef.current.fitBounds(bounds, { padding: [20, 20] });
+    }
+  }, [geojson]);
+
+  // ✅ Color scale for 1–5 score
   const getColor = (score: number) => {
-    if (score >= 4.5) return "#d73027";
-    if (score >= 3.5) return "#fc8d59";
-    if (score >= 2.5) return "#fee08b";
-    if (score >= 1.5) return "#d9ef8b";
-    return "#1a9850";
-  };
-
-  const onEachFeature = (feature: any, layer: any) => {
-    const s = feature.properties.score;
-    const name = feature.properties.adm3_name;
-    const dataset = feature.properties.dataset_name;
-    const category = feature.properties.category;
-    layer.setStyle({
-      color: "#555",
-      weight: 0.8,
-      fillOpacity: 0.8,
-      fillColor: getColor(s),
-    });
-    layer.bindTooltip(
-      `<div><b>${name}</b><br/>Score: ${s.toFixed(2)}<br/>${category} / ${dataset}</div>`
-    );
+    if (score <= 1) return "#00b050"; // green
+    if (score <= 2) return "#92d050";
+    if (score <= 3) return "#ffff00";
+    if (score <= 4) return "#ff9900";
+    return "#ff0000"; // red
   };
 
   return (
-    <div className="flex flex-col h-screen w-full">
-      {/* Summary Stats */}
-      <div className="grid grid-cols-4 gap-3 p-4 bg-white shadow z-10">
-        <div className="text-center">
-          <div className="text-xs text-gray-500">Total Population</div>
-          <div className="text-lg font-semibold">
-            {summary?.total_population?.toLocaleString() || "-"}
-          </div>
+    <div className="p-4">
+      <h1 className="text-lg font-semibold mb-2">Cebu EQ–Typhoon</h1>
+      <p className="text-sm text-gray-600 mb-4">
+        Overview of scoring and affected administrative areas.
+      </p>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <div className="bg-white border rounded p-3 text-center">
+          <p className="text-xs text-gray-500">Total Population</p>
+          <p className="text-lg font-semibold">{stats.pop}</p>
         </div>
-        <div className="text-center">
-          <div className="text-xs text-gray-500">People Concerned</div>
-          <div className="text-lg font-semibold">
-            {summary?.people_concern?.toLocaleString() || "-"}
-          </div>
+        <div className="bg-white border rounded p-3 text-center">
+          <p className="text-xs text-gray-500">People Concerned</p>
+          <p className="text-lg font-semibold">{stats.concern}</p>
         </div>
-        <div className="text-center">
-          <div className="text-xs text-gray-500">People in Need</div>
-          <div className="text-lg font-semibold text-red-600">
-            {summary?.people_need?.toLocaleString() || "-"}
-          </div>
+        <div className="bg-white border rounded p-3 text-center">
+          <p className="text-xs text-gray-500">People in Need</p>
+          <p className="text-lg font-semibold">{stats.need}</p>
         </div>
-        <div className="text-center">
-          <div className="text-xs text-gray-500">Average Score</div>
-          <div className="text-lg font-semibold text-blue-600">
-            {summary?.avg_score?.toFixed(2) || "-"}
-          </div>
+        <div className="bg-white border rounded p-3 text-center">
+          <p className="text-xs text-gray-500">Average Score</p>
+          <p className="text-lg font-semibold">{stats.avg}</p>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Side Map */}
-        <div className="flex-1 relative">
+      <div className="flex gap-4">
+        {/* Left map */}
+        <div className="flex-1 border rounded overflow-hidden">
           <MapContainer
-            center={[12.8797, 121.774]}
-            zoom={6}
-            style={{ height: "100%", width: "100%" }}
-            whenReady={() => {
-              if (!mapRef.current && typeof window !== "undefined") {
-                mapRef.current = (window as any).L?.map || null;
-              }
+            center={[10.3, 123.9]}
+            zoom={7}
+            style={{ height: "70vh", width: "100%" }}
+            whenReady={(mapEvent) => {
+              mapRef.current = mapEvent.target;
             }}
           >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors"
+            />
             {!loading &&
-              geojson.map((g, i) => (
-                <GeoJSON key={i} data={g.geojson} onEachFeature={onEachFeature} />
-              ))}
+              geojson
+                .filter((g) =>
+                  selectedDataset ? g.dataset_id === selectedDataset.dataset_id : true
+                )
+                .map((g, i) => (
+                  <GeoJSON
+                    key={i}
+                    data={g.geojson}
+                    style={{
+                      color: getColor(g.score),
+                      weight: 1,
+                      fillOpacity: 0.6,
+                    }}
+                    eventHandlers={{
+                      mouseover: (e) => {
+                        const layer = e.target;
+                        layer.bindTooltip(
+                          `<strong>${g.adm3_name}</strong><br>Score: ${g.score}`
+                        );
+                      },
+                    }}
+                  />
+                ))}
           </MapContainer>
-
-          {/* Legend */}
-          <div className="absolute bottom-4 right-4 bg-white bg-opacity-90 rounded shadow p-2 text-xs">
-            <div className="font-semibold mb-1">Score Legend</div>
-            {[5, 4, 3, 2, 1].map((v) => (
-              <div key={v} className="flex items-center gap-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: getColor(v) }}
-                ></div>
-                <span>{v}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Buttons */}
-          <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-            <button
-              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
-              onClick={() => alert("Define Affected Area")}
-            >
-              Define Affected Area
-            </button>
-            <button
-              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
-              onClick={() => alert("Configure Datasets")}
-            >
-              Configure Datasets
-            </button>
-            <button
-              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
-              onClick={() => setShowModal(true)}
-            >
-              Calibrate Scores
-            </button>
-            <button
-              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
-              onClick={loadGeojson}
-            >
-              Recompute Scores
-            </button>
-          </div>
         </div>
 
-        {/* Right Sidebar */}
-        <div className="w-80 bg-gray-50 border-l overflow-y-auto p-4">
-          <h3 className="font-semibold text-gray-800 mb-2">Score Layers</h3>
-          <ScoreLayerSelector
-            instanceId={params.id}
-            onSelect={setSelectedDataset}
-          />
+        {/* Right panel */}
+        <div className="w-72">
+          <div className="bg-white border rounded p-3 mb-3">
+            <div className="space-y-2">
+              <button className="bg-blue-600 text-white text-sm rounded px-3 py-1 w-full hover:bg-blue-700">
+                Define Affected Area
+              </button>
+              <button className="bg-green-600 text-white text-sm rounded px-3 py-1 w-full hover:bg-green-700">
+                Configure Datasets
+              </button>
+              <button className="bg-orange-600 text-white text-sm rounded px-3 py-1 w-full hover:bg-orange-700">
+                Calibrate Scores
+              </button>
+              <button className="bg-gray-700 text-white text-sm rounded px-3 py-1 w-full hover:bg-gray-800">
+                Recompute Scores
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white border rounded p-3">
+            <h3 className="font-semibold mb-2">Score Layers</h3>
+            <ScoreLayerSelector
+              instanceId={instanceId}
+              onSelect={setSelectedDataset}
+            />
+          </div>
         </div>
       </div>
-
-      {showModal && selectedDataset && (
-        <NumericScoringModal
-          dataset={selectedDataset}
-          instance={{ id: params.id }}
-          onClose={() => setShowModal(false)}
-          onSaved={loadGeojson}
-        />
-      )}
     </div>
   );
 }
