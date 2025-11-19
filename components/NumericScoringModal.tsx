@@ -25,7 +25,7 @@ export default function NumericScoringModal({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  // ✅ Load existing config from DB
+  // ✅ Load saved config from Supabase
   useEffect(() => {
     const loadConfig = async () => {
       const { data, error } = await supabase
@@ -36,7 +36,7 @@ export default function NumericScoringModal({
         .maybeSingle();
 
       if (error) {
-        console.warn("No existing score config found:", error.message);
+        console.warn("No existing config:", error.message);
         return;
       }
 
@@ -47,11 +47,10 @@ export default function NumericScoringModal({
       if (cfg.limitToAffected !== undefined) setLimitToAffected(cfg.limitToAffected);
       if (cfg.thresholds?.length) setThresholds(cfg.thresholds);
     };
-
     loadConfig();
   }, [instance.id, dataset.id]);
 
-  // ✅ Save current configuration
+  // ✅ Save config
   const saveConfig = async () => {
     setSaving(true);
     const config = { method, scaleMax, inverse, thresholds, limitToAffected };
@@ -71,7 +70,7 @@ export default function NumericScoringModal({
     setSaving(false);
   };
 
-  // ✅ Apply scoring (Normalization or Thresholds)
+  // ✅ Apply scoring logic
   const applyScoring = async () => {
     setSaving(true);
     setMessage("Running scoring...");
@@ -94,6 +93,7 @@ export default function NumericScoringModal({
             in_instance_id: instance.id,
             in_dataset_id: dataset.id,
             in_thresholds: thresholds,
+            in_inverse: inverse,
             in_limit_to_affected: limitToAffected,
           };
 
@@ -108,14 +108,13 @@ export default function NumericScoringModal({
     setSaving(false);
   };
 
-  // ✅ Preview results (summary)
+  // ✅ Safe preview logic (no SQL parser issues)
   const previewScores = async () => {
     const { data, error } = await supabase
       .from("scored_instance_values_adm3")
-      .select("count:count(*), min:min(score), max:max(score), avg:avg(score)")
+      .select("score")
       .eq("instance_id", instance.id)
-      .eq("dataset_id", dataset.id)
-      .maybeSingle();
+      .eq("dataset_id", dataset.id);
 
     if (error) {
       console.error("Preview error:", error);
@@ -123,16 +122,22 @@ export default function NumericScoringModal({
       return;
     }
 
-    if (!data) {
+    if (!data || data.length === 0) {
       setMessage("No scores available to preview.");
       return;
     }
 
+    const scores = data.map((d: any) => d.score ?? 0);
+    const avg =
+      scores.length > 0
+        ? scores.reduce((sum, v) => sum + v, 0) / scores.length
+        : 0;
+
     setPreview({
-      count: data.count ?? 0,
-      min: data.min?.toFixed(2) ?? "-",
-      max: data.max?.toFixed(2) ?? "-",
-      avg: data.avg?.toFixed(2) ?? "-",
+      count: scores.length,
+      min: Math.min(...scores).toFixed(2),
+      max: Math.max(...scores).toFixed(2),
+      avg: avg.toFixed(2),
     });
   };
 
@@ -285,7 +290,7 @@ export default function NumericScoringModal({
           </div>
         )}
 
-        {/* Preview summary */}
+        {/* Preview Summary */}
         {preview && (
           <div className="mt-4 p-3 border rounded bg-gray-50 text-sm">
             <h4 className="font-medium mb-1">Preview Summary</h4>
@@ -310,6 +315,7 @@ export default function NumericScoringModal({
           </div>
         )}
 
+        {/* Status Message */}
         {message && (
           <p
             className={`mt-2 text-sm ${
@@ -320,7 +326,7 @@ export default function NumericScoringModal({
           </p>
         )}
 
-        {/* Footer buttons */}
+        {/* Footer Buttons */}
         <div className="flex justify-end mt-4 gap-2">
           <button
             onClick={onClose}
