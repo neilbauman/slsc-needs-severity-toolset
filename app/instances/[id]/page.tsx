@@ -1,206 +1,138 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-import { useParams } from "next/navigation";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { createClient } from '@supabase/supabase-js';
+import 'leaflet/dist/leaflet.css';
 
-const ScoreLayerSelector = ({ instanceId, onSelect }: any) => {
-  const [layers, setLayers] = useState<any[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(m => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import('react-leaflet').then(m => m.GeoJSON), { ssr: false });
 
-  useEffect(() => {
-    const fetchLayers = async () => {
-      const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-      const headers = { apikey: key, Authorization: `Bearer ${key}` };
-      const res = await fetch(`${base}/rest/v1/instance_datasets?instance_id=eq.${instanceId}&select=*`, { headers });
-      const data = await res.json();
-      setLayers(data);
-    };
-    fetchLayers();
-  }, [instanceId]);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  const grouped = {
-    "SSC Framework - P1": layers.filter((l) => l.category === "P1"),
-    "SSC Framework - P2": layers.filter((l) => l.category === "P2"),
-    "SSC Framework - P3": layers.filter((l) => l.category === "P3"),
-    "Hazards": layers.filter((l) => l.category === "Hazard"),
-    "Underlying Vulnerability": layers.filter((l) => l.category === "Underlying Vulnerability"),
-  };
-
-  return (
-    <div className="text-sm">
-      {Object.entries(grouped).map(([cat, list]) => (
-        <div key={cat} className="mb-2">
-          <h4 className="font-semibold text-gray-700 mb-1">{cat}</h4>
-          <div className="space-y-1">
-            {list.map((d) => (
-              <button
-                key={d.dataset_id}
-                onClick={() => {
-                  setSelected(d.dataset_id);
-                  onSelect(d);
-                }}
-                className={`block w-full text-left px-2 py-1 rounded ${
-                  selected === d.dataset_id ? "bg-blue-600 text-white" : "hover:bg-gray-100"
-                }`}
-              >
-                {d.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-export default function InstancePage() {
-  const params = useParams();
-  const mapRef = useRef<L.Map | null>(null);
-  const [summary, setSummary] = useState<any>(null);
+export default function InstancePage({ params }: { params: { id: string } }) {
+  const instanceId = params.id;
+  const mapRef = useRef<any>(null);
   const [features, setFeatures] = useState<any[]>([]);
+  const [affectedBounds, setAffectedBounds] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedLayer, setSelectedLayer] = useState<any>(null);
 
+  // Color scale: 1 (green) → 5 (red)
   const getColor = (score: number) => {
-    if (score >= 4.5) return "#D32F2F";
-    if (score >= 4.0) return "#FF8C00";
-    if (score >= 3.0) return "#FFD700";
-    if (score >= 2.0) return "#9ACD32";
-    return "#00A65A";
+    if (score <= 1) return '#2ECC71';
+    if (score <= 2) return '#A2D56E';
+    if (score <= 3) return '#FFD54F';
+    if (score <= 4) return '#FF8C42';
+    return '#E74C3C';
   };
 
   useEffect(() => {
     const fetchData = async () => {
-      const id = params?.id;
-      const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-      const headers = { apikey: key, Authorization: `Bearer ${key}` };
+      setLoading(true);
 
-      const summaryRes = await fetch(
-        `${base}/rest/v1/v_instance_affected_summary?select=*&instance_id=eq.${id}`,
-        { headers }
-      );
-      const summaryJson = await summaryRes.json();
-      setSummary(summaryJson[0] || null);
+      // Get polygons with scores
+      const { data: geoData, error: geoError } = await supabase
+        .from('v_instance_admin_scores_geojson')
+        .select('geojson')
+        .eq('instance_id', instanceId);
 
-      const geoRes = await fetch(
-        `${base}/rest/v1/v_instance_admin_scores_geojson?select=*&instance_id=eq.${id}`,
-        { headers }
-      );
-      const geoJson = await geoRes.json();
-      setFeatures(geoJson || []);
+      if (geoError) console.error('GeoJSON fetch error:', geoError);
+      else if (geoData) {
+        const parsed = geoData.map((d: any) => JSON.parse(d.geojson));
+        setFeatures(parsed);
+      }
+
+      // Get affected area geometry
+      const { data: areaData, error: areaError } = await supabase
+        .from('v_instance_affected_areas')
+        .select('geom')
+        .eq('instance_id', instanceId)
+        .maybeSingle();
+
+      if (!areaError && areaData?.geom) {
+        const geom = JSON.parse(areaData.geom);
+        setAffectedBounds(geom);
+      }
 
       setLoading(false);
     };
+
     fetchData();
-  }, [params?.id]);
+  }, [instanceId]);
 
   useEffect(() => {
-    if (loading || !mapRef.current) return;
-    const map = mapRef.current;
-
-    map.eachLayer((layer: any) => {
-      if (!(layer instanceof L.TileLayer)) map.removeLayer(layer);
-    });
-
-    if (features.length > 0) {
-      const geoLayer = L.geoJSON(features.map((f) => f.geojson), {
-        style: (feature: any) => ({
-          color: "#444",
-          weight: 0.5,
-          fillColor: getColor(feature?.properties?.score),
-          fillOpacity: 0.65,
-        }),
-        onEachFeature: (feature: any, layer: any) => {
-          const name = feature.properties.admin_name || "Unknown";
-          const score = Number(feature.properties.score).toFixed(1);
-          layer.bindTooltip(`<strong>${name}</strong><br>Score: ${score}`);
-        },
-      }).addTo(map);
-
-      const bounds = geoLayer.getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
+    if (mapRef.current && affectedBounds) {
+      const bounds = L.geoJSON(affectedBounds).getBounds();
+      mapRef.current.fitBounds(bounds);
     }
-  }, [features, loading, selectedLayer]);
+  }, [affectedBounds]);
 
-  const MapContainer = dynamic(
-    async () => {
-      const { MapContainer, TileLayer } = await import("react-leaflet");
-      return ({ children }: any) => (
-        <MapContainer
-          center={[11, 122]}
-          zoom={6}
-          style={{ height: "70vh", width: "100%" }}
-          whenReady={() => {}}
-          ref={(map: any) => {
-            if (map && !mapRef.current) mapRef.current = map;
-          }}
-        >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {children}
-        </MapContainer>
-      );
-    },
-    { ssr: false }
-  );
-
-  if (loading) return <div className="p-2 text-sm">Loading...</div>;
+  if (loading) return <div className="p-4 text-sm text-gray-500">Loading...</div>;
 
   return (
-    <div className="p-2 space-y-2 text-sm">
-      <h2 className="font-semibold text-base">Cebu EQ–Typhoon</h2>
-      <div className="grid grid-cols-4 gap-2 text-center">
-        <div className="p-2 border rounded bg-white shadow-sm">
-          <p className="text-gray-500 text-xs">Total Areas</p>
-          <p className="text-lg font-semibold">{summary ? summary.total_areas : "-"}</p>
+    <div className="flex flex-col h-screen p-2 space-y-2 bg-gray-50">
+      <div className="flex flex-row space-x-2 h-[85vh]">
+        {/* Map Section */}
+        <div className="flex-1 relative rounded-md overflow-hidden border border-gray-200">
+          <MapContainer
+            center={[12.8797, 121.774]}
+            zoom={6}
+            style={{ height: '100%', width: '100%' }}
+            whenReady={(map) => (mapRef.current = map.target)}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {features.map((f: any, idx: number) => (
+              <GeoJSON
+                key={idx}
+                data={f}
+                style={() => ({
+                  color: '#333',
+                  weight: 0.8,
+                  fillColor: getColor(f.properties?.score ?? 0),
+                  fillOpacity: 0.7,
+                })}
+                onEachFeature={(feature, layer) => {
+                  const s = feature.properties?.score?.toFixed(2) ?? '-';
+                  const n = feature.properties?.admin_name ?? 'Unknown';
+                  layer.bindTooltip(`${n}: Score ${s}`);
+                }}
+              />
+            ))}
+          </MapContainer>
         </div>
-        <div className="p-2 border rounded bg-white shadow-sm">
-          <p className="text-gray-500 text-xs">Min Score</p>
-          <p className="text-lg font-semibold">
-            {summary ? Number(summary.min_score).toFixed(1) : "-"}
-          </p>
-        </div>
-        <div className="p-2 border rounded bg-white shadow-sm">
-          <p className="text-gray-500 text-xs">Max Score</p>
-          <p className="text-lg font-semibold">
-            {summary ? Number(summary.max_score).toFixed(1) : "-"}
-          </p>
-        </div>
-        <div className="p-2 border rounded bg-white shadow-sm">
-          <p className="text-gray-500 text-xs">Average Score</p>
-          <p className="text-lg font-semibold">
-            {summary ? Number(summary.avg_score).toFixed(1) : "-"}
-          </p>
-        </div>
-      </div>
 
-      <div className="flex gap-2">
-        <div className="flex flex-col w-64 gap-1">
-          <button className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
-            Define Affected Area
-          </button>
-          <button className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
-            Configure Datasets
-          </button>
-          <button className="px-3 py-1 bg-orange-600 text-white rounded hover:bg-orange-700 text-sm">
-            Calibrate Scores
-          </button>
-          <button className="px-3 py-1 bg-gray-800 text-white rounded hover:bg-gray-900 text-sm">
-            Recompute Scores
-          </button>
+        {/* Sidebar Controls */}
+        <div className="w-64 flex flex-col space-y-2 p-2 border-l border-gray-200 bg-white rounded-md">
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">Layers</h3>
 
-          <div className="mt-3 border-t pt-2">
-            <h4 className="font-semibold mb-1">Score Layers</h4>
-            <ScoreLayerSelector instanceId={params?.id} onSelect={setSelectedLayer} />
+          <div className="text-xs text-gray-600 space-y-1">
+            {['SSC Framework P1', 'SSC Framework P2', 'SSC Framework P3', 'Hazards', 'Underlying Vulnerability'].map((cat) => (
+              <div key={cat} className="border-b border-gray-100 pb-1">
+                <p className="font-medium text-gray-700">{cat}</p>
+                <div className="flex flex-col mt-1 space-y-1">
+                  <button className="text-left px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 text-[11px]">
+                    Dataset 1
+                  </button>
+                  <button className="text-left px-2 py-1 bg-gray-100 rounded hover:bg-gray-200 text-[11px]">
+                    Dataset 2
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
 
-        <div className="flex-1 border rounded overflow-hidden shadow-sm">
-          <MapContainer />
+          <div className="pt-3 mt-auto space-y-1 border-t border-gray-100">
+            <button className="w-full bg-blue-600 text-white text-xs py-1.5 rounded hover:bg-blue-700">
+              Adjust Scoring
+            </button>
+            <button className="w-full bg-green-600 text-white text-xs py-1.5 rounded hover:bg-green-700">
+              Refresh Data
+            </button>
+          </div>
         </div>
       </div>
     </div>
