@@ -102,10 +102,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           id,
           dataset_id,
           datasets ( name ),
-          instance_dataset_config (
-            category_id,
-            instance_category_config ( category_name )
-          )
+          instance_category_config ( category_name )
         `)
         .eq('instance_id', instanceId);
 
@@ -118,7 +115,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       CATEGORY_ORDER.forEach(c => (grouped[c] = []));
 
       data?.forEach((row: any) => {
-        const category = row.instance_dataset_config?.instance_category_config?.category_name;
+        const category = row.instance_category_config?.category_name;
         const datasetName = row.datasets?.name || 'Unnamed Dataset';
         if (category && grouped[category]) grouped[category].push(datasetName);
       });
