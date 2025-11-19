@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import type { Feature } from "geojson";
 
 interface SummaryRow {
   adm3_pcode: string;
@@ -29,13 +30,13 @@ export default function InstancePage() {
   });
   const [loading, setLoading] = useState(true);
 
-  // 🔹 Modals visibility
+  // Modal state
   const [showDefineArea, setShowDefineArea] = useState(false);
   const [showDatasetConfig, setShowDatasetConfig] = useState(false);
   const [showScoringConfig, setShowScoringConfig] = useState(false);
 
   // ======================================================
-  // Fetch affected summary with geometry
+  // Fetch summary data joined with geometry
   // ======================================================
   useEffect(() => {
     if (!id) return;
@@ -43,7 +44,6 @@ export default function InstancePage() {
     (async () => {
       setLoading(true);
 
-      // Join v_instance_affected_summary with admin_boundaries_geojson for map geometry
       const { data, error } = await supabase.rpc("get_instance_summary_map", {
         in_instance_id: id,
       });
@@ -63,7 +63,7 @@ export default function InstancePage() {
 
       setSummary(data);
 
-      // Compute stats
+      // Aggregate stats
       const totalPop = data.reduce((a, b) => a + Number(b.pop || 0), 0);
       const peopleConcern = data.reduce((a, b) => a + Number(b.pop_concern || 0), 0);
       const peopleNeed = data.reduce((a, b) => a + Number(b.pop_need || 0), 0);
@@ -91,7 +91,7 @@ export default function InstancePage() {
   };
 
   // ======================================================
-  // Map rendering
+  // Main render
   // ======================================================
   return (
     <div className="p-6 space-y-4">
@@ -158,34 +158,38 @@ export default function InstancePage() {
                 attribution='&copy; OpenStreetMap contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              {summary.map((area, i) => (
-                <GeoJSON
-                  key={i}
-                  data={{
-                    type: "Feature",
-                    geometry: area.geom,
-                    properties: { name: area.adm3_name },
-                  }}
-                  style={() => ({
-                    color: "#333",
-                    weight: 0.4,
-                    fillColor: getColor(area.score),
-                    fillOpacity: 0.75,
-                  })}
-                >
-                  <Tooltip sticky>
-                    <div>
-                      <strong>{area.adm3_name}</strong>
-                      <br />
-                      Score: {Number(area.score).toFixed(2)}
-                      <br />
-                      Pop: {Number(area.pop).toLocaleString()}
-                      <br />
-                      Pov: {Number(area.pov_rate).toFixed(1)}%
-                    </div>
-                  </Tooltip>
-                </GeoJSON>
-              ))}
+              {summary.map((area, i) => {
+                const feature: Feature = {
+                  type: "Feature",
+                  geometry: area.geom as any,
+                  properties: { name: area.adm3_name },
+                };
+
+                return (
+                  <GeoJSON
+                    key={i}
+                    data={feature}
+                    style={() => ({
+                      color: "#333",
+                      weight: 0.4,
+                      fillColor: getColor(area.score),
+                      fillOpacity: 0.75,
+                    })}
+                  >
+                    <Tooltip sticky>
+                      <div>
+                        <strong>{area.adm3_name}</strong>
+                        <br />
+                        Score: {Number(area.score).toFixed(2)}
+                        <br />
+                        Pop: {Number(area.pop).toLocaleString()}
+                        <br />
+                        Pov: {Number(area.pov_rate).toFixed(1)}%
+                      </div>
+                    </Tooltip>
+                  </GeoJSON>
+                );
+              })}
             </MapContainer>
           )}
         </div>
@@ -226,7 +230,7 @@ export default function InstancePage() {
 }
 
 // ---------------------------------------------
-// Reusable stat card component
+// Stat Card
 // ---------------------------------------------
 function StatCard({ title, value }: { title: string; value: string }) {
   return (
@@ -238,7 +242,7 @@ function StatCard({ title, value }: { title: string; value: string }) {
 }
 
 // ---------------------------------------------
-// Modals (already exist in your repo)
+// Modals (from your repo)
 // ---------------------------------------------
 import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
