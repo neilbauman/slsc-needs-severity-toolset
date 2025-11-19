@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabaseClient";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 
-// ✅ Dynamic imports for Leaflet (no SSR)
 const MapContainer = dynamic(() => import("react-leaflet").then((m) => m.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((m) => m.TileLayer), { ssr: false });
 const GeoJSON = dynamic(() => import("react-leaflet").then((m) => m.GeoJSON), { ssr: false });
@@ -15,8 +14,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const instanceId = params.id;
   const [instance, setInstance] = useState<any>(null);
   const [features, setFeatures] = useState<any[]>([]);
-  const [datasets, setDatasets] = useState<any[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<any | null>(null);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
@@ -30,41 +27,50 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [instanceId]);
 
-  // ✅ Load affected areas (convert geometry to GeoJSON)
+  // ✅ Load affected areas properly
   useEffect(() => {
     const loadAffected = async () => {
       setLoading(true);
+
       const { data, error } = await supabase
-        .rpc("st_asgeojson_for_instance", { instance_uuid: instanceId }); // custom RPC fallback if exists
-      if (!data) {
-        const { data: geomData, error: geomErr } = await supabase
-          .from("v_instance_affected_areas")
-          .select("admin_pcode, name, admin_level, ST_AsGeoJSON(geom)::json as geojson")
-          .eq("instance_id", instanceId);
-        if (geomErr) {
-          console.error("Error loading affected areas:", geomErr);
-          setLoading(false);
-          return;
-        }
-        if (geomData) {
-          const feats = geomData.map((r: any) => ({
-            type: "Feature",
-            geometry: r.geojson,
-            properties: {
-              admin_pcode: r.admin_pcode,
-              name: r.name,
-              admin_level: r.admin_level,
-            },
-          }));
-          setFeatures(feats);
-        }
+        .from("v_instance_affected_adm3") // ✅ corrected to match your hint
+        .select("admin_pcode, name, admin_level, geom")
+        .eq("instance_id", instanceId);
+
+      if (error) {
+        console.error("Error loading affected areas:", error);
+        setLoading(false);
+        return;
       }
+
+      if (data) {
+        const feats = data
+          .map((r: any) => {
+            try {
+              const g = typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom;
+              return {
+                type: "Feature",
+                geometry: g,
+                properties: {
+                  admin_pcode: r.admin_pcode,
+                  name: r.name,
+                  admin_level: r.admin_level,
+                },
+              };
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+        setFeatures(feats);
+      }
+
       setLoading(false);
     };
     loadAffected();
   }, [instanceId]);
 
-  // ✅ Auto zoom
+  // ✅ Auto zoom to affected polygons
   useEffect(() => {
     if (mapRef.current && features.length > 0) {
       const L = require("leaflet");
@@ -72,19 +78,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       mapRef.current.fitBounds(group.getBounds());
     }
   }, [features]);
-
-  // Load dataset list for ScoreLayerSelector
-  useEffect(() => {
-    const loadDatasets = async () => {
-      const { data, error } = await supabase
-        .from("v_dataset_scores")
-        .select("dataset_id, dataset_name, category")
-        .eq("instance_id", instanceId)
-        .order("category, dataset_name");
-      if (!error && data) setDatasets(data);
-    };
-    loadDatasets();
-  }, [instanceId]);
 
   if (loading) {
     return (
@@ -138,10 +131,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         {/* Sidebar */}
         <div className="w-64 border-l p-2 text-xs bg-white overflow-y-auto">
           <h3 className="font-semibold mb-2 text-gray-700">Score Layers</h3>
-          <ScoreLayerSelector
-            instanceId={instanceId}
-            onSelect={(dataset) => setSelectedDataset(dataset)}
-          />
+          <ScoreLayerSelector instanceId={instanceId} />
         </div>
       </div>
 
@@ -150,15 +140,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <InstanceDatasetConfigModal
           instance={instance}
           onClose={() => setShowConfigModal(false)}
-          onSaved={async () => {
-            setShowConfigModal(false);
-            const { data } = await supabase
-              .from("v_dataset_scores")
-              .select("dataset_id, dataset_name, category")
-              .eq("instance_id", instanceId)
-              .order("category, dataset_name");
-            if (data) setDatasets(data);
-          }}
+          onSaved={() => setShowConfigModal(false)}
         />
       )}
     </div>
