@@ -1,183 +1,204 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
-import dynamic from "next/dynamic";
-import { supabase } from "@/lib/supabaseClient";
-import ScoreLayerSelector from "@/components/ScoreLayerSelector";
-import L from "leaflet";
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import supabase from '@/lib/supabaseClient';
 
-const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), {
-  ssr: false,
-});
-const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), {
-  ssr: false,
-});
-const GeoJSON = dynamic(() => import("react-leaflet").then((mod) => mod.GeoJSON), {
-  ssr: false,
-});
+interface SummaryData {
+  total_areas: number;
+  min_score: number;
+  max_score: number;
+  avg_score: number;
+}
 
-export default function InstancePage() {
-  const params = useParams();
-  const instanceId = params?.id as string;
+interface GeoFeature {
+  type: string;
+  geometry: { type: string; coordinates: any };
+  properties: {
+    score: number;
+    admin_name: string;
+    dataset_id: string;
+    admin_pcode: string;
+  };
+}
 
+export default function InstancePage({ params }: { params: { id: string } }) {
+  const router = useRouter();
   const mapRef = useRef<L.Map | null>(null);
-
-  const [geojson, setGeojson] = useState<any[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<any>(null);
-  const [stats, setStats] = useState({ pop: "-", concern: "-", need: "-", avg: "-" });
+  const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [features, setFeatures] = useState<GeoFeature[]>([]);
+  const [hoverInfo, setHoverInfo] = useState<{ name: string; score: number } | null>(null);
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ Load overall summary stats
+  const instanceId = params.id;
+
   useEffect(() => {
-    const loadSummary = async () => {
-      const { data, error } = await supabase
-        .from("v_instance_affected_summary")
-        .select("total_population, people_concern, people_need, avg_score")
-        .eq("instance_id", instanceId)
-        .single();
+    async function loadData() {
+      try {
+        setLoading(true);
 
-      if (!error && data) {
-        setStats({
-          pop: Number(data.total_population).toLocaleString(),
-          concern: Number(data.people_concern).toLocaleString(),
-          need: Number(data.people_need).toLocaleString(),
-          avg: Number(data.avg_score).toFixed(2),
-        });
-      }
-    };
-    if (instanceId) loadSummary();
-  }, [instanceId]);
+        // --- Fetch summary data ---
+        const { data: summaryData, error: summaryError } = await supabase
+          .from('v_instance_affected_summary')
+          .select('*')
+          .eq('instance_id', instanceId)
+          .single();
 
-  // ✅ Load map data
-  useEffect(() => {
-    const loadMap = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("v_instance_admin_scores_geojson")
-        .select("admin_pcode, adm3_name, geojson, score, dataset_id")
-        .eq("instance_id", instanceId);
+        if (summaryError) throw summaryError;
+        setSummary(summaryData as SummaryData);
 
-      if (!error && data) setGeojson(data);
-      setLoading(false);
-    };
-    if (instanceId) loadMap();
-  }, [instanceId]);
+        // --- Fetch GeoJSON data ---
+        const { data: geoData, error: geoError } = await supabase
+          .from('v_instance_admin_scores_geojson')
+          .select('*')
+          .eq('instance_id', instanceId);
 
-  // ✅ Auto-fit bounds when geojson loads
-  useEffect(() => {
-    if (mapRef.current && geojson.length > 0) {
-      const bounds = L.geoJSON(geojson.map((g) => g.geojson)).getBounds();
-      if (bounds.isValid()) {
-        mapRef.current.fitBounds(bounds, { padding: [20, 20] });
+        if (geoError) throw geoError;
+
+        const parsed = geoData.map((d: any) => JSON.parse(JSON.stringify(d.geojson)));
+        setFeatures(parsed);
+      } catch (err) {
+        console.error('Error loading data:', err);
+      } finally {
+        setLoading(false);
       }
     }
-  }, [geojson]);
 
-  // ✅ Color scale 1 → 5
+    loadData();
+  }, [instanceId]);
+
+  // --- Color scale for scores 1–5 ---
   const getColor = (score: number) => {
-    if (score <= 1) return "#00b050";
-    if (score <= 2) return "#92d050";
-    if (score <= 3) return "#ffff00";
-    if (score <= 4) return "#ff9900";
-    return "#ff0000";
+    if (score <= 1) return '#2ECC71'; // green
+    if (score <= 2) return '#F1C40F'; // yellow
+    if (score <= 3) return '#E67E22'; // orange
+    if (score <= 4) return '#E74C3C'; // red-orange
+    return '#C0392B'; // deep red
   };
 
-  return (
-    <div className="p-4">
-      <h1 className="text-lg font-semibold mb-2">Cebu EQ–Typhoon</h1>
-      <p className="text-sm text-gray-600 mb-4">
-        Overview of scoring and affected administrative areas.
-      </p>
+  // --- GeoJSON style ---
+  const onEachFeature = (feature: any, layer: L.Layer) => {
+    const f = feature as any;
+    layer.on({
+      mouseover: (e: any) => {
+        const layer = e.target;
+        layer.setStyle({ weight: 2, color: '#000', fillOpacity: 0.9 });
+        setHoverInfo({
+          name: f.properties.admin_name,
+          score: f.properties.score,
+        });
+      },
+      mouseout: (e: any) => {
+        const layer = e.target;
+        layer.setStyle({ weight: 1, color: '#666', fillOpacity: 0.7 });
+        setHoverInfo(null);
+      },
+      click: () => {
+        setSelectedFeature(f.properties.admin_pcode);
+      },
+    });
+  };
 
-      {/* Summary stats */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        <div className="bg-white border rounded p-3 text-center">
-          <p className="text-xs text-gray-500">Total Population</p>
-          <p className="text-lg font-semibold">{stats.pop}</p>
+  const styleFeature = (feature: any) => ({
+    color: selectedFeature === feature.properties.admin_pcode ? '#000' : '#666',
+    weight: selectedFeature === feature.properties.admin_pcode ? 3 : 1,
+    fillColor: getColor(feature.properties.score),
+    fillOpacity: 0.7,
+  });
+
+  if (loading) return <div className="p-4">Loading...</div>;
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Cebu EQ–Typhoon</h2>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="border rounded-md p-3 text-center">
+          <p className="text-sm text-gray-500">Total Areas</p>
+          <p className="text-xl font-semibold">
+            {summary ? summary.total_areas.toLocaleString() : '-'}
+          </p>
         </div>
-        <div className="bg-white border rounded p-3 text-center">
-          <p className="text-xs text-gray-500">People Concerned</p>
-          <p className="text-lg font-semibold">{stats.concern}</p>
+        <div className="border rounded-md p-3 text-center">
+          <p className="text-sm text-gray-500">Min Score</p>
+          <p className="text-xl font-semibold">{summary ? summary.min_score.toFixed(2) : '-'}</p>
         </div>
-        <div className="bg-white border rounded p-3 text-center">
-          <p className="text-xs text-gray-500">People in Need</p>
-          <p className="text-lg font-semibold">{stats.need}</p>
+        <div className="border rounded-md p-3 text-center">
+          <p className="text-sm text-gray-500">Max Score</p>
+          <p className="text-xl font-semibold">{summary ? summary.max_score.toFixed(2) : '-'}</p>
         </div>
-        <div className="bg-white border rounded p-3 text-center">
-          <p className="text-xs text-gray-500">Average Score</p>
-          <p className="text-lg font-semibold">{stats.avg}</p>
+        <div className="border rounded-md p-3 text-center">
+          <p className="text-sm text-gray-500">Average Score</p>
+          <p className="text-xl font-semibold">{summary ? summary.avg_score.toFixed(2) : '-'}</p>
         </div>
       </div>
 
-      <div className="flex gap-4">
-        {/* Map container */}
-        <div className="flex-1 border rounded overflow-hidden">
+      {/* Map and controls layout */}
+      <div className="grid grid-cols-[1fr_250px] gap-4">
+        <div className="h-[75vh] border rounded-lg overflow-hidden">
           <MapContainer
-            center={[10.3, 123.9]}
-            zoom={7}
-            style={{ height: "70vh", width: "100%" }}
-            ref={(mapInstance) => {
-              if (mapInstance && !mapRef.current) mapRef.current = mapInstance;
-            }}
+            center={[11.0, 122.0]}
+            zoom={6}
+            style={{ height: '100%', width: '100%' }}
+            whenCreated={(mapInstance) => (mapRef.current = mapInstance)}
           >
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap contributors"
-            />
-            {!loading &&
-              geojson
-                .filter((g) =>
-                  selectedDataset ? g.dataset_id === selectedDataset.dataset_id : true
-                )
-                .map((g, i) => (
-                  <GeoJSON
-                    key={i}
-                    data={g.geojson}
-                    style={{
-                      color: getColor(g.score),
-                      weight: 1,
-                      fillOpacity: 0.6,
-                    }}
-                    eventHandlers={{
-                      mouseover: (e) => {
-                        const layer = e.target;
-                        layer.bindTooltip(
-                          `<strong>${g.adm3_name}</strong><br>Score: ${g.score}`
-                        );
-                      },
-                    }}
-                  />
-                ))}
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {features.map((f: GeoFeature, idx) => (
+              <GeoJSON
+                key={idx}
+                data={f as any}
+                style={styleFeature}
+                onEachFeature={onEachFeature}
+              />
+            ))}
           </MapContainer>
+          {hoverInfo && (
+            <div className="absolute bottom-4 left-4 bg-white border rounded px-2 py-1 shadow text-sm">
+              <b>{hoverInfo.name}</b>: {hoverInfo.score.toFixed(2)}
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}
-        <div className="w-72">
-          <div className="bg-white border rounded p-3 mb-3">
-            <div className="space-y-2">
-              <button className="bg-blue-600 text-white text-sm rounded px-3 py-1 w-full hover:bg-blue-700">
-                Define Affected Area
-              </button>
-              <button className="bg-green-600 text-white text-sm rounded px-3 py-1 w-full hover:bg-green-700">
-                Configure Datasets
-              </button>
-              <button className="bg-orange-600 text-white text-sm rounded px-3 py-1 w-full hover:bg-orange-700">
-                Calibrate Scores
-              </button>
-              <button className="bg-gray-700 text-white text-sm rounded px-3 py-1 w-full hover:bg-gray-800">
-                Recompute Scores
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white border rounded p-3">
-            <h3 className="font-semibold mb-2">Score Layers</h3>
-            <ScoreLayerSelector
-              instanceId={instanceId}
-              onSelect={setSelectedDataset}
-            />
-          </div>
+        <div className="space-y-3">
+          <button
+            onClick={() => router.push(`/instances/${instanceId}/define-affected`)}
+            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
+          >
+            Define Affected Area
+          </button>
+          <button
+            onClick={() => router.push(`/instances/${instanceId}/datasets`)}
+            className="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700"
+          >
+            Configure Datasets
+          </button>
+          <button
+            onClick={() => router.push(`/instances/${instanceId}/calibrate`)}
+            className="w-full bg-orange-600 text-white py-2 rounded hover:bg-orange-700"
+          >
+            Calibrate Scores
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await supabase.rpc('recompute_scores', { instance_id: instanceId });
+                alert('Scores recomputed successfully.');
+              } catch (e) {
+                alert('Failed to recompute scores.');
+              }
+            }}
+            className="w-full bg-gray-800 text-white py-2 rounded hover:bg-gray-900"
+          >
+            Recompute Scores
+          </button>
         </div>
       </div>
     </div>
