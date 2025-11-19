@@ -1,24 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
+import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import ScoreLayerSelector from "@/components/ScoreLayerSelector";
+import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
+import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
-const MapContainer = dynamic(() => import("react-leaflet").then((m) => m.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then((m) => m.TileLayer), { ssr: false });
-const GeoJSON = dynamic(() => import("react-leaflet").then((m) => m.GeoJSON), { ssr: false });
+export default function InstancePage() {
+  const { id } = useParams();
+  const instanceId = id as string;
 
-export default function InstancePage({ params }: { params: { id: string } }) {
-  const instanceId = params.id;
   const [instance, setInstance] = useState<any>(null);
   const [features, setFeatures] = useState<any[]>([]);
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
 
-  // Load instance metadata
+  // ✅ Load instance metadata
   useEffect(() => {
     const loadInstance = async () => {
       const { data, error } = await supabase
@@ -26,88 +25,100 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .select("*")
         .eq("id", instanceId)
         .single();
-      if (!error && data) setInstance(data);
+      if (error) console.error("Error loading instance:", error);
+      setInstance(data);
     };
     loadInstance();
   }, [instanceId]);
 
-  // Load affected area geometries (matches schema exactly)
+  // ✅ Load affected areas using confirmed schema
   useEffect(() => {
-    const loadAffected = async () => {
-      setLoading(true);
+    const loadAffectedAreas = async () => {
       const { data, error } = await supabase
         .from("v_instance_affected_adm3")
-        .select("instance_id, admin_pcode, admin_level, geom")
+        .select(
+          "instance_id, dataset_id, admin_pcode, admin_name, geom, score"
+        )
         .eq("instance_id", instanceId);
 
       if (error) {
         console.error("Error loading affected areas:", error);
-        setLoading(false);
         return;
       }
 
       const feats = (data || [])
         .map((r: any) => {
           try {
-            const geom = typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom;
+            const geom =
+              typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom;
             return {
               type: "Feature",
               geometry: geom,
               properties: {
                 admin_pcode: r.admin_pcode,
-                admin_level: r.admin_level,
+                admin_name: r.admin_name,
+                dataset_id: r.dataset_id,
+                score: r.score,
               },
             };
-          } catch {
+          } catch (e) {
+            console.error("Invalid geom:", e);
             return null;
           }
         })
         .filter(Boolean);
 
       setFeatures(feats);
-      setLoading(false);
+
+      // ✅ Zoom to affected area
+      if (feats.length && mapRef.current) {
+        const bounds = L.geoJSON(feats).getBounds();
+        mapRef.current.fitBounds(bounds);
+      }
     };
-    loadAffected();
+
+    loadAffectedAreas();
   }, [instanceId]);
 
-  // Auto zoom
-  useEffect(() => {
-    if (mapRef.current && features.length > 0) {
-      const L = require("leaflet");
-      const layerGroup = L.featureGroup(features.map((f: any) => L.geoJSON(f)));
-      mapRef.current.fitBounds(layerGroup.getBounds());
-    }
-  }, [features]);
+  const getColor = (score: number) => {
+    if (score > 4) return "#d73027";
+    if (score > 3) return "#fc8d59";
+    if (score > 2) return "#fee08b";
+    if (score > 1) return "#d9ef8b";
+    return "#91cf60";
+  };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[70vh] text-gray-500 text-sm">
-        Loading map and data...
-      </div>
-    );
-  }
+  if (!instance) return <p className="p-6 text-gray-500">Loading...</p>;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-80px)]">
-      <div className="flex justify-between items-center p-2 border-b text-sm">
-        <h1 className="font-semibold text-gray-800">
-          {instance?.name || "Instance"} Overview
+    <div className="p-4 flex flex-col gap-4">
+      <div className="flex justify-between items-center">
+        <h1 className="text-lg font-semibold text-gray-800">
+          {instance.name}
         </h1>
-        <button
-          onClick={() => setShowConfigModal(true)}
-          className="px-2 py-1 text-xs border rounded bg-white hover:bg-gray-100"
-        >
-          Configure Datasets
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowConfigModal(true)}
+            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Configure Datasets
+          </button>
+          <button
+            onClick={() => location.reload()}
+            className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700"
+          >
+            Refresh Data
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 relative">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="col-span-2 rounded-lg overflow-hidden border border-gray-200">
           <MapContainer
-            center={[12.8797, 121.774]}
+            center={[12.8797, 121.774]} // Philippines center
             zoom={6}
-            style={{ height: "100%", width: "100%" }}
-            ref={mapRef}
+            style={{ height: "70vh", width: "100%" }}
+            whenReady={(e) => (mapRef.current = e.target)}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: any, idx: number) => (
@@ -117,27 +128,29 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 style={{
                   color: "black",
                   weight: 0.5,
-                  fillOpacity: 0.8,
-                  fillColor: "#FF7043",
+                  fillOpacity: 0.7,
+                  fillColor: getColor(f.properties.score || 0),
                 }}
               />
             ))}
           </MapContainer>
         </div>
 
-        <div className="w-64 border-l p-2 text-xs bg-white overflow-y-auto">
-          <h3 className="font-semibold mb-2 text-gray-700">Score Layers</h3>
+        <div className="p-3 bg-white rounded-lg border border-gray-200">
+          <h3 className="text-md font-semibold text-gray-700 mb-2">
+            Score Layers
+          </h3>
           <ScoreLayerSelector instanceId={instanceId} />
         </div>
       </div>
 
-      {showConfigModal && instance && (
+      {showConfigModal && (
         <InstanceDatasetConfigModal
           instance={instance}
           onClose={() => setShowConfigModal(false)}
           onSaved={async () => {
             setShowConfigModal(false);
-            return Promise.resolve();
+            window.location.reload();
           }}
         />
       )}
