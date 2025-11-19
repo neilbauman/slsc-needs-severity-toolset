@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
+import L from "leaflet"; // ✅ Added explicit import
 import "leaflet/dist/leaflet.css";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
