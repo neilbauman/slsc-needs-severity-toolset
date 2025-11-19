@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseClient";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
+import L from "leaflet";
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), {
   ssr: false,
@@ -15,7 +16,6 @@ const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLa
 const GeoJSON = dynamic(() => import("react-leaflet").then((mod) => mod.GeoJSON), {
   ssr: false,
 });
-import L from "leaflet";
 
 export default function InstancePage() {
   const params = useParams();
@@ -46,10 +46,10 @@ export default function InstancePage() {
         });
       }
     };
-    loadSummary();
+    if (instanceId) loadSummary();
   }, [instanceId]);
 
-  // ✅ Load map data (affected ADM3 areas or all)
+  // ✅ Load map data
   useEffect(() => {
     const loadMap = async () => {
       setLoading(true);
@@ -61,24 +61,26 @@ export default function InstancePage() {
       if (!error && data) setGeojson(data);
       setLoading(false);
     };
-    loadMap();
+    if (instanceId) loadMap();
   }, [instanceId]);
 
   // ✅ Auto-fit bounds when geojson loads
   useEffect(() => {
     if (mapRef.current && geojson.length > 0) {
       const bounds = L.geoJSON(geojson.map((g) => g.geojson)).getBounds();
-      mapRef.current.fitBounds(bounds, { padding: [20, 20] });
+      if (bounds.isValid()) {
+        mapRef.current.fitBounds(bounds, { padding: [20, 20] });
+      }
     }
   }, [geojson]);
 
-  // ✅ Color scale for 1–5 score
+  // ✅ Color scale 1 → 5
   const getColor = (score: number) => {
-    if (score <= 1) return "#00b050"; // green
+    if (score <= 1) return "#00b050";
     if (score <= 2) return "#92d050";
     if (score <= 3) return "#ffff00";
     if (score <= 4) return "#ff9900";
-    return "#ff0000"; // red
+    return "#ff0000";
   };
 
   return (
@@ -109,14 +111,14 @@ export default function InstancePage() {
       </div>
 
       <div className="flex gap-4">
-        {/* Left map */}
+        {/* Map container */}
         <div className="flex-1 border rounded overflow-hidden">
           <MapContainer
             center={[10.3, 123.9]}
             zoom={7}
             style={{ height: "70vh", width: "100%" }}
-            whenReady={(mapEvent) => {
-              mapRef.current = mapEvent.target;
+            ref={(mapInstance) => {
+              if (mapInstance && !mapRef.current) mapRef.current = mapInstance;
             }}
           >
             <TileLayer
@@ -150,7 +152,7 @@ export default function InstancePage() {
           </MapContainer>
         </div>
 
-        {/* Right panel */}
+        {/* Sidebar */}
         <div className="w-72">
           <div className="bg-white border rounded p-3 mb-3">
             <div className="space-y-2">
