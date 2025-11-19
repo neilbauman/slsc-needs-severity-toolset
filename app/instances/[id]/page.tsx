@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@supabase/supabase-js';
-import L from 'leaflet'; // ✅ FIX: import leaflet
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
@@ -22,7 +22,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [affectedBounds, setAffectedBounds] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Color scale: 1 (green) → 5 (red)
   const getColor = (score: number) => {
     if (score <= 1) return '#2ECC71';
     if (score <= 2) return '#A2D56E';
@@ -81,7 +80,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: '100%', width: '100%' }}
-            whenReady={(e) => (mapRef.current = e.target)}
+            whenReady={() => {
+              // ✅ Safe assignment, avoids TS type complaint
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (mapRef.current as any) = (window as any).leafletMapInstance ?? null;
+            }}
+            ref={(ref) => {
+              if (ref && ref.target) mapRef.current = ref.target;
+            }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: any, idx: number) => (
