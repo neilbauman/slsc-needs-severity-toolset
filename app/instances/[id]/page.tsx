@@ -26,7 +26,6 @@ const CATEGORY_ORDER = [
 export default function InstancePage({ params }: { params: { id: string } }) {
   const instanceId = params.id;
   const mapRef = useRef<Map | null>(null);
-
   const [features, setFeatures] = useState<any[]>([]);
   const [affectedBounds, setAffectedBounds] = useState<any>(null);
   const [datasetsByCategory, setDatasetsByCategory] = useState<Record<string, any[]>>({});
@@ -45,21 +44,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     const fetchGeoData = async () => {
       setLoading(true);
 
-      // GeoJSON scores
       const { data: geoData, error: geoError } = await supabase
         .from('v_instance_admin_scores_geojson')
         .select('geojson')
         .eq('instance_id', instanceId);
 
-      if (geoError) {
-        console.error('GeoJSON fetch error:', geoError);
-      } else if (geoData) {
+      if (geoError) console.error('GeoJSON fetch error:', geoError);
+      else if (geoData) {
         const parsed = geoData
           .map((d: any) => {
             try {
               return typeof d.geojson === 'string' ? JSON.parse(d.geojson) : d.geojson;
-            } catch (err) {
-              console.warn('Invalid GeoJSON skipped:', d, err);
+            } catch {
               return null;
             }
           })
@@ -67,7 +63,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         setFeatures(parsed);
       }
 
-      // Affected bounds
       const { data: areaData, error: areaError } = await supabase
         .from('v_instance_affected_areas')
         .select('geom')
@@ -79,8 +74,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           const geom =
             typeof areaData.geom === 'string' ? JSON.parse(areaData.geom) : areaData.geom;
           setAffectedBounds(geom);
-        } catch (err) {
-          console.warn('Invalid area geometry skipped:', areaData, err);
+        } catch {
+          console.warn('Invalid area geometry skipped');
         }
       }
 
@@ -98,7 +93,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   }, [affectedBounds]);
 
-  // Load datasets and group by category
+  // Load datasets grouped by category
   useEffect(() => {
     const fetchDatasets = async () => {
       const { data, error } = await supabase
@@ -106,10 +101,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .select(`
           id,
           dataset_id,
-          category,
-          datasets (
-            id,
-            name
+          datasets ( name ),
+          instance_dataset_config (
+            category_id,
+            instance_category_config ( category_name )
           )
         `)
         .eq('instance_id', instanceId);
@@ -123,10 +118,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       CATEGORY_ORDER.forEach(c => (grouped[c] = []));
 
       data?.forEach((row: any) => {
-        const category = row.category || 'Uncategorized';
+        const category = row.instance_dataset_config?.instance_category_config?.category_name;
         const datasetName = row.datasets?.name || 'Unnamed Dataset';
-        if (!grouped[category]) grouped[category] = [];
-        grouped[category].push(datasetName);
+        if (category && grouped[category]) grouped[category].push(datasetName);
       });
 
       setDatasetsByCategory(grouped);
