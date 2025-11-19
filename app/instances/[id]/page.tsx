@@ -21,7 +21,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
 
-  // Load instance details
+  // Load instance
   useEffect(() => {
     const loadInstance = async () => {
       const { data } = await supabase.from("instances").select("*").eq("id", instanceId).single();
@@ -30,29 +30,41 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     loadInstance();
   }, [instanceId]);
 
-  // Load affected area polygons
+  // ✅ Load affected areas (convert geometry to GeoJSON)
   useEffect(() => {
     const loadAffected = async () => {
       setLoading(true);
       const { data, error } = await supabase
-        .from("v_instance_affected_areas")
-        .select("geojson")
-        .eq("instance_id", instanceId);
-      if (error) {
-        console.error("Error loading affected areas:", error);
-        setLoading(false);
-        return;
-      }
-      if (data) {
-        const feats = data.map((r: any) => JSON.parse(r.geojson));
-        setFeatures(feats);
+        .rpc("st_asgeojson_for_instance", { instance_uuid: instanceId }); // custom RPC fallback if exists
+      if (!data) {
+        const { data: geomData, error: geomErr } = await supabase
+          .from("v_instance_affected_areas")
+          .select("admin_pcode, name, admin_level, ST_AsGeoJSON(geom)::json as geojson")
+          .eq("instance_id", instanceId);
+        if (geomErr) {
+          console.error("Error loading affected areas:", geomErr);
+          setLoading(false);
+          return;
+        }
+        if (geomData) {
+          const feats = geomData.map((r: any) => ({
+            type: "Feature",
+            geometry: r.geojson,
+            properties: {
+              admin_pcode: r.admin_pcode,
+              name: r.name,
+              admin_level: r.admin_level,
+            },
+          }));
+          setFeatures(feats);
+        }
       }
       setLoading(false);
     };
     loadAffected();
   }, [instanceId]);
 
-  // Auto zoom to affected area
+  // ✅ Auto zoom
   useEffect(() => {
     if (mapRef.current && features.length > 0) {
       const L = require("leaflet");
@@ -112,14 +124,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <GeoJSON
                 key={idx}
                 data={f}
-                style={(feature: any) => ({
+                style={{
                   color: "black",
                   weight: 0.5,
                   fillOpacity: 0.8,
-                  fillColor: feature?.properties?.score
-                    ? getColor(feature.properties.score)
-                    : "#cccccc",
-                })}
+                  fillColor: "#FF7043",
+                }}
               />
             ))}
           </MapContainer>
@@ -135,7 +145,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      {/* Dataset Config Modal */}
+      {/* Config Modal */}
       {showConfigModal && instance && (
         <InstanceDatasetConfigModal
           instance={instance}
@@ -153,13 +163,4 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       )}
     </div>
   );
-}
-
-// Green → Red color scale
-function getColor(score: number) {
-  if (score <= 1) return "#2ECC71";
-  if (score <= 2) return "#A3E048";
-  if (score <= 3) return "#FFD93B";
-  if (score <= 4) return "#FF9F43";
-  return "#E74C3C";
 }
