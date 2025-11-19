@@ -1,181 +1,171 @@
-'use client';
+"use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabaseClient";
+import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 
+// ✅ Dynamic Leaflet imports to avoid SSR issues
+const MapContainer = dynamic(() => import("react-leaflet").then(m => m.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import("react-leaflet").then(m => m.TileLayer), { ssr: false });
+const GeoJSON = dynamic(() => import("react-leaflet").then(m => m.GeoJSON), { ssr: false });
+
 export default function InstancePage({ params }: { params: { id: string } }) {
+  const instanceId = params.id;
   const [instance, setInstance] = useState<any>(null);
-  const [datasets, setDatasets] = useState<any[]>([]);
   const [features, setFeatures] = useState<any[]>([]);
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [selectedDataset, setSelectedDataset] = useState<any | null>(null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [showConfig, setShowConfig] = useState(false);
-  const mapRef = useRef<L.Map | null>(null);
+  const mapRef = useRef<any>(null);
 
-  const categories = [
-    "SSC Framework P1",
-    "SSC Framework P2",
-    "SSC Framework P3",
-    "Hazards",
-    "Underlying Vulnerability",
-  ];
-
+  // ✅ Load instance basic info
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Load instance record
-        const { data: inst, error: instErr } = await supabase
-          .from("instances")
-          .select("*")
-          .eq("id", params.id)
-          .single();
-        if (instErr) throw instErr;
-        setInstance(inst);
-
-        // Load datasets for instance
-        const { data: ds, error: dsErr } = await supabase
-          .from("v_instance_datasets_view")
-          .select("*")
-          .eq("instance_id", params.id);
-        if (dsErr) throw dsErr;
-        setDatasets(ds || []);
-
-        // Load geojson
-        const { data: gj, error: gjErr } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("geojson")
-          .eq("instance_id", params.id);
-        if (gjErr) throw gjErr;
-
-        const parsed = (gj || [])
-          .map((g) => {
-            try {
-              if (!g.geojson) return null;
-              if (typeof g.geojson === "string") return JSON.parse(g.geojson);
-              if (typeof g.geojson === "object") return g.geojson;
-              return null;
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean);
-
-        setFeatures(parsed);
-
-        // Fit map to bounds after features load
-        setTimeout(() => {
-          if (mapRef.current && parsed.length > 0) {
-            const bounds = L.geoJSON(parsed).getBounds();
-            if (bounds.isValid()) mapRef.current.fitBounds(bounds, { padding: [20, 20] });
-          }
-        }, 300);
-      } catch (err) {
-        console.error("Error loading instance:", err);
-      } finally {
-        setLoading(false);
-      }
+    const loadInstance = async () => {
+      const { data, error } = await supabase
+        .from("instances")
+        .select("*")
+        .eq("id", instanceId)
+        .single();
+      if (!error && data) setInstance(data);
     };
-    fetchData();
-  }, [params.id]);
+    loadInstance();
+  }, [instanceId]);
 
-  const getColor = (score: number) => {
-    if (score <= 1) return "#00FF00";
-    if (score <= 2) return "#CCFF00";
-    if (score <= 3) return "#FFCC00";
-    if (score <= 4) return "#FF6600";
-    return "#FF0000";
-  };
+  // ✅ Load affected area geometries
+  useEffect(() => {
+    const loadAffected = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("v_instance_affected_areas")
+        .select("geojson")
+        .eq("instance_id", instanceId);
+      if (error) {
+        console.error("Error loading affected areas:", error);
+        setLoading(false);
+        return;
+      }
+      if (data) {
+        const feats = data.map((r: any) => JSON.parse(r.geojson));
+        setFeatures(feats);
+      }
+      setLoading(false);
+    };
+    loadAffected();
+  }, [instanceId]);
 
-  const onEachFeature = (feature: any, layer: any) => {
-    if (feature.properties?.score !== undefined) {
-      const score = Math.round(feature.properties.score);
-      const color = getColor(score);
-      layer.setStyle({
-        color,
-        fillColor: color,
-        fillOpacity: 0.6,
-        weight: 1,
-      });
-      layer.bindPopup(
-        `${feature.properties.admin_name}: ${feature.properties.score.toFixed(2)}`
-      );
+  // ✅ Auto zoom to affected area
+  useEffect(() => {
+    if (mapRef.current && features.length > 0) {
+      const L = require("leaflet");
+      const group = L.featureGroup(features.map((f: any) => L.geoJSON(f)));
+      mapRef.current.fitBounds(group.getBounds());
     }
-  };
+  }, [features]);
 
-  const handleConfigSaved = async () => {
-    setShowConfig(false);
-    const { data: ds } = await supabase
-      .from("v_instance_datasets_view")
-      .select("*")
-      .eq("instance_id", params.id);
-    setDatasets(ds || []);
-  };
+  // ✅ Load dataset list (for ScoreLayerSelector)
+  useEffect(() => {
+    const loadDatasets = async () => {
+      const { data, error } = await supabase
+        .from("v_dataset_scores")
+        .select("dataset_id, dataset_name, category")
+        .eq("instance_id", instanceId)
+        .order("category, dataset_name");
+      if (!error && data) setDatasets(data);
+    };
+    loadDatasets();
+  }, [instanceId]);
 
-  if (loading) return <div className="p-4 text-sm">Loading instance data…</div>;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[70vh] text-gray-500 text-sm">
+        Loading map and data...
+      </div>
+    );
+  }
 
   return (
-    <div className="flex p-2 space-x-2 text-sm">
-      <div className="flex-1 border rounded-lg overflow-hidden">
-        <MapContainer
-          center={[12.8797, 121.774]}
-          zoom={6}
-          style={{ height: "80vh", width: "100%" }}
-          ref={mapRef}
-        >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {features.map((f, i) => (
-            <GeoJSON key={i} data={f} onEachFeature={onEachFeature} />
-          ))}
-        </MapContainer>
-      </div>
-
-      <div className="w-72 space-y-2">
-        <div className="space-y-1">
+    <div className="flex flex-col h-[calc(100vh-80px)]">
+      {/* Header */}
+      <div className="flex justify-between items-center p-2 border-b text-sm">
+        <h1 className="font-semibold text-gray-800">
+          {instance?.name || "Instance"} Overview
+        </h1>
+        <div className="space-x-2">
           <button
-            onClick={() => setShowConfig(true)}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1 rounded text-sm"
+            onClick={() => setShowConfigModal(true)}
+            className="px-2 py-1 text-xs border rounded bg-white hover:bg-gray-100"
           >
             Configure Datasets
           </button>
-          <button
-            onClick={() => window.location.reload()}
-            className="w-full bg-green-600 hover:bg-green-700 text-white py-1 rounded text-sm"
-          >
-            Refresh Data
-          </button>
-        </div>
-
-        <div className="mt-2 border-t pt-2">
-          <h3 className="font-semibold mb-1">Score Layers</h3>
-          {categories.map((cat) => (
-            <div key={cat} className="mb-2">
-              <div className="font-medium">{cat}</div>
-              {datasets.filter((d) => d.score_config?.category === cat).length > 0 ? (
-                datasets
-                  .filter((d) => d.score_config?.category === cat)
-                  .map((d) => (
-                    <div key={d.id} className="text-gray-700 ml-2">
-                      {d.name}
-                    </div>
-                  ))
-              ) : (
-                <div className="text-gray-400 italic text-xs ml-2">No datasets</div>
-              )}
-            </div>
-          ))}
         </div>
       </div>
 
-      {showConfig && (
+      {/* Main content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Map */}
+        <div className="flex-1 relative">
+          <MapContainer
+            center={[12.8797, 121.7740]}
+            zoom={6}
+            style={{ height: "100%", width: "100%" }}
+            whenCreated={(mapInstance) => (mapRef.current = mapInstance)}
+          >
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {features.map((f: any, idx: number) => (
+              <GeoJSON
+                key={idx}
+                data={f}
+                style={(feature: any) => ({
+                  color: "black",
+                  weight: 0.5,
+                  fillOpacity: 0.8,
+                  fillColor: feature?.properties?.score
+                    ? getColor(feature.properties.score)
+                    : "#cccccc",
+                })}
+              />
+            ))}
+          </MapContainer>
+        </div>
+
+        {/* Sidebar */}
+        <div className="w-64 border-l p-2 text-xs bg-white overflow-y-auto">
+          <h3 className="font-semibold mb-2 text-gray-700">Score Layers</h3>
+          <ScoreLayerSelector
+            instanceId={instanceId}
+            onSelect={(dataset) => setSelectedDataset(dataset)}
+          />
+        </div>
+      </div>
+
+      {/* Dataset Config Modal */}
+      {showConfigModal && instance && (
         <InstanceDatasetConfigModal
           instance={instance}
-          onClose={() => setShowConfig(false)}
-          onSaved={handleConfigSaved}
+          onClose={() => setShowConfigModal(false)}
+          onSaved={async () => {
+            setShowConfigModal(false);
+            const { data, error } = await supabase
+              .from("v_dataset_scores")
+              .select("dataset_id, dataset_name, category")
+              .eq("instance_id", instanceId)
+              .order("category, dataset_name");
+            if (!error && data) setDatasets(data);
+          }}
         />
       )}
     </div>
   );
+}
+
+// ✅ Helper: consistent green→red scale (1–5)
+function getColor(score: number) {
+  if (score <= 1) return "#2ECC71"; // Green
+  if (score <= 2) return "#A3E048";
+  if (score <= 3) return "#FFD93B";
+  if (score <= 4) return "#FF9F43";
+  return "#E74C3C"; // Red
 }
