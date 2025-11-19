@@ -32,11 +32,12 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
     if (onSelect) onSelect(dataset);
   };
 
-  const grouped = datasets.reduce((acc, d) => {
+  // ✅ Properly typed grouping
+  const grouped: Record<string, any[]> = datasets.reduce((acc: Record<string, any[]>, d: any) => {
     if (!acc[d.category]) acc[d.category] = [];
     acc[d.category].push(d);
     return acc;
-  }, {} as Record<string, any[]>);
+  }, {});
 
   if (loading) return <p className="text-sm text-gray-500">Loading layers...</p>;
 
@@ -46,7 +47,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
         <div key={cat} className="mb-3">
           <h4 className="font-semibold text-gray-700 mb-1">{cat}</h4>
           <div className="space-y-1">
-            {list.map((d) => (
+            {(list as any[]).map((d) => (
               <button
                 key={d.dataset_id}
                 onClick={() => handleSelect(d)}
