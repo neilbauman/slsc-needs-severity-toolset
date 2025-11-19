@@ -22,7 +22,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [affectedBounds, setAffectedBounds] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Green → Red gradient (1–5)
   const getColor = (score: number) => {
     if (score <= 1) return '#2ECC71';
     if (score <= 2) return '#A2D56E';
@@ -40,8 +39,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         .select('geojson')
         .eq('instance_id', instanceId);
 
-      if (geoError) console.error('GeoJSON fetch error:', geoError);
-      else if (geoData) {
+      if (geoError) {
+        console.error('GeoJSON fetch error:', geoError);
+      } else if (geoData) {
         const parsed = geoData.map((d: any) => JSON.parse(d.geojson));
         setFeatures(parsed);
       }
@@ -75,15 +75,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   return (
     <div className="flex flex-col h-screen p-2 space-y-2 bg-gray-50">
       <div className="flex flex-row space-x-2 h-[85vh]">
-        {/* Map */}
+        {/* Map Section */}
         <div className="flex-1 relative rounded-md overflow-hidden border border-gray-200">
           <MapContainer
             center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: '100%', width: '100%' }}
-            whenReady={(event) => {
+            whenReady={((event: any) => {
               mapRef.current = event.target;
-            }}
+            }) as any}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
             {features.map((f: any, idx: number) => (
@@ -97,7 +97,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   fillOpacity: 0.7,
                 })}
                 onEachFeature={(feature, layer) => {
-                  const s = feature.properties?.score?.toFixed(2) ?? '-';
+                  const s = feature.properties?.score?.toFixed(0) ?? '-';
                   const n = feature.properties?.admin_name ?? 'Unknown';
                   layer.bindTooltip(`${n}: Score ${s}`);
                 }}
@@ -108,9 +108,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
         {/* Sidebar */}
         <div className="w-64 flex flex-col space-y-2 p-2 border-l border-gray-200 bg-white rounded-md">
-          <h3 className="text-sm font-semibold text-gray-700 mb-1">Layers</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">Score Layers</h3>
 
-          <div className="text-xs text-gray-600 space-y-1">
+          <div className="text-xs text-gray-600 space-y-1 overflow-y-auto">
             {['SSC Framework P1', 'SSC Framework P2', 'SSC Framework P3', 'Hazards', 'Underlying Vulnerability'].map((cat) => (
               <div key={cat} className="border-b border-gray-100 pb-1">
                 <p className="font-medium text-gray-700">{cat}</p>
