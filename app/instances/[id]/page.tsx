@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON } from "react-leaflet";
-import L from "leaflet"; // ✅ Added explicit import
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
@@ -32,7 +32,7 @@ export default function InstancePage() {
     loadInstance();
   }, [instanceId]);
 
-  // ✅ Load affected areas using confirmed schema
+  // ✅ Load affected areas (confirmed schema)
   useEffect(() => {
     const loadAffectedAreas = async () => {
       const { data, error } = await supabase
@@ -71,9 +71,13 @@ export default function InstancePage() {
 
       setFeatures(feats);
 
-      // ✅ Zoom to affected area
+      // ✅ Zoom to affected area (TypeScript-safe)
       if (feats.length && mapRef.current) {
-        const bounds = L.geoJSON(feats).getBounds();
+        const featureCollection = {
+          type: "FeatureCollection" as const,
+          features: feats,
+        };
+        const bounds = L.geoJSON(featureCollection as any).getBounds();
         mapRef.current.fitBounds(bounds);
       }
     };
@@ -116,7 +120,7 @@ export default function InstancePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="col-span-2 rounded-lg overflow-hidden border border-gray-200">
           <MapContainer
-            center={[12.8797, 121.774]} // Philippines center
+            center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: "70vh", width: "100%" }}
             whenReady={(e) => (mapRef.current = e.target)}
