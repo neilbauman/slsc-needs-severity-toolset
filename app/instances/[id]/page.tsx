@@ -72,19 +72,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       <div className="grid grid-cols-4 gap-3 p-4 bg-white shadow z-10">
         <div className="text-center">
           <div className="text-xs text-gray-500">Total Population</div>
-          <div className="text-lg font-semibold">{summary?.total_population?.toLocaleString() || "-"}</div>
+          <div className="text-lg font-semibold">
+            {summary?.total_population?.toLocaleString() || "-"}
+          </div>
         </div>
         <div className="text-center">
           <div className="text-xs text-gray-500">People Concerned</div>
-          <div className="text-lg font-semibold">{summary?.people_concern?.toLocaleString() || "-"}</div>
+          <div className="text-lg font-semibold">
+            {summary?.people_concern?.toLocaleString() || "-"}
+          </div>
         </div>
         <div className="text-center">
           <div className="text-xs text-gray-500">People in Need</div>
-          <div className="text-lg font-semibold text-red-600">{summary?.people_need?.toLocaleString() || "-"}</div>
+          <div className="text-lg font-semibold text-red-600">
+            {summary?.people_need?.toLocaleString() || "-"}
+          </div>
         </div>
         <div className="text-center">
           <div className="text-xs text-gray-500">Average Score</div>
-          <div className="text-lg font-semibold text-blue-600">{summary?.avg_score?.toFixed(2) || "-"}</div>
+          <div className="text-lg font-semibold text-blue-600">
+            {summary?.avg_score?.toFixed(2) || "-"}
+          </div>
         </div>
       </div>
 
@@ -96,12 +104,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             center={[12.8797, 121.774]}
             zoom={6}
             style={{ height: "100%", width: "100%" }}
-            whenReady={(mapEvent) => (mapRef.current = mapEvent.target)}
+            whenReady={() => {
+              if (!mapRef.current && typeof window !== "undefined") {
+                mapRef.current = (window as any).L?.map || null;
+              }
+            }}
           >
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-            {!loading && geojson.map((g, i) => (
-              <GeoJSON key={i} data={g.geojson} onEachFeature={onEachFeature} />
-            ))}
+            {!loading &&
+              geojson.map((g, i) => (
+                <GeoJSON key={i} data={g.geojson} onEachFeature={onEachFeature} />
+              ))}
           </MapContainer>
 
           {/* Legend */}
@@ -109,7 +122,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <div className="font-semibold mb-1">Score Legend</div>
             {[5, 4, 3, 2, 1].map((v) => (
               <div key={v} className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded" style={{ backgroundColor: getColor(v) }}></div>
+                <div
+                  className="w-4 h-4 rounded"
+                  style={{ backgroundColor: getColor(v) }}
+                ></div>
                 <span>{v}</span>
               </div>
             ))}
@@ -117,17 +133,40 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
           {/* Buttons */}
           <div className="absolute top-4 right-4 flex flex-col gap-2 z-20">
-            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={() => alert("Define Affected Area")}>Define Affected Area</button>
-            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={() => alert("Configure Datasets")}>Configure Datasets</button>
-            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={() => setShowModal(true)}>Calibrate Scores</button>
-            <button className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100" onClick={loadGeojson}>Recompute Scores</button>
+            <button
+              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
+              onClick={() => alert("Define Affected Area")}
+            >
+              Define Affected Area
+            </button>
+            <button
+              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
+              onClick={() => alert("Configure Datasets")}
+            >
+              Configure Datasets
+            </button>
+            <button
+              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
+              onClick={() => setShowModal(true)}
+            >
+              Calibrate Scores
+            </button>
+            <button
+              className="px-3 py-1 bg-white border rounded shadow hover:bg-gray-100"
+              onClick={loadGeojson}
+            >
+              Recompute Scores
+            </button>
           </div>
         </div>
 
         {/* Right Sidebar */}
         <div className="w-80 bg-gray-50 border-l overflow-y-auto p-4">
           <h3 className="font-semibold text-gray-800 mb-2">Score Layers</h3>
-          <ScoreLayerSelector instanceId={params.id} onSelect={setSelectedDataset} />
+          <ScoreLayerSelector
+            instanceId={params.id}
+            onSelect={setSelectedDataset}
+          />
         </div>
       </div>
 
