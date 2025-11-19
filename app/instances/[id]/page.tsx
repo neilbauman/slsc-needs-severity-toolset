@@ -18,22 +18,25 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const mapRef = useRef<any>(null);
 
-  // Load instance
+  // ✅ Load instance metadata
   useEffect(() => {
     const loadInstance = async () => {
-      const { data } = await supabase.from("instances").select("*").eq("id", instanceId).single();
-      if (data) setInstance(data);
+      const { data, error } = await supabase
+        .from("instances")
+        .select("*")
+        .eq("id", instanceId)
+        .single();
+      if (!error && data) setInstance(data);
     };
     loadInstance();
   }, [instanceId]);
 
-  // ✅ Load affected areas properly
+  // ✅ Load affected area geometries from correct view
   useEffect(() => {
     const loadAffected = async () => {
       setLoading(true);
-
       const { data, error } = await supabase
-        .from("v_instance_affected_adm3") // ✅ corrected to match your hint
+        .from("v_instance_affected_adm3") // use the actual view name
         .select("admin_pcode, name, admin_level, geom")
         .eq("instance_id", instanceId);
 
@@ -43,39 +46,37 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         return;
       }
 
-      if (data) {
-        const feats = data
-          .map((r: any) => {
-            try {
-              const g = typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom;
-              return {
-                type: "Feature",
-                geometry: g,
-                properties: {
-                  admin_pcode: r.admin_pcode,
-                  name: r.name,
-                  admin_level: r.admin_level,
-                },
-              };
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean);
-        setFeatures(feats);
-      }
+      const feats = (data || [])
+        .map((r: any) => {
+          try {
+            const geom = typeof r.geom === "string" ? JSON.parse(r.geom) : r.geom;
+            return {
+              type: "Feature",
+              geometry: geom,
+              properties: {
+                admin_pcode: r.admin_pcode,
+                name: r.name,
+                admin_level: r.admin_level,
+              },
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
 
+      setFeatures(feats);
       setLoading(false);
     };
     loadAffected();
   }, [instanceId]);
 
-  // ✅ Auto zoom to affected polygons
+  // ✅ Auto zoom once features load
   useEffect(() => {
     if (mapRef.current && features.length > 0) {
       const L = require("leaflet");
-      const group = L.featureGroup(features.map((f: any) => L.geoJSON(f)));
-      mapRef.current.fitBounds(group.getBounds());
+      const layerGroup = L.featureGroup(features.map((f: any) => L.geoJSON(f)));
+      mapRef.current.fitBounds(layerGroup.getBounds());
     }
   }, [features]);
 
@@ -102,7 +103,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </button>
       </div>
 
-      {/* Main layout */}
+      {/* Layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Map */}
         <div className="flex-1 relative">
@@ -140,7 +141,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <InstanceDatasetConfigModal
           instance={instance}
           onClose={() => setShowConfigModal(false)}
-          onSaved={() => setShowConfigModal(false)}
+          onSaved={async () => {
+            setShowConfigModal(false);
+            return Promise.resolve();
+          }}
         />
       )}
     </div>
