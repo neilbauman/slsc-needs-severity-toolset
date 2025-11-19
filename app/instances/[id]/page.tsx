@@ -6,90 +6,81 @@ import { createClient } from "@/lib/supabaseClient";
 import { MapContainer, TileLayer, GeoJSON, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-interface AreaRow {
-  admin_pcode: string;
-  name: string;
-  score: number | null;
-  geom_json: any;
+interface SummaryRow {
+  adm3_pcode: string;
+  adm3_name: string;
+  pop: number;
+  score: number;
+  pov_rate: number;
+  pop_concern: number;
+  pop_need: number;
+  geom: any;
 }
 
 export default function InstancePage() {
-  const supabase = createClient();
   const { id } = useParams();
-  const [adm3, setAdm3] = useState<AreaRow[]>([]);
+  const supabase = createClient();
+
+  const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [stats, setStats] = useState({
-    affected: 0,
-    avg: "-",
-    min: "-",
-    max: "-",
-  });
-  const [summary, setSummary] = useState({
-    totalPopulation: "-",
+    totalPop: "-",
     peopleConcern: "-",
     peopleNeed: "-",
   });
+  const [loading, setLoading] = useState(true);
 
-  const [showDefine, setShowDefine] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
-  const [showCalibrate, setShowCalibrate] = useState(false);
+  // 🔹 Modals visibility
+  const [showDefineArea, setShowDefineArea] = useState(false);
+  const [showDatasetConfig, setShowDatasetConfig] = useState(false);
+  const [showScoringConfig, setShowScoringConfig] = useState(false);
 
-  // ---------------------------------------------
-  // Load ADM3 GeoJSON & Scores (affected only)
-  // ---------------------------------------------
+  // ======================================================
+  // Fetch affected summary with geometry
+  // ======================================================
   useEffect(() => {
     if (!id) return;
+
     (async () => {
-      const { data, error } = await supabase
-        .from("v_instance_affected_adm3")
-        .select("admin_pcode,name,score,geom_json")
-        .eq("instance_id", id);
+      setLoading(true);
+
+      // Join v_instance_affected_summary with admin_boundaries_geojson for map geometry
+      const { data, error } = await supabase.rpc("get_instance_summary_map", {
+        in_instance_id: id,
+      });
 
       if (error) {
-        console.error("Error loading adm3:", error);
+        console.error("Error loading summary map data:", error);
+        setLoading(false);
         return;
       }
 
-      if (!data || data.length === 0) return;
+      if (!data || data.length === 0) {
+        console.warn("No affected data found for this instance");
+        setSummary([]);
+        setLoading(false);
+        return;
+      }
 
-      setAdm3(data);
+      setSummary(data);
 
-      const scores = data.map((d) => Number(d.score)).filter((s) => !isNaN(s));
-      const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
-      const min = Math.min(...scores).toFixed(2);
-      const max = Math.max(...scores).toFixed(2);
+      // Compute stats
+      const totalPop = data.reduce((a, b) => a + Number(b.pop || 0), 0);
+      const peopleConcern = data.reduce((a, b) => a + Number(b.pop_concern || 0), 0);
+      const peopleNeed = data.reduce((a, b) => a + Number(b.pop_need || 0), 0);
 
       setStats({
-        affected: data.length,
-        avg,
-        min,
-        max,
+        totalPop: totalPop.toLocaleString(),
+        peopleConcern: peopleConcern.toLocaleString(),
+        peopleNeed: Math.round(peopleNeed).toLocaleString(),
       });
+
+      setLoading(false);
     })();
   }, [id]);
 
-  // ---------------------------------------------
-  // Load population & need summary
-  // (once we add v_instance_affected_summary)
-  // ---------------------------------------------
-  useEffect(() => {
-    if (!id) return;
-    (async () => {
-      const { data } = await supabase.rpc("get_instance_summary", {
-        in_instance_id: id,
-      });
-      if (data && data.length > 0) {
-        setSummary({
-          totalPopulation: data[0].total_population ?? "-",
-          peopleConcern: data[0].people_concern ?? "-",
-          peopleNeed: data[0].people_need ?? "-",
-        });
-      }
-    })();
-  }, [id]);
-
-  // ---------------------------------------------
-  // Map Color Scale
-  // ---------------------------------------------
+  // ======================================================
+  // Color scale for vulnerability scores
+  // ======================================================
   const getColor = (score: number) => {
     if (!score) return "#d3d3d3";
     if (score >= 4.5) return "#800026";
@@ -99,125 +90,156 @@ export default function InstancePage() {
     return "#FFEDA0";
   };
 
-  // ---------------------------------------------
-  // UI
-  // ---------------------------------------------
+  // ======================================================
+  // Map rendering
+  // ======================================================
   return (
     <div className="p-6 space-y-4">
+      {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-xl font-semibold">Cebu EQ–Typhoon</h1>
+        <div>
+          <h1 className="text-xl font-semibold">Cebu EQ–Typhoon</h1>
+          <p className="text-gray-600 text-sm">
+            Overview of scoring and affected administrative areas.
+          </p>
+        </div>
         <div className="flex gap-2">
           <button
-            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-            onClick={() => setShowDefine(true)}
+            onClick={() => setShowDefineArea(true)}
+            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
           >
             Define Affected Area
           </button>
           <button
-            className="px-3 py-1.5 text-sm bg-gray-700 text-white rounded hover:bg-gray-800"
-            onClick={() => setShowConfig(true)}
+            onClick={() => setShowDatasetConfig(true)}
+            className="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700"
           >
             Configure Datasets
           </button>
           <button
-            className="px-3 py-1.5 text-sm bg-amber-600 text-white rounded hover:bg-amber-700"
-            onClick={() => setShowCalibrate(true)}
+            onClick={() => setShowScoringConfig(true)}
+            className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700"
           >
             Calibrate Scores
           </button>
           <button
-            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-            onClick={async () => {
-              await supabase.rpc("score_framework_aggregate", {
-                in_instance_id: id,
-              });
-              location.reload();
-            }}
+            onClick={() => alert('Recomputing all scores...')}
+            className="px-3 py-1 bg-gray-800 text-white text-sm rounded hover:bg-gray-900"
           >
-            Recompute All Scores
+            Recompute Scores
           </button>
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Stats Summary */}
       <div className="grid grid-cols-3 gap-3">
-        <SummaryCard title="Total Population" value={summary.totalPopulation} />
-        <SummaryCard
-          title="People of Concern (≥3)"
-          value={summary.peopleConcern}
-        />
-        <SummaryCard title="People in Need" value={summary.peopleNeed} />
+        <StatCard title="Total Population" value={stats.totalPop} />
+        <StatCard title="People of Concern (Score ≥ 3)" value={stats.peopleConcern} />
+        <StatCard title="People in Need" value={stats.peopleNeed} />
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        {/* Map */}
-        <div className="col-span-3 bg-white shadow rounded overflow-hidden">
-          <div className="p-3 grid grid-cols-3 text-center text-sm font-medium border-b bg-gray-50">
-            <div>Affected ADM3 Areas<br /><span className="text-lg font-bold">{stats.affected}</span></div>
-            <div>Average Score<br /><span className="text-lg font-bold">{stats.avg}</span></div>
-            <div>Highest / Lowest<br /><span className="text-lg font-bold">{stats.max} / {stats.min}</span></div>
+      {/* Map + Layer Panel */}
+      <div className="flex flex-row gap-4 mt-6">
+        <div className="flex-1 border rounded-lg overflow-hidden">
+          {loading ? (
+            <div className="p-6 text-gray-500 text-sm">Loading map data...</div>
+          ) : (
+            <MapContainer
+              style={{ height: "650px", width: "100%" }}
+              center={[10.3, 123.9]}
+              zoom={8}
+              zoomControl={false}
+              dragging={false}
+              scrollWheelZoom={false}
+              doubleClickZoom={false}
+              boxZoom={false}
+            >
+              <TileLayer
+                attribution='&copy; OpenStreetMap contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {summary.map((area, i) => (
+                <GeoJSON
+                  key={i}
+                  data={{
+                    type: "Feature",
+                    geometry: area.geom,
+                    properties: { name: area.adm3_name },
+                  }}
+                  style={() => ({
+                    color: "#333",
+                    weight: 0.4,
+                    fillColor: getColor(area.score),
+                    fillOpacity: 0.75,
+                  })}
+                >
+                  <Tooltip sticky>
+                    <div>
+                      <strong>{area.adm3_name}</strong>
+                      <br />
+                      Score: {Number(area.score).toFixed(2)}
+                      <br />
+                      Pop: {Number(area.pop).toLocaleString()}
+                      <br />
+                      Pov: {Number(area.pov_rate).toFixed(1)}%
+                    </div>
+                  </Tooltip>
+                </GeoJSON>
+              ))}
+            </MapContainer>
+          )}
+        </div>
+
+        {/* Right-hand Layer Panel */}
+        <div className="w-64 bg-white shadow rounded-lg p-3 text-sm space-y-2">
+          <h3 className="font-semibold text-gray-700 mb-2">Map Layers</h3>
+          <div className="flex flex-col gap-1">
+            <button className="border rounded px-2 py-1 hover:bg-gray-50">
+              Overall Score
+            </button>
+            <button className="border rounded px-2 py-1 hover:bg-gray-50">
+              Poverty Rate
+            </button>
+            <button className="border rounded px-2 py-1 hover:bg-gray-50">
+              Population Density
+            </button>
           </div>
-
-          <MapContainer
-            style={{ height: "600px", width: "100%" }}
-            center={[10.3, 123.9]}
-            zoom={8}
-            zoomControl={false}
-          >
-            <TileLayer
-              attribution='&copy; OpenStreetMap contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            {adm3.map((area, i) => (
-              <GeoJSON
-                key={i}
-                data={area.geom_json}
-                style={() => ({
-                  color: "#333",
-                  weight: 0.5,
-                  fillColor: getColor(area.score ?? 0),
-                  fillOpacity: 0.75,
-                })}
-              >
-                <Tooltip sticky>
-                  <div>
-                    <strong>{area.name}</strong>
-                    <br />
-                    Score: {area.score ? area.score.toFixed(2) : "–"}
-                  </div>
-                </Tooltip>
-              </GeoJSON>
-            ))}
-          </MapContainer>
-        </div>
-
-        {/* Layer Sidebar */}
-        <div className="col-span-1 bg-white rounded shadow p-3 text-sm">
-          <h3 className="font-semibold border-b pb-1 mb-2">Map Layers</h3>
-          <p className="text-gray-500 mb-2">
-            Select dataset layers or switch to overall score.
-          </p>
-          <ul className="space-y-1 text-sm">
-            <li className="px-2 py-1 rounded bg-blue-100 font-medium">Overall Score</li>
-            <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">SSC Framework – P1</li>
-            <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">SSC Framework – P3</li>
-            <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">Hazard</li>
-            <li className="px-2 py-1 hover:bg-gray-100 cursor-pointer">Underlying Vulnerability</li>
-          </ul>
         </div>
       </div>
+
+      {/* Modals */}
+      {showDefineArea && (
+        <DefineAffectedAreaModal
+          instance={{ id }}
+          onClose={() => setShowDefineArea(false)}
+          onSaved={() => window.location.reload()}
+        />
+      )}
+      {showDatasetConfig && (
+        <InstanceDatasetConfigModal onClose={() => setShowDatasetConfig(false)} />
+      )}
+      {showScoringConfig && (
+        <InstanceScoringModal onClose={() => setShowScoringConfig(false)} />
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------
-// Components
+// Reusable stat card component
 // ---------------------------------------------
-function SummaryCard({ title, value }: { title: string; value: string }) {
+function StatCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="p-3 bg-white rounded shadow text-center">
-      <h4 className="text-gray-500 text-sm">{title}</h4>
+    <div className="p-3 bg-white rounded-lg shadow text-center">
+      <div className="text-gray-500 text-sm">{title}</div>
       <div className="text-xl font-semibold mt-1">{value}</div>
     </div>
   );
 }
+
+// ---------------------------------------------
+// Modals (already exist in your repo)
+// ---------------------------------------------
+import DefineAffectedAreaModal from "@/components/DefineAffectedAreaModal";
+import InstanceDatasetConfigModal from "@/components/InstanceDatasetConfigModal";
+import InstanceScoringModal from "@/components/InstanceScoringModal";
