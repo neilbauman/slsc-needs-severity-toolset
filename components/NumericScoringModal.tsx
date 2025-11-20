@@ -163,22 +163,45 @@ export default function NumericScoringModal({
   // ✅ Preview stats (after scoring)
   const previewScores = async () => {
     setMessage("Loading preview...");
-    const { data, error } = await supabase
+    
+    // Build query for scores
+    let query = supabase
       .from("instance_dataset_scores")
-      .select("score")
+      .select("score, admin_pcode")
       .eq("instance_id", instance.id)
       .eq("dataset_id", dataset.id);
+
+    // If scope is "affected", filter by affected ADM3 codes
+    if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
+      // Get ADM3 codes from affected ADM2 areas
+      const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
+        in_scope: instance.admin_scope, // ADM2 codes
+      });
+
+      if (!adm3Error && adm3Data && Array.isArray(adm3Data)) {
+        const affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode || row.pcode || row.code).filter(Boolean);
+        if (affectedAdm3Codes.length > 0) {
+          query = query.in("admin_pcode", affectedAdm3Codes);
+        }
+      }
+    }
+
+    const { data, error } = await query;
 
     if (error || !data?.length) {
       setMessage("❌ Error generating preview or no data found.");
       return;
     }
 
-    const scores = data.map((d: any) => d.score);
+    const scores = data.map((d: any) => Number(d.score)).filter((s) => !isNaN(s));
+    if (scores.length === 0) {
+      setMessage("❌ No valid scores found.");
+      return;
+    }
+
     const min = Math.min(...scores);
     const max = Math.max(...scores);
-    const avg =
-      scores.reduce((sum: number, val: number) => sum + val, 0) / scores.length;
+    const avg = scores.reduce((sum: number, val: number) => sum + val, 0) / scores.length;
 
     setPreview({
       count: scores.length,
@@ -223,7 +246,6 @@ export default function NumericScoringModal({
       // Filter by affected area if scope is "affected" and we have codes
       if (scope === "affected" && affectedAdm3Codes.length > 0) {
         query = query.in("admin_pcode", affectedAdm3Codes);
-        console.log(`Filtering dataset values to ${affectedAdm3Codes.length} ADM3 codes`);
       } else if (scope === "affected") {
         console.warn("Scope is 'affected' but no ADM3 codes found - showing all data");
       }
@@ -274,11 +296,12 @@ export default function NumericScoringModal({
   };
 
   // Load data preview when dataset, scope, or instance changes
+  // Note: We intentionally don't reload when scaleMax changes - that doesn't affect the raw data distribution
   useEffect(() => {
-    if (dataset.id && instance?.id) {
+    if (dataset?.id && instance?.id) {
       loadDataPreview();
     }
-  }, [dataset.id, scope, instance?.admin_scope]);
+  }, [dataset?.id, scope, instance?.admin_scope]);
 
   const addRange = () =>
     setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
