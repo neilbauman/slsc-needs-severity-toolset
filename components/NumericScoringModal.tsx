@@ -32,17 +32,26 @@ export default function NumericScoringModal({
 
   // ✅ Load existing config
   useEffect(() => {
+    if (!instance?.id || !dataset?.id) return;
+
     const loadConfig = async () => {
+      // Use maybeSingle() instead of single() to handle no rows gracefully
       const { data, error } = await supabase
         .from("instance_dataset_config")
         .select("score_config")
         .eq("instance_id", instance.id)
         .eq("dataset_id", dataset.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
-        console.warn("No existing score config found:", error.message);
-        // Check if scores exist anyway (might have been scored without config saved)
+        // Only log if it's not a "no rows" error
+        if (error.code !== "PGRST116") {
+          console.warn("Error loading score config:", error.message);
+        }
+      }
+
+      // Check if scores exist anyway (might have been scored without config saved)
+      if (!data || !data.score_config) {
         const { data: scoresData } = await supabase
           .from("instance_dataset_scores")
           .select("id")
@@ -56,7 +65,7 @@ export default function NumericScoringModal({
         return;
       }
 
-      const cfg = data?.score_config || {};
+      const cfg = data.score_config || {};
       if (cfg.method) setMethod(cfg.method);
       if (cfg.scaleMax) setScaleMax(cfg.scaleMax);
       if (cfg.inverse !== undefined) setInverse(cfg.inverse);
@@ -70,7 +79,7 @@ export default function NumericScoringModal({
       }
     };
     loadConfig();
-  }, [instance.id, dataset.id]);
+  }, [instance?.id, dataset?.id]);
 
   // ✅ Save config (upsert to handle both insert and update)
   const saveConfig = async () => {
@@ -177,18 +186,23 @@ export default function NumericScoringModal({
 
   // ✅ Load data preview (before scoring) to see distribution
   const loadDataPreview = async () => {
+    if (!dataset?.id || !instance?.id) return;
+    
     setLoadingDataPreview(true);
     try {
       // If scope is "affected", get affected ADM3 codes first
       let affectedAdm3Codes: string[] = [];
-      if (scope === "affected" && instance?.admin_scope) {
+      if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
         // Get ADM3 codes from affected ADM2 areas
         const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
           in_scope: instance.admin_scope, // ADM2 codes
         });
 
-        if (!adm3Error && adm3Data) {
-          affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode);
+        if (adm3Error) {
+          console.error("Error getting affected ADM3 codes:", adm3Error);
+        } else if (adm3Data && Array.isArray(adm3Data)) {
+          affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode || row.admin_pcode).filter(Boolean);
+          console.log(`Found ${affectedAdm3Codes.length} affected ADM3 codes for preview`);
         }
       }
 
@@ -201,11 +215,20 @@ export default function NumericScoringModal({
       // Filter by affected area if scope is "affected" and we have codes
       if (scope === "affected" && affectedAdm3Codes.length > 0) {
         query = query.in("admin_pcode", affectedAdm3Codes);
+        console.log(`Filtering dataset values to ${affectedAdm3Codes.length} ADM3 codes`);
+      } else if (scope === "affected") {
+        console.warn("Scope is 'affected' but no ADM3 codes found - showing all data");
       }
 
       const { data, error } = await query.limit(10000); // Increased limit for affected area
 
-      if (error || !data?.length) {
+      if (error) {
+        console.error("Error loading data preview:", error);
+        setDataPreview(null);
+        return;
+      }
+
+      if (!data || data.length === 0) {
         setDataPreview(null);
         return;
       }
@@ -262,14 +285,25 @@ export default function NumericScoringModal({
     setThresholds(thresholds.filter((_, i) => i !== idx));
 
   // Check if admin level transformation is needed (case-insensitive comparison)
-  const datasetLevel = (dataset.admin_level || "").toUpperCase();
-  const targetLevel = INSTANCE_TARGET_LEVEL.toUpperCase();
-  const needsTransformation = datasetLevel !== targetLevel;
+  // Normalize both to uppercase and trim whitespace
+  const datasetLevel = dataset?.admin_level ? String(dataset.admin_level).trim().toUpperCase() : "";
+  const targetLevel = INSTANCE_TARGET_LEVEL.trim().toUpperCase();
+  const needsTransformation = datasetLevel && targetLevel && datasetLevel !== targetLevel;
+  
+  // Debug logging (remove in production)
+  if (dataset?.admin_level) {
+    console.log(`Admin level check: dataset="${dataset.admin_level}" (normalized: "${datasetLevel}") vs target="${targetLevel}"`, {
+      needsTransformation,
+      datasetRaw: dataset.admin_level,
+      datasetNormalized: datasetLevel,
+      targetNormalized: targetLevel,
+    });
+  }
   
   // Determine transformation type based on admin level hierarchy
   // ADM1 > ADM2 > ADM3 > ADM4 (higher number = lower level)
   const getLevelNumber = (level: string) => {
-    const l = level.toUpperCase();
+    const l = level.toUpperCase().trim();
     if (l === "ADM1") return 1;
     if (l === "ADM2") return 2;
     if (l === "ADM3") return 3;
@@ -277,8 +311,9 @@ export default function NumericScoringModal({
     return 0;
   };
   
-  const transformationType =
-    getLevelNumber(datasetLevel) > getLevelNumber(targetLevel) ? "rollup" : "disaggregation";
+  const transformationType = needsTransformation
+    ? getLevelNumber(datasetLevel) > getLevelNumber(targetLevel) ? "rollup" : "disaggregation"
+    : null;
 
   // Validate thresholds
   const validateThresholds = () => {
@@ -309,7 +344,7 @@ export default function NumericScoringModal({
         </div>
 
         {/* Admin Level Warning */}
-        {needsTransformation && (
+        {needsTransformation && transformationType && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
             <div className="flex items-start">
               <span className="text-amber-600 mr-2">⚠️</span>
