@@ -74,6 +74,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           if (instanceData && !instanceData.id) {
             instanceData.id = instanceData.instance_id || params.id;
           }
+          // If view doesn't have admin_scope, fetch it separately
+          if (!instanceData.admin_scope) {
+            const { data: scopeData } = await supabase
+              .from("instances")
+              .select("admin_scope")
+              .eq("id", params.id)
+              .single();
+            if (scopeData) {
+              instanceData.admin_scope = scopeData.admin_scope;
+            }
+          }
         }
       } catch (e) {
         // View might not exist, try direct table
