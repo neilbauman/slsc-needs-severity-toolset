@@ -201,9 +201,11 @@ export default function NumericScoringModal({
       scope,
       limitToAffected,
       thresholdsCount: thresholds.length,
+      instanceId: instance.id,
+      datasetId: dataset.id,
     });
 
-    const { error } = await supabase.rpc("score_numeric_auto", {
+    const { data: rpcData, error } = await supabase.rpc("score_numeric_auto", {
       in_instance_id: instance.id,
       in_dataset_id: dataset.id,
       in_method: rpcMethod,
@@ -214,9 +216,25 @@ export default function NumericScoringModal({
     });
 
     if (error) {
-      setMessage(`❌ Error running scoring: ${error.message}`);
-      console.error(error);
+      const errorMsg = error.message || "Unknown error";
+      setMessage(`❌ Error running scoring: ${errorMsg}`);
+      console.error("RPC error details:", {
+        error,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+      });
+      
+      // If it's a 500 error, provide more context
+      if (error.code === "PGRST301" || error.message?.includes("500")) {
+        setMessage(
+          `❌ Server error (500): The scoring RPC may have an issue. ` +
+          `Check Supabase logs. Parameters sent: method=${rpcMethod}, scaleMax=${scaleMax}, limitToAffected=${limitToAffected}`
+        );
+      }
     } else {
+      console.log("RPC returned successfully:", rpcData);
       setMessage("✅ Scoring complete! Old scores replaced with new ones.");
       await previewScores(); // auto-refresh preview
       if (onSaved) onSaved();
