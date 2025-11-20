@@ -1,0 +1,263 @@
+# Cursor Rules for Philippines SSC Toolset
+
+## Project Overview
+This is a Next.js 14 application for managing and scoring datasets related to the Philippines SSC (Social Services Center) Toolset. The application uses Supabase as the backend database and provides functionality for dataset management, scoring, and visualization.
+
+## Technology Stack
+- **Framework**: Next.js 14.2.1 with React 18.2.0
+- **Database**: Supabase (PostgreSQL)
+- **Styling**: Tailwind CSS
+- **Maps**: Leaflet with react-leaflet
+- **Charts**: Recharts
+- **Data Processing**: PapaParse for CSV handling
+
+## Supabase Configuration
+
+### Environment Variables Required
+- `NEXT_PUBLIC_SUPABASE_URL`: Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anonymous key
+
+### Supabase Client Usage
+- Use `createClient()` from `@/lib/supabaseClient` for client-side operations
+- The client is cached and reused across the application
+- All RPC calls use the `.rpc()` method on the Supabase client
+
+## Database Schema
+
+### Core Tables
+
+#### `datasets`
+Primary table for storing dataset metadata.
+- `id` (UUID, PK): Unique identifier
+- `name` (TEXT): Dataset name
+- `description` (TEXT): Optional description
+- `admin_level` (TEXT): Administrative level (ADM1, ADM2, ADM3, ADM4)
+- `type` (TEXT): Either 'numeric' or 'categorical'
+- `indicator_id` (UUID): Optional reference to indicator
+- `created_at` (TIMESTAMP): Creation timestamp
+- `is_baseline` (BOOLEAN): Whether this is a baseline dataset
+- `is_derived` (BOOLEAN): Whether this dataset is derived from others
+- `metadata` (JSONB): Additional metadata
+- `uploaded_by` (UUID): User who uploaded
+- `collected_at` (DATE): Collection date
+- `source` (TEXT): Data source
+
+#### `dataset_values_numeric`
+Stores numeric dataset values.
+- `id` (UUID, PK)
+- `dataset_id` (UUID, FK → datasets.id, CASCADE DELETE)
+- `admin_pcode` (TEXT): Administrative area code
+- `value` (NUMERIC): The numeric value
+
+#### `dataset_values_categorical`
+Stores categorical dataset values.
+- `id` (UUID, PK)
+- `dataset_id` (UUID, FK → datasets.id, CASCADE DELETE)
+- `admin_pcode` (TEXT): Administrative area code
+- `category` (TEXT): Category name
+- `value` (NUMERIC): Optional numeric value for the category
+
+### Additional Tables (Referenced in Code)
+- `instance_dataset_scores`: Stores computed scores for datasets within instances
+- `instances`: Stores instance configurations
+- `instance_datasets`: Links datasets to instances
+- `affected_areas`: Stores affected area definitions
+- `admin_boundaries`: Stores administrative boundary data
+
+## Supabase RPC Functions
+
+### Dataset Management RPCs
+
+#### `derive_dataset`
+Creates a derived dataset from base datasets.
+- **Parameters**: (varies, accepts JSON body)
+- **Usage**: Called via API route `/api/deriveDataset`
+- **Location**: `app/api/deriveDataset/route.ts`
+
+#### `preview_derived_dataset`
+Preview a derived dataset before materialization.
+- **Parameters**:
+  - `base_dataset_ids` (UUID[]): Array of base dataset IDs
+  - `formula` (TEXT): Formula for derivation
+  - `target_level` (TEXT): Target admin level
+  - `weight_dataset_id` (UUID, optional): Weight dataset ID
+  - `alignment_method` (TEXT, default: 'keep'): Alignment method
+- **Usage**: `components/DerivedDatasetPreviewModal.tsx`
+
+#### `preview_derived_dataset_v3`
+Enhanced preview for derived datasets (v3).
+- **Parameters**: Similar to `preview_derived_dataset`
+- **Usage**: `components/DeriveDatasetModal.tsx`
+
+#### `materialize_derived_dataset_v3`
+Creates the actual derived dataset.
+- **Parameters**: Similar to preview functions
+- **Usage**: `components/DeriveDatasetModal.tsx`
+
+#### `transform_admin_level`
+Transforms a dataset to a different administrative level.
+- **Parameters**:
+  - `source_id` (UUID): Source dataset ID
+  - `target_admin_level` (TEXT): Target level (ADM1-ADM4)
+  - `method` (TEXT): 'sum', 'average', or 'distribute'
+- **Usage**: `components/TransformDatasetModal.tsx`
+
+### Dataset Cleaning RPCs
+
+#### `preview_numeric_cleaning_v2`
+Preview cleaning operations for numeric datasets.
+- **Parameters**:
+  - `_dataset_id` (UUID): Dataset ID to preview
+- **Returns**: Array of preview data
+- **Usage**: `lib/supabasePreview.ts`, `components/CleanDatasetModal.tsx`
+
+#### `preview_categorical_cleaning`
+Preview cleaning operations for categorical datasets.
+- **Parameters**: Dataset ID
+- **Usage**: `components/CleanDatasetModal.tsx`
+
+#### `preview_categorical_cleaning_v2`
+Enhanced preview for categorical cleaning (v2).
+- **Parameters**: Dataset ID
+- **Usage**: `components/CleanCategoricalDatasetModal.tsx`
+
+#### `clean_numeric_dataset`
+Applies cleaning to a numeric dataset.
+- **Parameters**: Cleaning configuration
+- **Usage**: `components/CleanNumericDatasetModal.tsx`
+
+#### `clean_categorical_dataset`
+Applies cleaning to a categorical dataset.
+- **Parameters**: Cleaning configuration
+- **Usage**: `components/CleanCategoricalDatasetModal.tsx`
+
+### Scoring RPCs
+
+#### `score_numeric_auto`
+Automatically scores numeric datasets.
+- **Parameters**:
+  - `in_instance_id` (UUID): Instance ID
+  - `in_dataset_id` (UUID): Dataset ID
+  - `in_method` (TEXT): Scoring method
+  - `in_thresholds` (JSONB): Threshold configuration
+  - `in_scale_max` (NUMERIC): Maximum scale value
+  - `in_inverse` (BOOLEAN): Whether to invert scores
+  - `in_limit_to_affected` (BOOLEAN): Limit to affected areas
+- **Usage**: `components/NumericScoringModal.tsx`
+
+#### `score_building_typology`
+Scores categorical datasets using building typology.
+- **Parameters**:
+  - `in_category_scores` (JSONB): Category score mappings
+  - `in_dataset_id` (UUID): Dataset ID
+  - `in_instance_id` (UUID): Instance ID
+  - `in_method` (TEXT): Scoring method
+  - `in_threshold` (NUMERIC): Threshold value
+- **Usage**: `components/CategoricalScoringModal.tsx`
+
+#### `score_framework_aggregate`
+Aggregates pillar scores (P1, P2, P3) into framework rollup.
+- **Parameters**:
+  - `in_instance_id` (UUID): Instance ID
+  - `in_config` (JSONB, optional): Configuration with methods and weights
+    - `methods`: { P1: 'weighted_mean', P2: 'weighted_mean', P3: 'weighted_mean' }
+    - `weights`: { P1: 1, P2: 1, P3: 1 }
+- **Returns**: Object with `status`, `upserted_rows`, `framework_avg`
+- **Usage**: `components/ComputeFrameworkRollupButton.tsx`, `components/FrameworkScoringModal.tsx`, `components/InstanceRecomputePanel.tsx`
+
+#### `score_final_aggregate`
+Aggregates framework scores into final rollup.
+- **Parameters**:
+  - `in_instance_id` (UUID): Instance ID
+- **Returns**: Object with `status`, `upserted_rows`, `final_avg`
+- **Usage**: `components/ComputeFinalRollupButton.tsx`, `components/InstanceRecomputePanel.tsx`
+
+#### `score_instance_overall`
+Scores the overall instance.
+- **Parameters**:
+  - `in_instance_id` (UUID): Instance ID
+- **Usage**: `components/InstanceScoringModal.tsx`
+
+### Administrative & Geographic RPCs
+
+#### `get_affected_adm3`
+Retrieves affected ADM3 areas.
+- **Parameters**: Instance or area configuration
+- **Returns**: Array of affected ADM3 codes
+- **Usage**: `components/DefineAffectedAreaModal.tsx`
+
+#### `get_admin_boundaries_list`
+Lists administrative boundaries.
+- **Parameters**: Filtering options
+- **Returns**: List of boundary metadata
+- **Usage**: `components/AffectedAreaModal.tsx`
+
+#### `get_admin_boundaries_geojson`
+Retrieves administrative boundaries as GeoJSON.
+- **Parameters**: Boundary identifiers
+- **Returns**: GeoJSON feature collection
+- **Usage**: `components/AffectedAreaModal.tsx`
+
+## Code Patterns
+
+### Supabase Client Usage
+```typescript
+import { createClient } from '@/lib/supabaseClient';
+const supabase = createClient();
+```
+
+### RPC Call Pattern
+```typescript
+const { data, error } = await supabase.rpc('function_name', {
+  param1: value1,
+  param2: value2,
+});
+if (error) throw error;
+```
+
+### Error Handling
+Always check for `error` after RPC calls and handle appropriately. Display user-friendly error messages.
+
+### Dataset Types
+- **Numeric**: Single numeric value per admin area
+- **Categorical**: Multiple categories per admin area, each with optional numeric values
+
+### Admin Levels
+Supported levels: ADM1, ADM2, ADM3, ADM4 (from highest to lowest administrative level)
+
+## File Structure Conventions
+
+- **Components**: Located in `/components`, use client-side rendering ('use client')
+- **API Routes**: Located in `/app/api`, use server-side rendering
+- **Lib Utilities**: Located in `/lib`, shared utilities and Supabase clients
+- **Pages**: Located in `/app`, use Next.js App Router structure
+
+## GitHub Integration
+
+When reviewing or editing code:
+1. Check existing patterns in similar components
+2. Maintain consistency with existing error handling
+3. Follow TypeScript best practices
+4. Use Tailwind CSS for styling (no inline styles)
+5. Ensure proper TypeScript types for all Supabase operations
+6. Test RPC calls handle both success and error cases
+
+## Common Tasks
+
+### Adding a New RPC Call
+1. Check if RPC exists in Supabase
+2. Add proper TypeScript types for parameters
+3. Handle errors appropriately
+4. Update this documentation if it's a new RPC
+
+### Working with Datasets
+- Always check `dataset.type` before processing (numeric vs categorical)
+- Respect `admin_level` when aggregating or transforming
+- Use appropriate value tables (`dataset_values_numeric` vs `dataset_values_categorical`)
+
+### Scoring Operations
+- Scoring typically requires instance_id and dataset_id
+- Framework aggregation combines P1, P2, P3 pillars
+- Final aggregation combines framework scores
+- Always provide user feedback during long-running operations
+
