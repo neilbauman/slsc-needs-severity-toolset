@@ -29,6 +29,7 @@ export default function NumericScoringModal({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [loadingDataPreview, setLoadingDataPreview] = useState(false);
+  const [scopeWarning, setScopeWarning] = useState<string | null>(null);
 
   // ✅ Load existing config
   useEffect(() => {
@@ -70,7 +71,20 @@ export default function NumericScoringModal({
       if (cfg.scaleMax) setScaleMax(cfg.scaleMax);
       if (cfg.inverse !== undefined) setInverse(cfg.inverse);
       if (cfg.thresholds?.length) setThresholds(cfg.thresholds);
-      if (cfg.scope) setScope(cfg.scope);
+      if (cfg.scope) {
+        setScope(cfg.scope);
+        // Check if scores exist and scope might have changed
+        const { data: scoresData } = await supabase
+          .from("instance_dataset_scores")
+          .select("id")
+          .eq("instance_id", instance.id)
+          .eq("dataset_id", dataset.id)
+          .limit(1);
+        
+        if (scoresData && scoresData.length > 0 && cfg.scope !== scope) {
+          setScopeWarning("⚠️ Scores exist but scope setting changed. Re-apply scoring to update.");
+        }
+      }
       
       // Show message if config was loaded
       if (Object.keys(cfg).length > 0) {
@@ -80,6 +94,43 @@ export default function NumericScoringModal({
     };
     loadConfig();
   }, [instance?.id, dataset?.id]);
+
+  // ✅ Warn if scope changes after scores exist
+  useEffect(() => {
+    if (!instance?.id || !dataset?.id) return;
+    
+    const checkScores = async () => {
+      const { data: scoresData } = await supabase
+        .from("instance_dataset_scores")
+        .select("id")
+        .eq("instance_id", instance.id)
+        .eq("dataset_id", dataset.id)
+        .limit(1);
+      
+      if (scoresData && scoresData.length > 0) {
+        // Check if current scope matches saved config
+        const { data: configData } = await supabase
+          .from("instance_dataset_config")
+          .select("score_config")
+          .eq("instance_id", instance.id)
+          .eq("dataset_id", dataset.id)
+          .maybeSingle();
+        
+        const savedScope = configData?.score_config?.scope;
+        if (savedScope && savedScope !== scope) {
+          setScopeWarning("⚠️ Scope changed from saved config. Re-apply scoring to update scores with new scope.");
+        } else {
+          setScopeWarning(null);
+        }
+      } else {
+        setScopeWarning(null);
+      }
+    };
+    
+    // Debounce scope changes
+    const timer = setTimeout(checkScores, 500);
+    return () => clearTimeout(timer);
+  }, [scope, instance?.id, dataset?.id]);
 
   // ✅ Save config (upsert to handle both insert and update)
   const saveConfig = async () => {
@@ -178,14 +229,15 @@ export default function NumericScoringModal({
   const previewScores = async () => {
     setMessage("Loading preview...");
     
-    // Build query for scores
+    // Build query for scores - use count for accurate totals
     let query = supabase
       .from("instance_dataset_scores")
-      .select("score, admin_pcode")
+      .select("score, admin_pcode", { count: "exact" })
       .eq("instance_id", instance.id)
       .eq("dataset_id", dataset.id);
 
     // If scope is "affected", filter by affected ADM3 codes
+    let affectedAdm3Codes: string[] = [];
     if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
       // Get ADM3 codes from affected ADM2 areas
       const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
@@ -193,21 +245,52 @@ export default function NumericScoringModal({
       });
 
       if (!adm3Error && adm3Data && Array.isArray(adm3Data)) {
-        const affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode || row.pcode || row.code).filter(Boolean);
+        affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode || row.pcode || row.code).filter(Boolean);
         if (affectedAdm3Codes.length > 0) {
           query = query.in("admin_pcode", affectedAdm3Codes);
         }
       }
     }
 
-    const { data, error } = await query;
+    // Fetch all scores (paginate if needed)
+    const batchSize = 1000;
+    let allScores: any[] = [];
+    let hasMore = true;
+    let offset = 0;
+    
+    while (hasMore) {
+      const batchQuery = query.range(offset, offset + batchSize - 1);
+      const { data: batchData, error: batchError, count } = await batchQuery;
+      
+      if (batchError) {
+        setMessage(`❌ Error generating preview: ${batchError.message}`);
+        return;
+      }
+      
+      if (batchData && batchData.length > 0) {
+        allScores = [...allScores, ...batchData];
+        offset += batchSize;
+        
+        // If we got fewer rows than batchSize, we're done
+        if (batchData.length < batchSize || (count !== null && allScores.length >= count)) {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
+      }
+      
+      // Safety limit
+      if (allScores.length >= 10000) {
+        hasMore = false;
+      }
+    }
 
-    if (error || !data?.length) {
-      setMessage("❌ Error generating preview or no data found.");
+    if (allScores.length === 0) {
+      setMessage("❌ No scores found. Apply scoring first.");
       return;
     }
 
-    const scores = data.map((d: any) => Number(d.score)).filter((s) => !isNaN(s));
+    const scores = allScores.map((d: any) => Number(d.score)).filter((s) => !isNaN(s));
     if (scores.length === 0) {
       setMessage("❌ No valid scores found.");
       return;
@@ -216,6 +299,19 @@ export default function NumericScoringModal({
     const min = Math.min(...scores);
     const max = Math.max(...scores);
     const avg = scores.reduce((sum: number, val: number) => sum + val, 0) / scores.length;
+
+    // Log diagnostic info for debugging normalization issues
+    console.log("Preview scores:", {
+      scope,
+      count: scores.length,
+      min,
+      max,
+      avg,
+      scaleMax,
+      method,
+      affectedAdm3Count: affectedAdm3Codes.length,
+      expectedRange: `1-${scaleMax}`,
+    });
 
     setPreview({
       count: scores.length,
@@ -454,17 +550,25 @@ export default function NumericScoringModal({
           <label className="block text-sm font-medium mb-1">Normalization Scope:</label>
           <select
             value={scope}
-            onChange={(e) => setScope(e.target.value)}
+            onChange={(e) => {
+              setScope(e.target.value);
+              setScopeWarning(null); // Clear warning when user actively changes
+            }}
             className="border rounded p-2 w-full text-sm mb-1"
           >
             <option value="affected">Affected Area Only</option>
             <option value="country">Entire Country</option>
           </select>
+          {scopeWarning && (
+            <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+              {scopeWarning}
+            </div>
+          )}
           <p className="text-xs text-gray-600 mt-1">
             {method === "Normalization" ? (
               <>
                 <strong>Affected Area:</strong> Normalization uses min/max from only the affected
-                area (may have smaller range). <strong>Entire Country:</strong> Uses national
+                area (should span 1-{scaleMax}). <strong>Entire Country:</strong> Uses national
                 min/max (wider range, more context).
               </>
             ) : (
