@@ -179,11 +179,31 @@ export default function NumericScoringModal({
   const loadDataPreview = async () => {
     setLoadingDataPreview(true);
     try {
-      const { data, error } = await supabase
+      // If scope is "affected", get affected ADM3 codes first
+      let affectedAdm3Codes: string[] = [];
+      if (scope === "affected" && instance?.admin_scope) {
+        // Get ADM3 codes from affected ADM2 areas
+        const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
+          in_scope: instance.admin_scope, // ADM2 codes
+        });
+
+        if (!adm3Error && adm3Data) {
+          affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode);
+        }
+      }
+
+      // Build query
+      let query = supabase
         .from("dataset_values_numeric")
-        .select("value")
-        .eq("dataset_id", dataset.id)
-        .limit(1000); // Sample for preview
+        .select("value, admin_pcode")
+        .eq("dataset_id", dataset.id);
+
+      // Filter by affected area if scope is "affected" and we have codes
+      if (scope === "affected" && affectedAdm3Codes.length > 0) {
+        query = query.in("admin_pcode", affectedAdm3Codes);
+      }
+
+      const { data, error } = await query.limit(10000); // Increased limit for affected area
 
       if (error || !data?.length) {
         setDataPreview(null);
@@ -212,6 +232,7 @@ export default function NumericScoringModal({
         median: median.toFixed(2),
         p25: p25.toFixed(2),
         p75: p75.toFixed(2),
+        scope: scope === "affected" ? "affected area" : "entire country",
       });
     } catch (err) {
       console.error("Error loading data preview:", err);
@@ -221,10 +242,12 @@ export default function NumericScoringModal({
     }
   };
 
-  // Load data preview on mount
+  // Load data preview when dataset, scope, or instance changes
   useEffect(() => {
-    loadDataPreview();
-  }, [dataset.id]);
+    if (dataset.id && instance?.id) {
+      loadDataPreview();
+    }
+  }, [dataset.id, scope, instance?.admin_scope]);
 
   const addRange = () =>
     setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
@@ -238,10 +261,24 @@ export default function NumericScoringModal({
   const removeRange = (idx: number) =>
     setThresholds(thresholds.filter((_, i) => i !== idx));
 
-  // Check if admin level transformation is needed
-  const needsTransformation = dataset.admin_level !== INSTANCE_TARGET_LEVEL;
+  // Check if admin level transformation is needed (case-insensitive comparison)
+  const datasetLevel = (dataset.admin_level || "").toUpperCase();
+  const targetLevel = INSTANCE_TARGET_LEVEL.toUpperCase();
+  const needsTransformation = datasetLevel !== targetLevel;
+  
+  // Determine transformation type based on admin level hierarchy
+  // ADM1 > ADM2 > ADM3 > ADM4 (higher number = lower level)
+  const getLevelNumber = (level: string) => {
+    const l = level.toUpperCase();
+    if (l === "ADM1") return 1;
+    if (l === "ADM2") return 2;
+    if (l === "ADM3") return 3;
+    if (l === "ADM4") return 4;
+    return 0;
+  };
+  
   const transformationType =
-    dataset.admin_level > INSTANCE_TARGET_LEVEL ? "rollup" : "disaggregation";
+    getLevelNumber(datasetLevel) > getLevelNumber(targetLevel) ? "rollup" : "disaggregation";
 
   // Validate thresholds
   const validateThresholds = () => {
@@ -464,7 +501,14 @@ export default function NumericScoringModal({
         {/* Data Preview (before scoring) */}
         {dataPreview && (
           <div className="mb-4 p-3 border rounded bg-blue-50 text-sm">
-            <h4 className="font-medium mb-2 text-blue-800">Dataset Value Distribution</h4>
+            <h4 className="font-medium mb-2 text-blue-800">
+              Dataset Value Distribution
+              {dataPreview.scope && (
+                <span className="text-xs font-normal text-blue-600 ml-2">
+                  ({dataPreview.scope})
+                </span>
+              )}
+            </h4>
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
                 <div className="text-blue-600">Count</div>
