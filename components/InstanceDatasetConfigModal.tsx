@@ -23,6 +23,12 @@ export default function InstanceDatasetConfigModal({
 
   // ✅ Load datasets and their linkage to the instance
   useEffect(() => {
+    // Ensure instance and instance.id exist before loading
+    if (!instance || !instance.id) {
+      console.warn("InstanceDatasetConfigModal: instance or instance.id is missing");
+      return;
+    }
+
     const loadData = async () => {
       setLoading(true);
 
@@ -55,7 +61,7 @@ export default function InstanceDatasetConfigModal({
     };
 
     loadData();
-  }, [instance.id]);
+  }, [instance?.id]);
 
   // ✅ Toggle dataset linkage (add/remove)
   const toggleDataset = async (datasetId: string, checked: boolean) => {

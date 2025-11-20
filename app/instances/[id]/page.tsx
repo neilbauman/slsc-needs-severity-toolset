@@ -70,6 +70,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
         if (!instanceError) {
           instanceData = data;
+          // Ensure instance_id is set as id for consistency
+          if (instanceData && !instanceData.id) {
+            instanceData.id = instanceData.instance_id || params.id;
+          }
         }
       } catch (e) {
         // View might not exist, try direct table
@@ -79,8 +83,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .eq("id", params.id)
           .single();
         
-        if (!directError) {
+        if (!directError && data) {
           instanceData = data;
+        } else if (!instanceData) {
+          // Last resort: create minimal instance object with just the ID
+          instanceData = { id: params.id, name: `Instance ${params.id}` };
         }
       }
       setInstance(instanceData);
