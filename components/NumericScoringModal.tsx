@@ -42,6 +42,17 @@ export default function NumericScoringModal({
 
       if (error) {
         console.warn("No existing score config found:", error.message);
+        // Check if scores exist anyway (might have been scored without config saved)
+        const { data: scoresData } = await supabase
+          .from("instance_dataset_scores")
+          .select("id")
+          .eq("instance_id", instance.id)
+          .eq("dataset_id", dataset.id)
+          .limit(1);
+        
+        if (scoresData && scoresData.length > 0) {
+          setMessage("⚠️ This dataset has been scored, but no configuration was saved. Using defaults.");
+        }
         return;
       }
 
@@ -51,25 +62,39 @@ export default function NumericScoringModal({
       if (cfg.inverse !== undefined) setInverse(cfg.inverse);
       if (cfg.thresholds?.length) setThresholds(cfg.thresholds);
       if (cfg.scope) setScope(cfg.scope);
+      
+      // Show message if config was loaded
+      if (Object.keys(cfg).length > 0) {
+        setMessage("✅ Loaded existing scoring configuration");
+        setTimeout(() => setMessage(""), 3000); // Clear after 3 seconds
+      }
     };
     loadConfig();
   }, [instance.id, dataset.id]);
 
-  // ✅ Save config
+  // ✅ Save config (upsert to handle both insert and update)
   const saveConfig = async () => {
     setSaving(true);
     const config = { method, scaleMax, inverse, thresholds, scope };
 
+    // Use upsert to handle both new and existing configs
     const { error } = await supabase
       .from("instance_dataset_config")
-      .update({ score_config: config })
-      .eq("instance_id", instance.id)
-      .eq("dataset_id", dataset.id);
+      .upsert(
+        {
+          instance_id: instance.id,
+          dataset_id: dataset.id,
+          score_config: config,
+        },
+        {
+          onConflict: "instance_id,dataset_id",
+        }
+      );
 
     if (error) {
       setMessage(`❌ Error saving config: ${error.message}`);
     } else {
-      setMessage("✅ Config saved!");
+      setMessage("✅ Config saved! (Note: This does not apply scoring - use 'Apply Scoring' button)");
       if (onSaved) onSaved();
     }
     setSaving(false);
@@ -78,8 +103,24 @@ export default function NumericScoringModal({
   // ✅ Apply scoring (calls unified RPC)
   const applyScoring = async () => {
     setSaving(true);
-    setMessage("Running scoring...");
+    setMessage("Deleting old scores...");
 
+    // Delete existing scores for this dataset/instance combination
+    // This ensures we replace old scores rather than creating duplicates
+    // TODO: In the future, check if affected area has changed, as this may affect
+    // normalization ranges and should trigger a recalculation even if config hasn't changed
+    const { error: deleteError } = await supabase
+      .from("instance_dataset_scores")
+      .delete()
+      .eq("instance_id", instance.id)
+      .eq("dataset_id", dataset.id);
+
+    if (deleteError) {
+      console.warn("Warning: Could not delete old scores:", deleteError);
+      // Continue anyway - the RPC might handle it
+    }
+
+    setMessage("Running scoring...");
     const limitToAffected = scope === "affected";
 
     const { error } = await supabase.rpc("score_numeric_auto", {
@@ -96,7 +137,7 @@ export default function NumericScoringModal({
       setMessage(`❌ Error running scoring: ${error.message}`);
       console.error(error);
     } else {
-      setMessage("✅ Scoring complete!");
+      setMessage("✅ Scoring complete! Old scores replaced with new ones.");
       await previewScores(); // auto-refresh preview
       if (onSaved) onSaved();
     }

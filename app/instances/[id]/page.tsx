@@ -8,9 +8,14 @@ import { supabase } from "@/lib/supabaseClient";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 
-// Dynamically import modal to avoid SSR issues
+// Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
   () => import("@/components/InstanceScoringModal"),
+  { ssr: false }
+);
+
+const InstanceDatasetConfigModal = dynamic(
+  () => import("@/components/InstanceDatasetConfigModal"),
   { ssr: false }
 );
 
@@ -40,6 +45,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showScoringModal, setShowScoringModal] = useState(false);
+  const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
 
   const categories = [
     "SSC Framework P1",
@@ -295,6 +301,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           {/* Action Buttons */}
           <div className="bg-white border rounded-lg p-3 space-y-2">
             <button
+              onClick={() => setShowDatasetConfigModal(true)}
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm font-medium transition-colors"
+            >
+              Configure Datasets
+            </button>
+            <button
               onClick={() => setShowScoringModal(true)}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm font-medium transition-colors"
             >
@@ -364,6 +376,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           instance={instance}
           onClose={() => setShowScoringModal(false)}
           onSaved={handleScoringSaved}
+        />
+      )}
+
+      {/* Dataset Configuration Modal */}
+      {showDatasetConfigModal && instance && (
+        <InstanceDatasetConfigModal
+          instance={instance}
+          onClose={() => setShowDatasetConfigModal(false)}
+          onSaved={async () => {
+            await fetchData(); // Refresh data after config changes
+          }}
         />
       )}
     </div>
