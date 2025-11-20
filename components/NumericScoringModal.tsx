@@ -192,36 +192,19 @@ export default function NumericScoringModal({
     try {
       // If scope is "affected", get affected ADM3 codes first
       let affectedAdm3Codes: string[] = [];
-      if (scope === "affected" && instance?.admin_scope) {
-        console.log("Loading affected ADM3 codes...", {
-          admin_scope: instance.admin_scope,
-          isArray: Array.isArray(instance.admin_scope),
-          length: Array.isArray(instance.admin_scope) ? instance.admin_scope.length : 'not array'
+      if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
+        // Get ADM3 codes from affected ADM2 areas
+        const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
+          in_scope: instance.admin_scope, // ADM2 codes
         });
 
-        if (Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
-          // Get ADM3 codes from affected ADM2 areas
-          const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
-            in_scope: instance.admin_scope, // ADM2 codes
-          });
-
-          if (adm3Error) {
-            console.error("Error getting affected ADM3 codes:", adm3Error);
-          } else {
-            console.log("RPC response:", { adm3Data, dataType: Array.isArray(adm3Data) ? 'array' : typeof adm3Data, length: Array.isArray(adm3Data) ? adm3Data.length : 'N/A' });
-            
-            if (adm3Data && Array.isArray(adm3Data)) {
-              affectedAdm3Codes = adm3Data.map((row: any) => {
-                // Handle different possible field names
-                return row.admin_pcode || row.pcode || row.code || null;
-              }).filter(Boolean);
-              console.log(`Found ${affectedAdm3Codes.length} affected ADM3 codes for preview`, affectedAdm3Codes.slice(0, 5));
-            } else if (adm3Data) {
-              console.warn("RPC returned data but it's not an array:", adm3Data);
-            }
-          }
-        } else {
-          console.warn("instance.admin_scope is not a valid array:", instance.admin_scope);
+        if (adm3Error) {
+          console.error("Error getting affected ADM3 codes:", adm3Error);
+        } else if (adm3Data && Array.isArray(adm3Data)) {
+          affectedAdm3Codes = adm3Data.map((row: any) => {
+            // Handle different possible field names
+            return row.admin_pcode || row.pcode || row.code || null;
+          }).filter(Boolean);
         }
       }
 
@@ -308,16 +291,6 @@ export default function NumericScoringModal({
   const datasetLevel = dataset?.admin_level ? String(dataset.admin_level).trim().toUpperCase() : "";
   const targetLevel = INSTANCE_TARGET_LEVEL.trim().toUpperCase();
   const needsTransformation = datasetLevel && targetLevel && datasetLevel !== targetLevel;
-  
-  // Debug logging (remove in production)
-  if (dataset?.admin_level) {
-    console.log(`Admin level check: dataset="${dataset.admin_level}" (normalized: "${datasetLevel}") vs target="${targetLevel}"`, {
-      needsTransformation,
-      datasetRaw: dataset.admin_level,
-      datasetNormalized: datasetLevel,
-      targetNormalized: targetLevel,
-    });
-  }
   
   // Determine transformation type based on admin level hierarchy
   // ADM1 > ADM2 > ADM3 > ADM4 (higher number = lower level)
