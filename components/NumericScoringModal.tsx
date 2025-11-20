@@ -138,11 +138,25 @@ export default function NumericScoringModal({
     setMessage("Running scoring...");
     const limitToAffected = scope === "affected";
 
+    // Map method name to what RPC expects
+    // The RPC likely expects: 'minmax' for normalization, 'threshold' for thresholds
+    // But let's try passing it as-is first, and if that doesn't work, we'll normalize
+    const rpcMethod = method === "Normalization" ? "minmax" : method.toLowerCase();
+
+    console.log("Applying scoring with:", {
+      method: rpcMethod,
+      scaleMax,
+      inverse,
+      scope,
+      limitToAffected,
+      thresholdsCount: thresholds.length,
+    });
+
     const { error } = await supabase.rpc("score_numeric_auto", {
       in_instance_id: instance.id,
       in_dataset_id: dataset.id,
-      in_method: method,
-      in_thresholds: thresholds,
+      in_method: rpcMethod,
+      in_thresholds: thresholds.length > 0 ? thresholds : null,
       in_scale_max: scaleMax,
       in_inverse: inverse,
       in_limit_to_affected: limitToAffected,
@@ -237,33 +251,60 @@ export default function NumericScoringModal({
         }
       }
 
-      // Build query
+      // Build query - use count for accurate totals
       let query = supabase
         .from("dataset_values_numeric")
-        .select("value, admin_pcode")
+        .select("value, admin_pcode", { count: "exact" })
         .eq("dataset_id", dataset.id);
 
       // Filter by affected area if scope is "affected" and we have codes
       if (scope === "affected" && affectedAdm3Codes.length > 0) {
         query = query.in("admin_pcode", affectedAdm3Codes);
-      } else if (scope === "affected") {
-        console.warn("Scope is 'affected' but no ADM3 codes found - showing all data");
+      }
+      // For "country" scope, don't filter - get all data
+
+      // Fetch data - for country scope, we need to handle large datasets
+      // Supabase default limit is 1000, so we need to paginate
+      const batchSize = 1000;
+      let allData: any[] = [];
+      let hasMore = true;
+      let offset = 0;
+      
+      while (hasMore) {
+        const batchQuery = query.range(offset, offset + batchSize - 1);
+        const { data: batchData, error: batchError, count } = await batchQuery;
+        
+        if (batchError) {
+          console.error("Error loading data preview:", batchError);
+          setDataPreview(null);
+          return;
+        }
+        
+        if (batchData && batchData.length > 0) {
+          allData = [...allData, ...batchData];
+          offset += batchSize;
+          
+          // If we got fewer rows than batchSize, we're done
+          // Or if count is available and we've fetched all rows
+          if (batchData.length < batchSize || (count !== null && allData.length >= count)) {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+        
+        // Safety limit: don't fetch more than 10,000 rows for preview
+        if (allData.length >= 10000) {
+          hasMore = false;
+        }
       }
 
-      const { data, error } = await query.limit(10000); // Increased limit for affected area
-
-      if (error) {
-        console.error("Error loading data preview:", error);
+      if (allData.length === 0) {
         setDataPreview(null);
         return;
       }
 
-      if (!data || data.length === 0) {
-        setDataPreview(null);
-        return;
-      }
-
-      const values = data.map((d: any) => Number(d.value)).filter((v) => !isNaN(v));
+      const values = allData.map((d: any) => Number(d.value)).filter((v) => !isNaN(v));
       if (values.length === 0) {
         setDataPreview(null);
         return;
@@ -277,8 +318,11 @@ export default function NumericScoringModal({
       const p75 = sorted[Math.floor(sorted.length * 0.75)];
       const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
 
+      // Use actual count of values we processed
+      const totalCount = values.length;
+
       setDataPreview({
-        count: values.length,
+        count: totalCount,
         min: min.toFixed(2),
         max: max.toFixed(2),
         avg: avg.toFixed(2),
@@ -618,6 +662,18 @@ export default function NumericScoringModal({
                 <div className="font-semibold">{preview.avg}</div>
               </div>
             </div>
+            {method === "Normalization" && (
+              <div className="mt-2 text-xs text-gray-600 border-t pt-2">
+                <strong>Expected range:</strong> 1.00 to {scaleMax}.00
+                {parseFloat(preview.min) !== 1 || parseFloat(preview.max) !== scaleMax ? (
+                  <span className="text-orange-600 ml-2 block mt-1">
+                    ⚠️ Scores don't span full range (1-{scaleMax}) - may indicate normalization issue in RPC
+                  </span>
+                ) : (
+                  <span className="text-green-600 ml-2">✓ Range looks correct</span>
+                )}
+              </div>
+            )}
           </div>
         )}
 
