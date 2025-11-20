@@ -86,14 +86,19 @@ export default function NumericScoringModal({
     setSaving(true);
     const config = { method, scaleMax, inverse, thresholds, scope };
 
+    // Map method to database format (normalize to lowercase)
+    const scoringMethod = method.toLowerCase();
+
     // Use upsert to handle both new and existing configs
+    // Include scoring_method column if the table requires it
     const { error } = await supabase
       .from("instance_dataset_config")
       .upsert(
         {
           instance_id: instance.id,
           dataset_id: dataset.id,
-          score_config: config,
+          scoring_method: scoringMethod, // Required column
+          score_config: config, // JSONB with full config
         },
         {
           onConflict: "instance_id,dataset_id",
@@ -102,6 +107,7 @@ export default function NumericScoringModal({
 
     if (error) {
       setMessage(`❌ Error saving config: ${error.message}`);
+      console.error("Save config error:", error);
     } else {
       setMessage("✅ Config saved! (Note: This does not apply scoring - use 'Apply Scoring' button)");
       if (onSaved) onSaved();
