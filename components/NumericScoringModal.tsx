@@ -10,6 +10,9 @@ interface NumericScoringModalProps {
   onSaved?: () => void;
 }
 
+// Instance target admin level (currently ADM3)
+const INSTANCE_TARGET_LEVEL = "ADM3";
+
 export default function NumericScoringModal({
   dataset,
   instance,
@@ -22,8 +25,10 @@ export default function NumericScoringModal({
   const [thresholds, setThresholds] = useState<any[]>([]);
   const [scope, setScope] = useState("affected"); // "affected" or "country"
   const [preview, setPreview] = useState<any>(null);
+  const [dataPreview, setDataPreview] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [loadingDataPreview, setLoadingDataPreview] = useState(false);
 
   // ✅ Load existing config
   useEffect(() => {
@@ -99,7 +104,7 @@ export default function NumericScoringModal({
     setSaving(false);
   };
 
-  // ✅ Preview stats
+  // ✅ Preview stats (after scoring)
   const previewScores = async () => {
     setMessage("Loading preview...");
     const { data, error } = await supabase
@@ -129,6 +134,57 @@ export default function NumericScoringModal({
     setMessage("✅ Preview updated.");
   };
 
+  // ✅ Load data preview (before scoring) to see distribution
+  const loadDataPreview = async () => {
+    setLoadingDataPreview(true);
+    try {
+      const { data, error } = await supabase
+        .from("dataset_values_numeric")
+        .select("value")
+        .eq("dataset_id", dataset.id)
+        .limit(1000); // Sample for preview
+
+      if (error || !data?.length) {
+        setDataPreview(null);
+        return;
+      }
+
+      const values = data.map((d: any) => Number(d.value)).filter((v) => !isNaN(v));
+      if (values.length === 0) {
+        setDataPreview(null);
+        return;
+      }
+
+      const sorted = [...values].sort((a, b) => a - b);
+      const min = sorted[0];
+      const max = sorted[sorted.length - 1];
+      const median = sorted[Math.floor(sorted.length / 2)];
+      const p25 = sorted[Math.floor(sorted.length * 0.25)];
+      const p75 = sorted[Math.floor(sorted.length * 0.75)];
+      const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+
+      setDataPreview({
+        count: values.length,
+        min: min.toFixed(2),
+        max: max.toFixed(2),
+        avg: avg.toFixed(2),
+        median: median.toFixed(2),
+        p25: p25.toFixed(2),
+        p75: p75.toFixed(2),
+      });
+    } catch (err) {
+      console.error("Error loading data preview:", err);
+      setDataPreview(null);
+    } finally {
+      setLoadingDataPreview(false);
+    }
+  };
+
+  // Load data preview on mount
+  useEffect(() => {
+    loadDataPreview();
+  }, [dataset.id]);
+
   const addRange = () =>
     setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
 
@@ -141,10 +197,64 @@ export default function NumericScoringModal({
   const removeRange = (idx: number) =>
     setThresholds(thresholds.filter((_, i) => i !== idx));
 
+  // Check if admin level transformation is needed
+  const needsTransformation = dataset.admin_level !== INSTANCE_TARGET_LEVEL;
+  const transformationType =
+    dataset.admin_level > INSTANCE_TARGET_LEVEL ? "rollup" : "disaggregation";
+
+  // Validate thresholds
+  const validateThresholds = () => {
+    if (thresholds.length === 0) return true;
+    const sorted = [...thresholds].sort((a, b) => a.min - b.min);
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i].min >= sorted[i].max) {
+        return false; // Invalid range
+      }
+      if (i > 0 && sorted[i].min < sorted[i - 1].max) {
+        return false; // Overlapping ranges
+      }
+    }
+    return true;
+  };
+
+  const thresholdsValid = validateThresholds();
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-[650px] p-6 relative text-gray-800">
-        <h2 className="text-lg font-semibold mb-3">{dataset.name}</h2>
+      <div className="bg-white rounded-lg shadow-xl w-[700px] max-h-[90vh] overflow-y-auto p-6 relative text-gray-800">
+        {/* Header */}
+        <div className="mb-4 border-b pb-3">
+          <h2 className="text-lg font-semibold mb-1">{dataset.name}</h2>
+          {dataset.category && (
+            <p className="text-sm text-gray-600">Category: {dataset.category}</p>
+          )}
+        </div>
+
+        {/* Admin Level Warning */}
+        {needsTransformation && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start">
+              <span className="text-amber-600 mr-2">⚠️</span>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-amber-800 mb-1">
+                  Admin Level Transformation Required
+                </p>
+                <p className="text-xs text-amber-700">
+                  Dataset is at <strong>{dataset.admin_level}</strong> level, but this instance
+                  works at <strong>{INSTANCE_TARGET_LEVEL}</strong> level. Data will be{" "}
+                  <strong>{transformationType === "rollup" ? "rolled up" : "disaggregated"}</strong>{" "}
+                  to {INSTANCE_TARGET_LEVEL} before scoring.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Scoring Level Indicator */}
+        <div className="mb-4 p-2 bg-blue-50 border border-blue-200 rounded text-sm">
+          <span className="font-medium text-blue-800">Scoring will be performed at: </span>
+          <span className="text-blue-700">{INSTANCE_TARGET_LEVEL} level</span>
+        </div>
 
         {/* Method Selection */}
         <div className="mb-4">
@@ -163,15 +273,26 @@ export default function NumericScoringModal({
 
         {/* Scope Selection */}
         <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Scope:</label>
+          <label className="block text-sm font-medium mb-1">Normalization Scope:</label>
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value)}
-            className="border rounded p-2 w-full text-sm"
+            className="border rounded p-2 w-full text-sm mb-1"
           >
             <option value="affected">Affected Area Only</option>
             <option value="country">Entire Country</option>
           </select>
+          <p className="text-xs text-gray-600 mt-1">
+            {method === "Normalization" ? (
+              <>
+                <strong>Affected Area:</strong> Normalization uses min/max from only the affected
+                area (may have smaller range). <strong>Entire Country:</strong> Uses national
+                min/max (wider range, more context).
+              </>
+            ) : (
+              "Threshold ranges apply the same regardless of scope selection."
+            )}
+          </p>
         </div>
 
         {method === "Normalization" && (
@@ -193,15 +314,22 @@ export default function NumericScoringModal({
               </select>
             </div>
 
-            <label className="inline-flex items-center mt-2 text-sm">
-              <input
-                type="checkbox"
-                checked={inverse}
-                onChange={(e) => setInverse(e.target.checked)}
-                className="mr-2"
-              />
-              Higher values mean more vulnerability
-            </label>
+            <div className="mb-3 p-2 bg-gray-50 border rounded">
+              <label className="inline-flex items-center text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={inverse}
+                  onChange={(e) => setInverse(e.target.checked)}
+                  className="mr-2"
+                />
+                <span className="font-medium">Higher values = Higher scores (more severe)</span>
+              </label>
+              <p className="text-xs text-gray-600 mt-1 ml-6">
+                {inverse
+                  ? "✓ Checked: Higher values will score higher (e.g., poverty rate 20% scores higher than 10%)"
+                  : "Unchecked: Lower values will score higher (inverse relationship)"}
+              </p>
+            </div>
           </>
         )}
 
@@ -216,60 +344,114 @@ export default function NumericScoringModal({
                 + Add Range
               </button>
             </div>
-            <table className="w-full text-sm border border-gray-200">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="p-1 text-left">Min</th>
-                  <th className="p-1 text-left">Max</th>
-                  <th className="p-1 text-left">Score</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {thresholds.map((t, i) => (
-                  <tr key={i} className="border-t">
-                    <td className="p-1">
-                      <input
-                        type="number"
-                        value={t.min}
-                        onChange={(e) =>
-                          updateRange(i, "min", Number(e.target.value))
-                        }
-                        className="w-full border rounded p-1"
-                      />
-                    </td>
-                    <td className="p-1">
-                      <input
-                        type="number"
-                        value={t.max}
-                        onChange={(e) =>
-                          updateRange(i, "max", Number(e.target.value))
-                        }
-                        className="w-full border rounded p-1"
-                      />
-                    </td>
-                    <td className="p-1">
-                      <input
-                        type="number"
-                        value={t.score}
-                        onChange={(e) =>
-                          updateRange(i, "score", Number(e.target.value))
-                        }
-                        className="w-full border rounded p-1"
-                      />
-                    </td>
-                    <td className="p-1 text-center">
-                      <button
-                        onClick={() => removeRange(i)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        ✕
-                      </button>
-                    </td>
+            {!thresholdsValid && thresholds.length > 0 && (
+              <p className="text-xs text-red-600 mb-2 bg-red-50 p-2 rounded">
+                ⚠️ Invalid thresholds: Ranges must not overlap and min must be less than max.
+              </p>
+            )}
+            {thresholds.length === 0 ? (
+              <p className="text-sm text-gray-500 italic p-2 bg-gray-50 rounded">
+                No thresholds defined. Click "+ Add Range" to create threshold ranges (e.g., 0-300
+                → score 3, 300-1500 → score 2, 1500+ → score 1).
+              </p>
+            ) : (
+              <table className="w-full text-sm border border-gray-200">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-2 text-left">Min Value</th>
+                    <th className="p-2 text-left">Max Value</th>
+                    <th className="p-2 text-left">Score (1-{scaleMax})</th>
+                    <th className="p-2 text-center w-12"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {thresholds.map((t, i) => (
+                    <tr key={i} className="border-t">
+                      <td className="p-2">
+                        <input
+                          type="number"
+                          step="any"
+                          value={t.min}
+                          onChange={(e) =>
+                            updateRange(i, "min", Number(e.target.value))
+                          }
+                          className="w-full border rounded p-1 text-sm"
+                          placeholder="0"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="number"
+                          step="any"
+                          value={t.max}
+                          onChange={(e) =>
+                            updateRange(i, "max", Number(e.target.value))
+                          }
+                          className="w-full border rounded p-1 text-sm"
+                          placeholder="∞"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max={scaleMax}
+                          value={t.score}
+                          onChange={(e) =>
+                            updateRange(i, "score", Number(e.target.value))
+                          }
+                          className="w-full border rounded p-1 text-sm"
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        <button
+                          onClick={() => removeRange(i)}
+                          className="text-red-500 hover:text-red-700 text-lg"
+                          title="Remove range"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Data Preview (before scoring) */}
+        {dataPreview && (
+          <div className="mb-4 p-3 border rounded bg-blue-50 text-sm">
+            <h4 className="font-medium mb-2 text-blue-800">Dataset Value Distribution</h4>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <div className="text-blue-600">Count</div>
+                <div className="font-semibold">{dataPreview.count}</div>
+              </div>
+              <div>
+                <div className="text-blue-600">Min</div>
+                <div className="font-semibold">{dataPreview.min}</div>
+              </div>
+              <div>
+                <div className="text-blue-600">Max</div>
+                <div className="font-semibold">{dataPreview.max}</div>
+              </div>
+              <div>
+                <div className="text-blue-600">Average</div>
+                <div className="font-semibold">{dataPreview.avg}</div>
+              </div>
+              <div>
+                <div className="text-blue-600">Median</div>
+                <div className="font-semibold">{dataPreview.median}</div>
+              </div>
+              <div>
+                <div className="text-blue-600">Range</div>
+                <div className="font-semibold">
+                  {dataPreview.p25} - {dataPreview.p75}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -325,8 +507,9 @@ export default function NumericScoringModal({
           </button>
           <button
             onClick={applyScoring}
-            disabled={saving}
+            disabled={saving || (method === "Thresholds" && (!thresholdsValid || thresholds.length === 0))}
             className="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
+            title={method === "Thresholds" && (!thresholdsValid || thresholds.length === 0) ? "Please add valid threshold ranges" : ""}
           >
             Apply Scoring
           </button>
