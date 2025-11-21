@@ -42,6 +42,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
   const [features, setFeatures] = useState<any[]>([]);
+  const [overallFeatures, setOverallFeatures] = useState<any[]>([]); // Store overall features for reuse
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -203,6 +204,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       
       // Set initial features (overall view)
       setFeatures(parsed);
+      setOverallFeatures(parsed); // Store for reuse when switching back to overall
     } catch (err: any) {
       console.error("Error loading instance page:", err);
       setError(err?.message || "Failed to load instance data");
@@ -225,16 +227,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           return;
         }
         
-        const { data: geoData } = await supabase
+        const { data: geoData, error: geoError } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("geojson")
           .eq("instance_id", instanceId);
 
+        if (geoError) {
+          console.error("Error fetching overall GeoJSON:", geoError);
+          setFeatures([]);
+          return;
+        }
+
+        // Each row contains a single Feature in the geojson field
         const parsed = (geoData || [])
-          .map((g: any) => {
+          .map((row: any) => {
             try {
-              return typeof g.geojson === 'string' ? JSON.parse(g.geojson) : g.geojson;
+              const feature = typeof row.geojson === 'string' 
+                ? JSON.parse(row.geojson) 
+                : row.geojson;
+              return feature;
             } catch (e) {
+              console.warn("Error parsing GeoJSON feature:", e);
               return null;
             }
           })
@@ -243,73 +256,81 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         setFeatures(parsed);
       } else if (selection.type === 'dataset' && selection.datasetId) {
         // Load scores for specific dataset
-        const { data: scores } = await supabase
+        const { data: scores, error: scoresError } = await supabase
           .from("instance_dataset_scores")
           .select("admin_pcode, score")
           .eq("instance_id", instanceId)
           .eq("dataset_id", selection.datasetId);
 
-        if (!scores || scores.length === 0) {
+        if (scoresError) {
+          console.error("Error fetching dataset scores:", scoresError);
           setFeatures([]);
           return;
         }
 
-        // Get geometry from overall view and filter by dataset scores
-        // This is the most reliable approach since the RPC function may not exist
-        const { data: overallGeo, error: geoError } = await supabase
+        if (!scores || scores.length === 0) {
+          console.log("No scores found for dataset:", selection.datasetId);
+          setFeatures([]);
+          return;
+        }
+
+        // Create score map for this dataset
+        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
+        console.log(`Loaded ${scores.length} scores for dataset ${selection.datasetId}`);
+
+        // Get geometry from view - each row is a single Feature (not FeatureCollection)
+        const { data: geoRows, error: geoError } = await supabase
           .from("v_instance_admin_scores_geojson")
-          .select("geojson")
+          .select("admin_pcode, geojson")
           .eq("instance_id", instanceId);
         
         if (geoError) {
-          console.error("Error fetching overall GeoJSON:", geoError);
+          console.error("Error fetching GeoJSON:", geoError);
           setFeatures([]);
           return;
         }
         
-        if (!overallGeo || overallGeo.length === 0) {
+        if (!geoRows || geoRows.length === 0) {
+          console.log("No GeoJSON features found for instance");
           setFeatures([]);
           return;
         }
         
-        // Parse GeoJSON
-        const parsed = overallGeo
-          .map((g: any) => {
+        console.log(`Loaded ${geoRows.length} GeoJSON features from view`);
+        
+        // Parse and filter features - each row has a single Feature in the geojson field
+        const filteredFeatures = geoRows
+          .map((row: any) => {
             try {
-              return typeof g.geojson === 'string' ? JSON.parse(g.geojson) : g.geojson;
+              // Parse the geojson field (it's a single Feature, not FeatureCollection)
+              const feature = typeof row.geojson === 'string' 
+                ? JSON.parse(row.geojson) 
+                : row.geojson;
+              
+              // Check if this admin_pcode has a score for this dataset
+              const datasetScore = scoreMap.get(row.admin_pcode);
+              
+              // Only include features that have scores for this dataset
+              if (datasetScore === undefined) return null;
+              
+              // Update the feature with the dataset-specific score
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: row.admin_pcode,
+                  admin_name: feature.properties?.admin_name || feature.properties?.name,
+                  score: datasetScore, // Use dataset-specific score
+                }
+              };
             } catch (e) {
-              console.warn("Error parsing GeoJSON:", e);
+              console.warn("Error parsing GeoJSON feature:", e, row);
               return null;
             }
           })
           .filter((f: any) => f !== null);
         
-        // Create score map for this dataset
-        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
-        
-        // Filter to only features with scores for this dataset and update scores
-        const filteredFeatures = parsed
-          .flatMap((fc: any) => {
-            if (!fc || !fc.features) return [];
-            return fc.features.map((f: any) => {
-              const adminPcode = f.properties?.admin_pcode;
-              const datasetScore = scoreMap.get(adminPcode);
-              
-              // Only include features that have scores for this dataset
-              if (datasetScore === undefined) return null;
-              
-              return {
-                ...f,
-                properties: {
-                  ...f.properties,
-                  admin_name: f.properties?.admin_name || f.properties?.name,
-                  score: datasetScore, // Use dataset-specific score
-                }
-              };
-            });
-          })
-          .filter((f: any) => f !== null);
-        
+        console.log(`Filtered to ${filteredFeatures.length} features with dataset scores`);
         setFeatures(filteredFeatures);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
@@ -335,11 +356,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   }, [instanceId]);
 
-  // ✅ Load features when selection changes (but not on initial load)
+  // ✅ Load features when selection changes
   useEffect(() => {
-    // Only reload if we have initial features loaded and selection changed from 'overall'
-    if (!loading && instance && instanceId && features.length > 0 && selectedLayer.type !== 'overall') {
-      loadFeaturesForSelection(selectedLayer);
+    // Only reload if we have instance loaded
+    if (!loading && instance && instanceId) {
+      loadFeaturesForSelection(selectedLayer, overallFeatures);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category]);
