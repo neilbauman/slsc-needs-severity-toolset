@@ -44,6 +44,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [features, setFeatures] = useState<any[]>([]);
   const [overallFeatures, setOverallFeatures] = useState<any[]>([]); // Store overall features for reuse
   const [loading, setLoading] = useState(true);
+  const [loadingFeatures, setLoadingFeatures] = useState(false); // Track feature loading separately
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showScoringModal, setShowScoringModal] = useState(false);
@@ -220,6 +221,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     overallFeatures?: any[]
   ) => {
     try {
+      // Clear features first to prevent stale data from showing
+      setFeatures([]);
+      setLoadingFeatures(true);
+      
       if (selection.type === 'overall') {
         // Use overall instance scores
         if (overallFeatures) {
@@ -254,6 +259,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .filter((f: any) => f !== null);
         
         setFeatures(parsed);
+        setLoadingFeatures(false);
       } else if (selection.type === 'dataset' && selection.datasetId) {
         console.log(`Loading features for dataset: ${selection.datasetId}`);
         
@@ -343,6 +349,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         // Force a new array reference to ensure React detects the change
         setFeatures([...filteredFeatures]);
+        setLoadingFeatures(false);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
         // If a specific category is selected, we'd need category-specific scoring
@@ -358,6 +365,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     } catch (err) {
       console.error("Error loading features for selection:", err);
       setFeatures([]);
+      setLoadingFeatures(false);
     }
   };
 
@@ -499,11 +507,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       <div className="flex gap-2">
         {/* Map - Fixed height for laptop viewing */}
         <div className="flex-1 border rounded-lg overflow-hidden bg-white" style={{ height: '600px', minHeight: '600px' }}>
-          {features.length === 0 && !loading ? (
+          {features.length === 0 && !loading && !loadingFeatures ? (
             <div className="h-full flex items-center justify-center text-gray-500">
               <div className="text-center">
                 <p className="mb-2">No map data available</p>
                 <p className="text-sm">Scores may not have been calculated yet.</p>
+              </div>
+            </div>
+          ) : loadingFeatures ? (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              <div className="text-center">
+                <p className="mb-2">Loading map data...</p>
+                <p className="text-sm">Switching to selected dataset...</p>
               </div>
             </div>
           ) : (
@@ -519,17 +534,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               <MapBoundsController features={features} />
-              {features.map((f, idx) => {
-                // Use a more stable key based on admin_pcode if available
-                const featureKey = f?.properties?.admin_pcode || `feature-${idx}`;
-                return (
-                  <GeoJSON 
-                    key={`${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${featureKey}`} 
-                    data={f} 
-                    onEachFeature={onEachFeature} 
-                  />
-                );
-              })}
+              {features.length > 0 && (
+                <GeoJSON 
+                  key={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}`}
+                  data={{
+                    type: 'FeatureCollection',
+                    features: features
+                  }}
+                  onEachFeature={onEachFeature}
+                />
+              )}
             </MapContainer>
           )}
         </div>
