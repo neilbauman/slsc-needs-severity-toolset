@@ -534,33 +534,34 @@ export default function NumericScoringModal({
         const batchSize = 1000;
         let hasMore = true;
         let offset = 0;
-      
-      while (hasMore) {
-        const batchQuery = query.range(offset, offset + batchSize - 1);
-        const { data: batchData, error: batchError, count } = await batchQuery;
         
-        if (batchError) {
-          console.error("Error loading data preview:", batchError);
-          setDataPreview(null);
-          return;
-        }
-        
-        if (batchData && batchData.length > 0) {
-          allData = [...allData, ...batchData];
-          offset += batchSize;
+        while (hasMore) {
+          const batchQuery = query.range(offset, offset + batchSize - 1);
+          const { data: batchData, error: batchError, count } = await batchQuery;
           
-          // If we got fewer rows than batchSize, we're done
-          // Or if count is available and we've fetched all rows
-          if (batchData.length < batchSize || (count !== null && allData.length >= count)) {
+          if (batchError) {
+            console.error("Error loading data preview:", batchError);
+            setDataPreview(null);
+            return;
+          }
+          
+          if (batchData && batchData.length > 0) {
+            allData = [...allData, ...batchData];
+            offset += batchSize;
+            
+            // If we got fewer rows than batchSize, we're done
+            // Or if count is available and we've fetched all rows
+            if (batchData.length < batchSize || (count !== null && allData.length >= count)) {
+              hasMore = false;
+            }
+          } else {
             hasMore = false;
           }
-        } else {
-          hasMore = false;
-        }
-        
-        // Safety limit: don't fetch more than 10,000 rows for preview
-        if (allData.length >= 10000) {
-          hasMore = false;
+          
+          // Safety limit: don't fetch more than 10,000 rows for preview
+          if (allData.length >= 10000) {
+            hasMore = false;
+          }
         }
       }
 
