@@ -462,7 +462,7 @@ export default function NumericScoringModal({
   }, [dataset?.id, scope, instance?.admin_scope]);
 
   const addRange = () =>
-    setThresholds([...thresholds, { min: 0, max: 0, score: 1 }]);
+    setThresholds([...thresholds, { min: 0, max: null, score: 1 }]);
 
   const updateRange = (idx: number, key: string, value: any) => {
     const updated = [...thresholds];
@@ -499,11 +499,31 @@ export default function NumericScoringModal({
     if (thresholds.length === 0) return true;
     const sorted = [...thresholds].sort((a, b) => a.min - b.min);
     for (let i = 0; i < sorted.length; i++) {
-      if (sorted[i].min >= sorted[i].max) {
-        return false; // Invalid range
+      const threshold = sorted[i];
+      // Allow empty/null max for the last threshold only (represents "no upper limit")
+      const isLastThreshold = i === sorted.length - 1;
+      const maxIsEmpty = threshold.max == null || threshold.max === '' || (typeof threshold.max === 'number' && isNaN(threshold.max));
+      
+      // For non-last thresholds, max must be set and greater than min
+      if (!isLastThreshold) {
+        if (maxIsEmpty || threshold.min >= threshold.max) {
+          return false; // Invalid range
+        }
+      } else {
+        // Last threshold: if max is set, it must be greater than min; if empty, that's OK
+        if (!maxIsEmpty && threshold.min >= threshold.max) {
+          return false; // Invalid range
+        }
       }
-      if (i > 0 && sorted[i].min < sorted[i - 1].max) {
-        return false; // Overlapping ranges
+      
+      // Check for overlapping ranges (non-adjacent)
+      if (i > 0) {
+        const prevMax = sorted[i - 1].max;
+        // Previous threshold's max must be less than or equal to current min
+        // (allowing equality means ranges can be adjacent: [0-100], [100-200])
+        if (prevMax != null && prevMax !== '' && !isNaN(prevMax) && threshold.min < prevMax) {
+          return false; // Overlapping ranges
+        }
       }
     }
     return true;
@@ -683,12 +703,14 @@ export default function NumericScoringModal({
                         <input
                           type="number"
                           step="any"
-                          value={t.max}
-                          onChange={(e) =>
-                            updateRange(i, "max", Number(e.target.value))
-                          }
+                          value={t.max === null || t.max === 0 || t.max === '' ? '' : t.max}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            // Allow empty string for "no upper limit" (last threshold)
+                            updateRange(i, "max", val === '' ? null : Number(val));
+                          }}
                           className="w-full border rounded p-1 text-sm"
-                          placeholder="∞"
+                          placeholder={i === thresholds.length - 1 ? "∞ (optional)" : "∞"}
                         />
                       </td>
                       <td className="p-2">

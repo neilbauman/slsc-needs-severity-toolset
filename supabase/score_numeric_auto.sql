@@ -118,23 +118,61 @@ BEGIN
     -- ============================================
     
     -- Calculate min/max based on scope
-    IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
-      -- Calculate min/max from ONLY affected area data
-      SELECT 
-        MIN(value),
-        MAX(value)
-      INTO v_min_value, v_max_value
-      FROM dataset_values_numeric
-      WHERE dataset_id = in_dataset_id
-        AND admin_pcode = ANY(v_affected_adm3_codes);
+    -- If dataset is ADM4, we need to roll up to ADM3 first for min/max calculation
+    IF v_dataset_admin_level = 'ADM4' THEN
+      -- Roll up ADM4 to ADM3 and calculate min/max from rolled-up values
+      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+        SELECT 
+          MIN(rolled_value),
+          MAX(rolled_value)
+        INTO v_min_value, v_max_value
+        FROM (
+          SELECT 
+            ab3.admin_pcode,
+            AVG(dvn.value) AS rolled_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          GROUP BY ab3.admin_pcode
+        ) rolled_data;
+      ELSE
+        SELECT 
+          MIN(rolled_value),
+          MAX(rolled_value)
+        INTO v_min_value, v_max_value
+        FROM (
+          SELECT 
+            ab3.admin_pcode,
+            AVG(dvn.value) AS rolled_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+          GROUP BY ab3.admin_pcode
+        ) rolled_data;
+      END IF;
     ELSE
-      -- Calculate min/max from entire country
-      SELECT 
-        MIN(value),
-        MAX(value)
-      INTO v_min_value, v_max_value
-      FROM dataset_values_numeric
-      WHERE dataset_id = in_dataset_id;
+      -- Dataset is already at ADM3 or higher, calculate min/max directly
+      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+        -- Calculate min/max from ONLY affected area data
+        SELECT 
+          MIN(value),
+          MAX(value)
+        INTO v_min_value, v_max_value
+        FROM dataset_values_numeric
+        WHERE dataset_id = in_dataset_id
+          AND admin_pcode = ANY(v_affected_adm3_codes);
+      ELSE
+        -- Calculate min/max from entire country
+        SELECT 
+          MIN(value),
+          MAX(value)
+        INTO v_min_value, v_max_value
+        FROM dataset_values_numeric
+        WHERE dataset_id = in_dataset_id;
+      END IF;
     END IF;
     
     -- Check if we have valid min/max values
@@ -148,25 +186,55 @@ BEGIN
       v_score := (in_scale_max + 1) / 2.0;
       
       -- Insert scores for all affected areas (or all if not limited)
-      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
-        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
-        SELECT 
-          in_instance_id,
-          in_dataset_id,
-          admin_pcode,
-          v_score
-        FROM dataset_values_numeric
-        WHERE dataset_id = in_dataset_id
-          AND admin_pcode = ANY(v_affected_adm3_codes);
+      -- If dataset is ADM4, use rolled-up values; otherwise use direct values
+      IF v_dataset_admin_level = 'ADM4' THEN
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            v_score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          GROUP BY ab3.admin_pcode;
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            v_score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+          GROUP BY ab3.admin_pcode;
+        END IF;
       ELSE
-        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
-        SELECT 
-          in_instance_id,
-          in_dataset_id,
-          admin_pcode,
-          v_score
-        FROM dataset_values_numeric
-        WHERE dataset_id = in_dataset_id;
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            admin_pcode,
+            v_score
+          FROM dataset_values_numeric
+          WHERE dataset_id = in_dataset_id
+            AND admin_pcode = ANY(v_affected_adm3_codes);
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            admin_pcode,
+            v_score
+          FROM dataset_values_numeric
+          WHERE dataset_id = in_dataset_id;
+        END IF;
       END IF;
       
       RETURN;
@@ -176,41 +244,95 @@ BEGIN
     v_value_range := v_max_value - v_min_value;
     
     -- Normalize and insert scores
-    IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
-      -- Score only affected areas, but use affected area's min/max for normalization
-      INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
-      SELECT 
-        in_instance_id,
-        in_dataset_id,
-        dvn.admin_pcode,
-        CASE
-          WHEN in_inverse THEN
-            -- Inverted: higher values get lower scores
-            in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
-          ELSE
-            -- Normal: higher values get higher scores
-            1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
-        END AS score
-      FROM dataset_values_numeric dvn
-      WHERE dvn.dataset_id = in_dataset_id
-        AND dvn.admin_pcode = ANY(v_affected_adm3_codes);
+    -- If dataset is ADM4, use rolled-up values; otherwise use direct values
+    IF v_dataset_admin_level = 'ADM4' THEN
+      -- Roll up ADM4 to ADM3 and score
+      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        WITH rolled_up_data AS (
+          SELECT 
+            ab3.admin_pcode AS adm3_pcode,
+            AVG(dvn.value) AS rolled_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          GROUP BY ab3.admin_pcode
+        )
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          rud.adm3_pcode,
+          CASE
+            WHEN in_inverse THEN
+              in_scale_max - ((rud.rolled_value - v_min_value) / v_value_range * (in_scale_max - 1))
+            ELSE
+              1 + ((rud.rolled_value - v_min_value) / v_value_range * (in_scale_max - 1))
+          END AS score
+        FROM rolled_up_data rud;
+      ELSE
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        WITH rolled_up_data AS (
+          SELECT 
+            ab3.admin_pcode AS adm3_pcode,
+            AVG(dvn.value) AS rolled_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+          GROUP BY ab3.admin_pcode
+        )
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          rud.adm3_pcode,
+          CASE
+            WHEN in_inverse THEN
+              in_scale_max - ((rud.rolled_value - v_min_value) / v_value_range * (in_scale_max - 1))
+            ELSE
+              1 + ((rud.rolled_value - v_min_value) / v_value_range * (in_scale_max - 1))
+          END AS score
+        FROM rolled_up_data rud;
+      END IF;
     ELSE
-      -- Score entire country using country's min/max
-      INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
-      SELECT 
-        in_instance_id,
-        in_dataset_id,
-        dvn.admin_pcode,
-        CASE
-          WHEN in_inverse THEN
-            -- Inverted: higher values get lower scores
-            in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
-          ELSE
-            -- Normal: higher values get higher scores
-            1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
-        END AS score
-      FROM dataset_values_numeric dvn
-      WHERE dvn.dataset_id = in_dataset_id;
+      -- Dataset is already at ADM3 or higher, score directly
+      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+        -- Score only affected areas, but use affected area's min/max for normalization
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          dvn.admin_pcode,
+          CASE
+            WHEN in_inverse THEN
+              -- Inverted: higher values get lower scores
+              in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+            ELSE
+              -- Normal: higher values get higher scores
+              1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+          END AS score
+        FROM dataset_values_numeric dvn
+        WHERE dvn.dataset_id = in_dataset_id
+          AND dvn.admin_pcode = ANY(v_affected_adm3_codes);
+      ELSE
+        -- Score entire country using country's min/max
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          dvn.admin_pcode,
+          CASE
+            WHEN in_inverse THEN
+              -- Inverted: higher values get lower scores
+              in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+            ELSE
+              -- Normal: higher values get higher scores
+              1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+          END AS score
+        FROM dataset_values_numeric dvn
+        WHERE dvn.dataset_id = in_dataset_id;
+      END IF;
     END IF;
     
   ELSIF in_method = 'threshold' THEN
@@ -222,52 +344,124 @@ BEGIN
       RAISE EXCEPTION 'Thresholds required for threshold method';
     END IF;
     
-    -- Score based on thresholds
-    IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
-      INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
-      SELECT 
-        in_instance_id,
-        in_dataset_id,
-        dvn.admin_pcode,
-        (
-          SELECT (threshold->>'score')::NUMERIC
-          FROM jsonb_array_elements(in_thresholds) AS threshold
-          WHERE (threshold->>'min')::NUMERIC <= dvn.value
-            AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
-          ORDER BY (threshold->>'min')::NUMERIC DESC
-          LIMIT 1
-        ) AS score
-      FROM dataset_values_numeric dvn
-      WHERE dvn.dataset_id = in_dataset_id
-        AND dvn.admin_pcode = ANY(v_affected_adm3_codes)
-        AND EXISTS (
+    -- Check if we need to roll up from ADM4 to ADM3
+    -- If dataset is ADM4, we need to aggregate to ADM3 before scoring
+    IF v_dataset_admin_level = 'ADM4' THEN
+      -- Roll up ADM4 values to ADM3 using average (appropriate for density metrics)
+      -- Use a CTE to aggregate values first
+      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        WITH rolled_up_data AS (
+          SELECT 
+            ab3.admin_pcode AS adm3_pcode,
+            AVG(dvn.value) AS rolled_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          GROUP BY ab3.admin_pcode
+        )
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          rud.adm3_pcode,
+          (
+            SELECT (threshold->>'score')::NUMERIC
+            FROM jsonb_array_elements(in_thresholds) AS threshold
+            WHERE (threshold->>'min')::NUMERIC <= rud.rolled_value
+              AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > rud.rolled_value OR (threshold->>'max')::TEXT IS NULL)
+            ORDER BY (threshold->>'min')::NUMERIC DESC
+            LIMIT 1
+          ) AS score
+        FROM rolled_up_data rud
+        WHERE EXISTS (
           SELECT 1
           FROM jsonb_array_elements(in_thresholds) AS threshold
-          WHERE (threshold->>'min')::NUMERIC <= dvn.value
-            AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+          WHERE (threshold->>'min')::NUMERIC <= rud.rolled_value
+            AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > rud.rolled_value OR (threshold->>'max')::TEXT IS NULL)
         );
+      ELSE
+        -- Roll up all ADM4 to ADM3 (entire country)
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        WITH rolled_up_data AS (
+          SELECT 
+            ab3.admin_pcode AS adm3_pcode,
+            AVG(dvn.value) AS rolled_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab4 ON ab4.admin_pcode = dvn.admin_pcode AND ab4.admin_level = 'ADM4'
+          INNER JOIN admin_boundaries ab3 ON ab3.admin_pcode = ab4.parent_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+          GROUP BY ab3.admin_pcode
+        )
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          rud.adm3_pcode,
+          (
+            SELECT (threshold->>'score')::NUMERIC
+            FROM jsonb_array_elements(in_thresholds) AS threshold
+            WHERE (threshold->>'min')::NUMERIC <= rud.rolled_value
+              AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > rud.rolled_value OR (threshold->>'max')::TEXT IS NULL)
+            ORDER BY (threshold->>'min')::NUMERIC DESC
+            LIMIT 1
+          ) AS score
+        FROM rolled_up_data rud
+        WHERE EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(in_thresholds) AS threshold
+          WHERE (threshold->>'min')::NUMERIC <= rud.rolled_value
+            AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > rud.rolled_value OR (threshold->>'max')::TEXT IS NULL)
+        );
+      END IF;
     ELSE
-      INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
-      SELECT 
-        in_instance_id,
-        in_dataset_id,
-        dvn.admin_pcode,
-        (
-          SELECT (threshold->>'score')::NUMERIC
-          FROM jsonb_array_elements(in_thresholds) AS threshold
-          WHERE (threshold->>'min')::NUMERIC <= dvn.value
-            AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
-          ORDER BY (threshold->>'min')::NUMERIC DESC
-          LIMIT 1
-        ) AS score
-      FROM dataset_values_numeric dvn
-      WHERE dvn.dataset_id = in_dataset_id
-        AND EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements(in_thresholds) AS threshold
-          WHERE (threshold->>'min')::NUMERIC <= dvn.value
-            AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
-        );
+      -- Dataset is already at ADM3 or higher, score directly
+      IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          dvn.admin_pcode,
+          (
+            SELECT (threshold->>'score')::NUMERIC
+            FROM jsonb_array_elements(in_thresholds) AS threshold
+            WHERE (threshold->>'min')::NUMERIC <= dvn.value
+              AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+            ORDER BY (threshold->>'min')::NUMERIC DESC
+            LIMIT 1
+          ) AS score
+        FROM dataset_values_numeric dvn
+        WHERE dvn.dataset_id = in_dataset_id
+          AND dvn.admin_pcode = ANY(v_affected_adm3_codes)
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(in_thresholds) AS threshold
+            WHERE (threshold->>'min')::NUMERIC <= dvn.value
+              AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+          );
+      ELSE
+        INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+        SELECT 
+          in_instance_id,
+          in_dataset_id,
+          dvn.admin_pcode,
+          (
+            SELECT (threshold->>'score')::NUMERIC
+            FROM jsonb_array_elements(in_thresholds) AS threshold
+            WHERE (threshold->>'min')::NUMERIC <= dvn.value
+              AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+            ORDER BY (threshold->>'min')::NUMERIC DESC
+            LIMIT 1
+          ) AS score
+        FROM dataset_values_numeric dvn
+        WHERE dvn.dataset_id = in_dataset_id
+          AND EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(in_thresholds) AS threshold
+            WHERE (threshold->>'min')::NUMERIC <= dvn.value
+              AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+          );
+      END IF;
     END IF;
     
   ELSIF in_method = 'zscore' THEN
