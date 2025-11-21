@@ -49,7 +49,29 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string }>({ type: 'overall' });
 
+  // Ensure instanceId exists
+  const instanceId = params?.id;
+  
+  if (!instanceId) {
+    return (
+      <div className="p-4">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <h2 className="text-red-800 font-semibold mb-2">Invalid Instance ID</h2>
+          <p className="text-red-600 text-sm mb-4">No instance ID provided.</p>
+          <Link
+            href="/instances"
+            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+          >
+            Back to Instances
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const fetchData = async () => {
+    if (!instanceId) return;
+    
     try {
       setError(null);
       
@@ -59,21 +81,21 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data, error: instanceError } = await supabase
           .from("v_instance_affected_summary")
           .select("*")
-          .eq("instance_id", params.id)
+          .eq("instance_id", instanceId)
           .single();
 
         if (!instanceError) {
           instanceData = data;
           // Ensure instance_id is set as id for consistency
           if (instanceData && !instanceData.id) {
-            instanceData.id = instanceData.instance_id || params.id;
+            instanceData.id = instanceData.instance_id || instanceId;
           }
           // If view doesn't have admin_scope, fetch it separately
           if (!instanceData.admin_scope) {
             const { data: scopeData } = await supabase
               .from("instances")
               .select("admin_scope")
-              .eq("id", params.id)
+              .eq("id", instanceId)
               .single();
             if (scopeData) {
               instanceData.admin_scope = scopeData.admin_scope;
@@ -85,14 +107,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data, error: directError } = await supabase
           .from("instances")
           .select("*")
-          .eq("id", params.id)
+          .eq("id", instanceId)
           .single();
         
         if (!directError && data) {
           instanceData = data;
         } else if (!instanceData) {
           // Last resort: create minimal instance object with just the ID
-          instanceData = { id: params.id, name: `Instance ${params.id}` };
+          instanceData = { id: instanceId, name: `Instance ${instanceId}` };
         }
       }
       setInstance(instanceData);
@@ -103,7 +125,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data, error: dsError } = await supabase
           .from("v_instance_datasets_view")
           .select("*")
-          .eq("instance_id", params.id);
+          .eq("instance_id", instanceId);
 
         if (!dsError && data) {
           dsData = data;
@@ -122,7 +144,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 admin_level
               )
             `)
-            .eq("instance_id", params.id);
+            .eq("instance_id", instanceId);
 
           if (!fallbackError && fallbackData) {
             // Load configs separately
@@ -132,7 +154,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               const { data: configs } = await supabase
                 .from("instance_dataset_config")
                 .select("dataset_id, score_config")
-                .eq("instance_id", params.id)
+                .eq("instance_id", instanceId)
                 .in("dataset_id", datasetIds);
               
               configMap = new Map(
@@ -159,7 +181,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data, error: geoError } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("geojson")
-          .eq("instance_id", params.id);
+          .eq("instance_id", instanceId);
 
         if (!geoError && data) {
           geoData = data;
@@ -206,7 +228,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data: geoData } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("geojson")
-          .eq("instance_id", params.id);
+          .eq("instance_id", instanceId);
 
         const parsed = (geoData || [])
           .map((g: any) => {
@@ -224,7 +246,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data: scores } = await supabase
           .from("instance_dataset_scores")
           .select("admin_pcode, score")
-          .eq("instance_id", params.id)
+          .eq("instance_id", instanceId)
           .eq("dataset_id", selection.datasetId);
 
         if (!scores || scores.length === 0) {
@@ -237,7 +259,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const { data: overallGeo, error: geoError } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("geojson")
-          .eq("instance_id", params.id);
+          .eq("instance_id", instanceId);
         
         if (geoError) {
           console.error("Error fetching overall GeoJSON:", geoError);
@@ -308,13 +330,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   };
 
   useEffect(() => {
-    fetchData();
-  }, [params.id]);
+    if (instanceId) {
+      fetchData();
+    }
+  }, [instanceId]);
 
   // ✅ Load features when selection changes (but not on initial load)
   useEffect(() => {
     // Only reload if we have initial features loaded and selection changed from 'overall'
-    if (!loading && instance && params.id && features.length > 0 && selectedLayer.type !== 'overall') {
+    if (!loading && instance && instanceId && features.length > 0 && selectedLayer.type !== 'overall') {
       loadFeaturesForSelection(selectedLayer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -412,7 +436,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold text-gray-800">
-              {instance?.name || `Instance ${params.id}`}
+              {instance?.name || `Instance ${instanceId}`}
             </h1>
             {instance?.description && (
               <p className="text-sm text-gray-600 mt-1">{instance.description}</p>
@@ -486,7 +510,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           <div className="bg-white border rounded-lg p-3 flex-1 overflow-y-auto">
             <h3 className="font-semibold mb-2 text-gray-800">Score Layers</h3>
             <ScoreLayerSelector
-              instanceId={params.id}
+              instanceId={instanceId}
               onSelect={(selection) => {
                 setSelectedLayer(selection);
               }}
