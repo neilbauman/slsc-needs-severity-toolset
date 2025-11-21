@@ -476,16 +476,16 @@ export default function NumericScoringModal({
       let allData: any[] = [];
       
       if (needsDisaggregation) {
-        // For ADM2 datasets, show the ADM2 values that will be disaggregated
-        // Filter by affected ADM2 areas if scope is "affected"
+        // For ADM2 datasets, show ALL ADM2 values in the dataset for preview
+        // (not just affected ones, so user can see full distribution)
+        // Note: Only affected ADM2s will be scored, but preview shows all for context
         let query = supabase
           .from("dataset_values_numeric")
           .select("value, admin_pcode", { count: "exact" })
           .eq("dataset_id", dataset.id);
         
-        if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
-          query = query.in("admin_pcode", instance.admin_scope);
-        }
+        // Don't filter by affected area for preview - show all values
+        // The actual scoring will filter correctly
         
         const batchSize = 1000;
         let hasMore = true;
@@ -596,7 +596,11 @@ export default function NumericScoringModal({
         p25: p25.toFixed(2),
         p75: p75.toFixed(2),
         scope: scope === "affected" ? "affected area" : "entire country",
-        note: needsDisaggregation ? "Showing ADM2 values (will be inherited by ADM3s)" : undefined,
+        note: needsDisaggregation 
+          ? (scope === "affected" && instance?.admin_scope?.length 
+              ? `Showing all ADM2 values in dataset. Only ${instance.admin_scope.length} ADM2(s) in affected area will be scored.`
+              : "Showing ADM2 values (will be inherited by ADM3s)")
+          : undefined,
       });
     } catch (err) {
       console.error("Error loading data preview:", err);
