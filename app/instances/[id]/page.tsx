@@ -9,6 +9,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceMetricsPanel from "@/components/InstanceMetricsPanel";
+import VulnerableLocationsPanel from "@/components/VulnerableLocationsPanel";
 
 // Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
@@ -100,47 +101,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     try {
       setError(null);
       
-      // Fetch instance basic info (fallback if view doesn't exist)
+      // Fetch instance basic info - always fetch from instances table for name
       let instanceData = null;
-      try {
-        const { data, error: instanceError } = await supabase
-          .from("v_instance_affected_summary")
-          .select("*")
-          .eq("instance_id", instanceId)
-          .single();
-
-        if (!instanceError) {
-          instanceData = data;
-          // Ensure instance_id is set as id for consistency
-          if (instanceData && !instanceData.id) {
-            instanceData.id = instanceData.instance_id || instanceId;
-          }
-          // If view doesn't have admin_scope, fetch it separately
-          if (!instanceData.admin_scope) {
-            const { data: scopeData } = await supabase
-              .from("instances")
-              .select("admin_scope")
-              .eq("id", instanceId)
-              .single();
-            if (scopeData) {
-              instanceData.admin_scope = scopeData.admin_scope;
-            }
-          }
-        }
-      } catch (e) {
-        // View might not exist, try direct table
-        const { data, error: directError } = await supabase
-          .from("instances")
-          .select("*")
-          .eq("id", instanceId)
-          .single();
-        
-        if (!directError && data) {
-          instanceData = data;
-        } else if (!instanceData) {
-          // Last resort: create minimal instance object with just the ID
-          instanceData = { id: instanceId, name: `Instance ${instanceId}` };
-        }
+      const { data: directData, error: directError } = await supabase
+        .from("instances")
+        .select("*")
+        .eq("id", instanceId)
+        .single();
+      
+      if (!directError && directData) {
+        instanceData = directData;
+      } else {
+        // Last resort: create minimal instance object with just the ID
+        instanceData = { id: instanceId, name: `Instance ${instanceId}` };
       }
       setInstance(instanceData);
 
@@ -1051,6 +1024,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Vulnerable Locations Panel */}
+      <div className="mt-4">
+        <VulnerableLocationsPanel instanceId={instanceId} />
       </div>
 
       {/* Scoring Modal */}
