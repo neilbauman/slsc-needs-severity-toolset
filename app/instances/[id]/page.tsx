@@ -407,12 +407,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     if (feature.properties && feature.properties.score !== undefined) {
       const score = Number(feature.properties.score);
       const color = getColor(score);
-      layer.setStyle({ 
-        color, 
-        fillColor: color, 
-        fillOpacity: 0.6,
-        weight: 2
-      });
       const adminName = feature.properties.admin_name || feature.properties.name || 'Unknown';
       let layerName = 'Overall Score';
       if (selectedLayer.type === 'dataset') {
@@ -424,20 +418,102 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
         }
       }
+      
+      // Set initial style with thin black borders
+      layer.setStyle({ 
+        color: '#000000', // Black border
+        fillColor: color, 
+        fillOpacity: 0.6,
+        weight: 1, // Thin border
+        opacity: 1
+      });
+      
+      // Bind tooltip for hover (shows name and score)
+      layer.bindTooltip(
+        `<strong>${adminName}</strong><br/>${layerName}: ${score.toFixed(2)}`,
+        {
+          permanent: false,
+          direction: 'top',
+          offset: [0, -10],
+          className: 'custom-tooltip'
+        }
+      );
+      
+      // Bind popup for click
       layer.bindPopup(
         `<strong>${adminName}</strong><br/>${layerName}: ${score.toFixed(2)}`
       );
+      
+      // Add hover effects
+      layer.on({
+        mouseover: (e: any) => {
+          const hoverLayer = e.target;
+          hoverLayer.setStyle({
+            weight: 2, // Thicker border on hover
+            fillOpacity: 0.8,
+            color: '#000000',
+            fillColor: color
+          });
+        },
+        mouseout: (e: any) => {
+          const hoverLayer = e.target;
+          hoverLayer.setStyle({
+            weight: 1, // Back to thin border
+            fillOpacity: 0.6,
+            color: '#000000',
+            fillColor: color
+          });
+        }
+      });
     } else {
       // No score - use gray
+      const adminName = feature.properties?.admin_name || feature.properties?.name || 'Unknown';
+      
       layer.setStyle({ 
-        color: '#999', 
+        color: '#000000', // Black border
         fillColor: '#ddd', 
         fillOpacity: 0.3,
-        weight: 1
+        weight: 1, // Thin border
+        opacity: 1
       });
-      layer.bindPopup(
-        `<strong>${feature.properties?.admin_name || feature.properties?.name || 'Unknown'}</strong><br/>No score available`
+      
+      // Bind tooltip for hover
+      layer.bindTooltip(
+        `<strong>${adminName}</strong><br/>No score available`,
+        {
+          permanent: false,
+          direction: 'top',
+          offset: [0, -10],
+          className: 'custom-tooltip'
+        }
       );
+      
+      // Bind popup for click
+      layer.bindPopup(
+        `<strong>${adminName}</strong><br/>No score available`
+      );
+      
+      // Add hover effects
+      layer.on({
+        mouseover: (e: any) => {
+          const hoverLayer = e.target;
+          hoverLayer.setStyle({
+            weight: 2,
+            fillOpacity: 0.5,
+            color: '#000000',
+            fillColor: '#ddd'
+          });
+        },
+        mouseout: (e: any) => {
+          const hoverLayer = e.target;
+          hoverLayer.setStyle({
+            weight: 1,
+            fillOpacity: 0.3,
+            color: '#000000',
+            fillColor: '#ddd'
+          });
+        }
+      });
     }
   };
 

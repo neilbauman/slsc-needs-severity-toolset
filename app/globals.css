@@ -63,6 +63,23 @@ body{
   height:360px; /* keeps modal compact */
 }
 
+/* Custom tooltip styling for map hover */
+.custom-tooltip {
+  background-color: rgba(0, 0, 0, 0.85) !important;
+  color: white !important;
+  border: 1px solid #333 !important;
+  border-radius: 4px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  white-space: nowrap !important;
+}
+
+.custom-tooltip::before {
+  border-top-color: rgba(0, 0, 0, 0.85) !important;
+}
+
 /* Print-friendly letter page for dashboards */
 @media print{
   @page{ size:Letter; margin:0.5in; }
