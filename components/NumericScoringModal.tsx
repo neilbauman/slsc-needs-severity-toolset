@@ -251,17 +251,58 @@ export default function NumericScoringModal({
       datasetId: dataset.id,
     });
 
-    const { data: rpcData, error } = await supabase.rpc("score_numeric_auto", {
-      in_instance_id: instance.id,
-      in_dataset_id: dataset.id,
-      in_method: rpcMethod,
-      in_thresholds: thresholds.length > 0 ? thresholds : null,
-      in_scale_max: scaleMax,
-      in_inverse: inverse,
-      in_limit_to_affected: limitToAffected,
-      in_disaggregation_method: transformationType === "disaggregation" ? disaggregationMethod : null,
-      in_weight_dataset_id: transformationType === "disaggregation" && disaggregationMethod === "distribute" ? weightDatasetId : null,
-    });
+    // Try calling with new parameters first (for disaggregation support)
+    let rpcData, error;
+    if (transformationType === "disaggregation") {
+      // Use new function signature with disaggregation parameters
+      const result = await supabase.rpc("score_numeric_auto", {
+        in_instance_id: instance.id,
+        in_dataset_id: dataset.id,
+        in_method: rpcMethod,
+        in_thresholds: thresholds.length > 0 ? thresholds : null,
+        in_scale_max: scaleMax,
+        in_inverse: inverse,
+        in_limit_to_affected: limitToAffected,
+        in_disaggregation_method: disaggregationMethod || null,
+        in_weight_dataset_id: disaggregationMethod === "distribute" ? weightDatasetId : null,
+      });
+      rpcData = result.data;
+      error = result.error;
+    } else {
+      // For roll-up or no transformation, try new signature first, fall back to old if needed
+      const result = await supabase.rpc("score_numeric_auto", {
+        in_instance_id: instance.id,
+        in_dataset_id: dataset.id,
+        in_method: rpcMethod,
+        in_thresholds: thresholds.length > 0 ? thresholds : null,
+        in_scale_max: scaleMax,
+        in_inverse: inverse,
+        in_limit_to_affected: limitToAffected,
+        in_disaggregation_method: null,
+        in_weight_dataset_id: null,
+      });
+      rpcData = result.data;
+      error = result.error;
+      
+      // If error is about function signature, try old signature (backward compatibility)
+      if (error && (error.message?.includes("function") || error.message?.includes("signature"))) {
+        console.warn("New function signature not found, trying old signature...");
+        const oldResult = await supabase.rpc("score_numeric_auto", {
+          in_instance_id: instance.id,
+          in_dataset_id: dataset.id,
+          in_method: rpcMethod,
+          in_thresholds: thresholds.length > 0 ? thresholds : null,
+          in_scale_max: scaleMax,
+          in_inverse: inverse,
+          in_limit_to_affected: limitToAffected,
+        });
+        rpcData = oldResult.data;
+        error = oldResult.error;
+        if (!error) {
+          setMessage("⚠️ Using old RPC function. Please update the function in Supabase for disaggregation support.");
+        }
+      }
+    }
 
     if (error) {
       const errorMsg = error.message || "Unknown error";
@@ -272,10 +313,21 @@ export default function NumericScoringModal({
         message: error.message,
         details: error.details,
         hint: error.hint,
+        parameters: {
+          method: rpcMethod,
+          scaleMax,
+          limitToAffected,
+          disaggregationMethod: transformationType === "disaggregation" ? disaggregationMethod : null,
+        }
       });
       
-      // If it's a 500 error, provide more context
-      if (error.code === "PGRST301" || error.message?.includes("500")) {
+      // If it's a function signature error, provide helpful message
+      if (error.message?.includes("function") || error.message?.includes("signature") || error.code === "42883") {
+        setMessage(
+          `❌ Function signature mismatch. The RPC function in Supabase needs to be updated. ` +
+          `Please apply the updated score_numeric_auto.sql file to your Supabase database.`
+        );
+      } else if (error.code === "PGRST301" || error.message?.includes("500")) {
         setMessage(
           `❌ Server error (500): The scoring RPC may have an issue. ` +
           `Check Supabase logs. Parameters sent: method=${rpcMethod}, scaleMax=${scaleMax}, limitToAffected=${limitToAffected}`
@@ -352,7 +404,11 @@ export default function NumericScoringModal({
     }
 
     if (allScores.length === 0) {
-      setMessage("❌ No scores found. Apply scoring first.");
+      setMessage("❌ No scores found. Apply scoring first. Check browser console for errors.");
+      console.error("No scores found after applying scoring. This could indicate:");
+      console.error("1. The RPC function may not have been updated in Supabase");
+      console.error("2. The scoring operation may have failed silently");
+      console.error("3. The dataset may not have data at the expected admin level");
       return;
     }
 
