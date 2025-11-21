@@ -878,24 +878,24 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" style={{ maxWidth: '8.5in', margin: '0 auto' }}>
       {/* Header */}
-      <div className="mb-4 p-4 bg-white rounded-lg shadow-sm border">
+      <div className="mb-2 p-2 bg-white rounded shadow-sm border">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-gray)' }}>
+            <h1 className="text-base font-semibold" style={{ color: 'var(--gsc-gray)' }}>
               {instance?.name || 'Loading...'}
             </h1>
             {instance?.description && (
-              <p className="text-sm mt-1" style={{ color: 'var(--gsc-gray)' }}>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>
                 {instance.description}
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setShowAffectedAreaModal(true)}
-              className="btn btn-secondary"
+              className="btn btn-secondary text-xs py-1 px-2"
               disabled={!instance}
               title="Edit affected area for this instance"
             >
@@ -903,9 +903,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </button>
             <Link
               href="/instances"
-              className="btn btn-secondary"
+              className="btn btn-secondary text-xs py-1 px-2"
             >
-              ← Back to Instances
+              ← Back
             </Link>
           </div>
         </div>
@@ -916,8 +916,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       {/* Main Content */}
       <div className="flex gap-2">
-        {/* Map - Fixed height for laptop viewing */}
-        <div className="flex-1 border rounded-lg overflow-hidden bg-white" style={{ height: '600px', minHeight: '600px' }}>
+        {/* Map - Sized for letter page */}
+        <div className="flex-1 border rounded overflow-hidden bg-white" style={{ height: '400px', minHeight: '400px' }}>
           {features.length === 0 && !loading && !loadingFeatures ? (
             <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
               <div className="text-center">
@@ -960,27 +960,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         </div>
 
         {/* Sidebar - Independent of map height */}
-        <div className="w-72 space-y-2 flex flex-col">
+        <div className="w-64 space-y-1 flex flex-col">
           {/* Action Buttons */}
-          <div className="bg-white border rounded-lg p-3 space-y-2">
+          <div className="bg-white border rounded p-1.5 space-y-1">
             <button
               onClick={() => setShowDatasetConfigModal(true)}
               disabled={!instance || refreshing}
-              className="btn btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-secondary w-full text-xs py-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Configure Datasets
             </button>
             <button
               onClick={() => setShowScoringModal(true)}
               disabled={!instance || refreshing}
-              className="btn btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-primary w-full text-xs py-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Adjust Scoring
             </button>
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="btn w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn w-full text-xs py-1 px-2 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background: refreshing ? 'var(--gsc-light-gray)' : 'var(--gsc-green)',
                 color: refreshing ? 'var(--gsc-gray)' : '#fff'
@@ -991,9 +991,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           </div>
 
           {/* Score Layers */}
-          <div className="bg-white border rounded-lg p-3 flex-1 overflow-y-auto">
+          <div className="bg-white border rounded p-1.5 flex-1 overflow-y-auto">
             <h3 
-              className="font-semibold mb-2"
+              className="font-semibold mb-1 text-xs"
               style={{ color: 'var(--gsc-gray)' }}
             >
               Score Layers

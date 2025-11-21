@@ -149,29 +149,29 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
   } = metrics;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
+    <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
       {/* Total Population in Affected Area */}
       <div 
-        className="border rounded-lg p-4 shadow-sm"
+        className="border rounded p-2 shadow-sm"
         style={{
           backgroundColor: 'rgba(0, 75, 135, 0.05)',
           borderColor: 'rgba(0, 75, 135, 0.2)'
         }}
       >
         <div 
-          className="text-xs font-medium uppercase tracking-wide mb-1"
+          className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-blue)' }}
         >
           Total Population
         </div>
         <div 
-          className="text-2xl font-bold"
+          className="text-lg font-bold"
           style={{ color: 'var(--gsc-blue)' }}
         >
           {formatNumber(total_population)}
         </div>
         <div 
-          className="text-xs mt-1"
+          className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           Affected Area
@@ -180,26 +180,26 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
 
       {/* People of Concern */}
       <div 
-        className="border rounded-lg p-4 shadow-sm"
+        className="border rounded p-2 shadow-sm"
         style={{
           backgroundColor: 'rgba(211, 84, 0, 0.05)',
           borderColor: 'rgba(211, 84, 0, 0.2)'
         }}
       >
         <div 
-          className="text-xs font-medium uppercase tracking-wide mb-1"
+          className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-orange)' }}
         >
           People of Concern
         </div>
         <div 
-          className="text-2xl font-bold"
+          className="text-lg font-bold"
           style={{ color: 'var(--gsc-orange)' }}
         >
           {formatNumber(people_concern)}
         </div>
         <div 
-          className="text-xs mt-1"
+          className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           Severity ≥ 3 ({formatPercentage(people_concern, total_population)})
@@ -208,26 +208,26 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
 
       {/* People in Need */}
       <div 
-        className="border rounded-lg p-4 shadow-sm"
+        className="border rounded p-2 shadow-sm"
         style={{
           backgroundColor: 'rgba(99, 7, 16, 0.05)',
           borderColor: 'rgba(99, 7, 16, 0.2)'
         }}
       >
         <div 
-          className="text-xs font-medium uppercase tracking-wide mb-1"
+          className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-red)' }}
         >
           People in Need
         </div>
         <div 
-          className="text-2xl font-bold"
+          className="text-lg font-bold"
           style={{ color: 'var(--gsc-red)' }}
         >
           {formatNumber(people_need)}
         </div>
         <div 
-          className="text-xs mt-1"
+          className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           PoC × Poverty Rate ({formatPercentage(people_need, total_population)})
@@ -236,26 +236,26 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
 
       {/* Average Severity Score */}
       <div 
-        className="border rounded-lg p-4 shadow-sm"
+        className="border rounded p-2 shadow-sm"
         style={{
           backgroundColor: 'rgba(0, 75, 135, 0.05)',
           borderColor: 'rgba(0, 75, 135, 0.2)'
         }}
       >
         <div 
-          className="text-xs font-medium uppercase tracking-wide mb-1"
+          className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-blue)' }}
         >
           Avg Severity
         </div>
         <div 
-          className="text-2xl font-bold"
+          className="text-lg font-bold"
           style={{ color: 'var(--gsc-blue)' }}
         >
           {avg_severity !== null && avg_severity !== undefined ? avg_severity.toFixed(2) : 'N/A'}
         </div>
         <div 
-          className="text-xs mt-1"
+          className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           Out of 5.0
@@ -264,26 +264,26 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
 
       {/* High Severity Locations */}
       <div 
-        className="border rounded-lg p-4 shadow-sm"
+        className="border rounded p-2 shadow-sm"
         style={{
           backgroundColor: 'rgba(211, 84, 0, 0.08)',
           borderColor: 'rgba(211, 84, 0, 0.3)'
         }}
       >
         <div 
-          className="text-xs font-medium uppercase tracking-wide mb-1"
+          className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-orange)' }}
         >
           High Severity
         </div>
         <div 
-          className="text-2xl font-bold"
+          className="text-lg font-bold"
           style={{ color: 'var(--gsc-orange)' }}
         >
           {formatNumber(high_severity_count)}
         </div>
         <div 
-          className="text-xs mt-1"
+          className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           Locations (≥ 4) {total_affected_locations ? `(${formatPercentage(high_severity_count, total_affected_locations)})` : ''}
@@ -292,26 +292,26 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
 
       {/* Total Affected Locations */}
       <div 
-        className="border rounded-lg p-4 shadow-sm"
+        className="border rounded p-2 shadow-sm"
         style={{
           backgroundColor: 'var(--gsc-light-gray)',
           borderColor: 'rgba(55, 65, 81, 0.2)'
         }}
       >
         <div 
-          className="text-xs font-medium uppercase tracking-wide mb-1"
+          className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           Affected Locations
         </div>
         <div 
-          className="text-2xl font-bold"
+          className="text-lg font-bold"
           style={{ color: 'var(--gsc-gray)' }}
         >
           {formatNumber(total_affected_locations)}
         </div>
         <div 
-          className="text-xs mt-1"
+          className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
           Admin Units

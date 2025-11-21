@@ -200,15 +200,15 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
     }
   };
 
-  if (loading) return <p className="text-sm" style={{ color: 'var(--gsc-gray)' }}>Loading layers...</p>;
+  if (loading) return <p className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Loading layers...</p>;
 
   return (
-    <div className="text-sm" style={{ color: 'var(--gsc-gray)' }}>
+    <div className="text-xs" style={{ color: 'var(--gsc-gray)' }}>
       {/* Overall Score Option */}
-      <div className="mb-3">
+      <div className="mb-1">
         <button
           onClick={() => handleSelect('overall')}
-          className="block w-full text-left px-2 py-1.5 rounded font-semibold text-sm transition-colors"
+          className="block w-full text-left px-1.5 py-1 rounded font-semibold text-xs transition-colors"
           style={{
             backgroundColor: activeSelection.type === 'overall' 
               ? 'var(--gsc-blue)' 
@@ -221,17 +221,17 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
       </div>
 
       {Object.keys(grouped).length === 0 && (
-        <p className="italic text-sm" style={{ color: 'var(--gsc-gray)' }}>No datasets configured.</p>
+        <p className="italic text-xs" style={{ color: 'var(--gsc-gray)' }}>No datasets configured.</p>
       )}
 
       {Object.entries(grouped).map(([cat, list]) => (
-        <div key={cat} className="mb-3">
-          <div className="flex items-center justify-between mb-1">
-            <h4 className="font-semibold text-sm" style={{ color: 'var(--gsc-gray)' }}>{cat}</h4>
+        <div key={cat} className="mb-1">
+          <div className="flex items-center justify-between mb-0.5">
+            <h4 className="font-semibold text-xs" style={{ color: 'var(--gsc-gray)' }}>{cat}</h4>
             {list.length > 0 && (
               <button
                 onClick={() => toggleCategory(cat)}
-                className="text-sm px-1 hover:opacity-70 transition-opacity"
+                className="text-xs px-0.5 hover:opacity-70 transition-opacity"
                 style={{ color: 'var(--gsc-gray)' }}
               >
                 {expandedCategories.has(cat) ? '−' : '+'}
@@ -243,7 +243,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           {list.length > 0 && (
             <button
               onClick={() => handleSelect('category_score', undefined, cat, undefined, cat)}
-              className="block w-full text-left px-2 py-1.5 rounded text-sm mb-1 font-medium border transition-colors"
+              className="block w-full text-left px-1.5 py-1 rounded text-xs mb-0.5 font-medium border transition-colors"
               style={{
                 backgroundColor: activeSelection.type === 'category_score' && activeSelection.category === cat
                   ? 'var(--gsc-blue)'
@@ -266,7 +266,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           )}
           
           {expandedCategories.has(cat) && (
-            <div className="space-y-1 ml-2 mt-1">
+            <div className="space-y-0.5 ml-1.5 mt-0.5">
               {list.map((d) => (
                 <div key={d.dataset_id}>
                   <button
@@ -276,7 +276,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                         loadCategoriesForDataset(d.dataset_id);
                       }
                     }}
-                    className="block w-full text-left px-2 py-1.5 rounded text-sm transition-colors"
+                    className="block w-full text-left px-1.5 py-1 rounded text-xs transition-colors"
                     style={{
                       backgroundColor: (activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
                                      (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)
@@ -300,18 +300,18 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                       }
                     }}
                   >
-                    {d.dataset_name}
-                    {d.avg_score !== null && (
-                      <span className="float-right text-sm opacity-75">
-                        {Number(d.avg_score).toFixed(1)}
-                      </span>
-                    )}
-                  </button>
-                  {d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
-                    <div className="ml-4 mt-1 space-y-1">
-                      <button
-                        onClick={() => handleSelect('category', d.dataset_id, 'overall', d.dataset_name)}
-                        className="block w-full text-left px-2 py-1 rounded text-sm transition-colors"
+                  {d.dataset_name}
+                  {d.avg_score !== null && (
+                    <span className="float-right text-xs opacity-75">
+                      {Number(d.avg_score).toFixed(1)}
+                    </span>
+                  )}
+                </button>
+                {d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
+                  <div className="ml-1.5 mt-0.5 space-y-0.5">
+                    <button
+                      onClick={() => handleSelect('category', d.dataset_id, 'overall', d.dataset_name)}
+                      className="block w-full text-left px-1.5 py-0.5 rounded text-xs transition-colors"
                         style={{
                           backgroundColor: activeSelection.type === 'category' && activeSelection.category === 'overall'
                             ? 'rgba(0, 75, 135, 0.7)'
@@ -324,13 +324,13 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                         Overall
                       </button>
                       {loadingCategories[d.dataset_id] && (
-                        <div className="text-sm px-2 py-1" style={{ color: 'var(--gsc-gray)' }}>Loading categories...</div>
+                        <div className="text-xs px-1.5 py-0.5" style={{ color: 'var(--gsc-gray)' }}>Loading categories...</div>
                       )}
                       {!loadingCategories[d.dataset_id] && datasetCategories[d.dataset_id]?.map((cat) => (
                         <button
                           key={cat}
                           onClick={() => handleSelect('category', d.dataset_id, cat, d.dataset_name)}
-                          className="block w-full text-left px-2 py-1 rounded text-sm transition-colors"
+                          className="block w-full text-left px-1.5 py-0.5 rounded text-xs transition-colors"
                           style={{
                             backgroundColor: activeSelection.type === 'category' && activeSelection.category === cat
                               ? 'rgba(0, 75, 135, 0.7)'
