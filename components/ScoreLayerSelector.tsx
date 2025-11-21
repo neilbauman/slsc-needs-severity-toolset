@@ -5,39 +5,119 @@ import { supabase } from "@/lib/supabaseClient";
 
 export interface ScoreLayerSelectorProps {
   instanceId: string;
-  onSelect?: (dataset: any) => void;
+  onSelect?: (selection: { type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string }) => void;
 }
 
 export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerSelectorProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
-  const [activeDataset, setActiveDataset] = useState<string | null>(null);
+  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string }>({ type: 'overall' });
   const [loading, setLoading] = useState(true);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [datasetCategories, setDatasetCategories] = useState<Record<string, string[]>>({});
+  const [loadingCategories, setLoadingCategories] = useState<Record<string, boolean>>({});
 
   // ✅ Load datasets linked to this instance
   useEffect(() => {
     const loadDatasets = async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("v_dataset_scores")
-        .select("dataset_id, dataset_name, category, avg_score")
-        .eq("instance_id", instanceId)
-        .order("category, dataset_name");
+      try {
+        // Load instance_datasets with dataset info and config
+        const { data: instanceDatasets, error: idError } = await supabase
+          .from("instance_datasets")
+          .select(`
+            dataset_id,
+            datasets (
+              id,
+              name,
+              type,
+              admin_level
+            ),
+            instance_dataset_config (
+              score_config
+            )
+          `)
+          .eq("instance_id", instanceId);
 
-      if (error) {
-        console.error("Error loading datasets:", error.message);
+        if (idError) {
+          console.error("Error loading instance datasets:", idError);
+          setDatasets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Get average scores for each dataset
+        const datasetIds = (instanceDatasets || [])
+          .map((id: any) => id.dataset_id)
+          .filter((id: string) => id);
+
+        let avgScores: Record<string, number> = {};
+        if (datasetIds.length > 0) {
+          const { data: scoresData } = await supabase
+            .from("instance_dataset_scores")
+            .select("dataset_id, score")
+            .eq("instance_id", instanceId)
+            .in("dataset_id", datasetIds);
+
+          if (scoresData) {
+            // Calculate average score per dataset
+            const scoreMap: Record<string, { sum: number; count: number }> = {};
+            scoresData.forEach((s: any) => {
+              if (!scoreMap[s.dataset_id]) {
+                scoreMap[s.dataset_id] = { sum: 0, count: 0 };
+              }
+              scoreMap[s.dataset_id].sum += Number(s.score);
+              scoreMap[s.dataset_id].count += 1;
+            });
+
+            Object.keys(scoreMap).forEach((datasetId) => {
+              avgScores[datasetId] = scoreMap[datasetId].sum / scoreMap[datasetId].count;
+            });
+          }
+        }
+
+        // Transform data
+        const transformed = (instanceDatasets || []).map((id: any) => {
+          const dataset = id.datasets;
+          const config = id.instance_dataset_config?.[0]?.score_config || {};
+          const category = config.category || "Uncategorized";
+          
+          return {
+            dataset_id: id.dataset_id,
+            dataset_name: dataset?.name || `Dataset ${id.dataset_id}`,
+            type: dataset?.type || 'numeric',
+            category: category,
+            avg_score: avgScores[id.dataset_id] || null,
+          };
+        });
+
+        setDatasets(transformed);
+      } catch (err) {
+        console.error("Error loading datasets:", err);
         setDatasets([]);
-      } else {
-        setDatasets(data || []);
       }
       setLoading(false);
     };
     loadDatasets();
   }, [instanceId]);
 
-  // ✅ Handle selection of dataset
-  const handleSelect = (dataset: any) => {
-    setActiveDataset(dataset.dataset_id);
-    if (onSelect) onSelect(dataset);
+  // ✅ Handle selection
+  const handleSelect = (type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string) => {
+    const selection = { type, datasetId, category };
+    setActiveSelection(selection);
+    if (onSelect) {
+      onSelect({ ...selection, datasetName });
+    }
+  };
+
+  // ✅ Toggle category expansion
+  const toggleCategory = (cat: string) => {
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(cat)) {
+      newExpanded.delete(cat);
+    } else {
+      newExpanded.add(cat);
+    }
+    setExpandedCategories(newExpanded);
   };
 
   // ✅ Group datasets by category
@@ -48,37 +128,122 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
     return acc;
   }, {});
 
+  // ✅ Get categories for categorical datasets
+  const loadCategoriesForDataset = async (datasetId: string) => {
+    if (datasetCategories[datasetId]) return; // Already loaded
+    
+    setLoadingCategories(prev => ({ ...prev, [datasetId]: true }));
+    try {
+      const { data } = await supabase
+        .from("dataset_values_categorical")
+        .select("category")
+        .eq("dataset_id", datasetId)
+        .limit(1000);
+      
+      const uniqueCategories = [...new Set((data || []).map((d: any) => d.category))].sort();
+      setDatasetCategories(prev => ({ ...prev, [datasetId]: uniqueCategories }));
+    } catch (err) {
+      console.error("Error loading categories:", err);
+    } finally {
+      setLoadingCategories(prev => ({ ...prev, [datasetId]: false }));
+    }
+  };
+
   if (loading) return <p className="text-sm text-gray-500">Loading layers...</p>;
 
   return (
     <div className="text-sm text-gray-800">
+      {/* Overall Score Option */}
+      <div className="mb-3">
+        <button
+          onClick={() => handleSelect('overall')}
+          className={`block w-full text-left px-2 py-1 rounded font-semibold ${
+            activeSelection.type === 'overall'
+              ? "bg-blue-600 text-white"
+              : "bg-gray-100 hover:bg-gray-200"
+          }`}
+        >
+          Overall Score
+        </button>
+      </div>
+
       {Object.keys(grouped).length === 0 && (
         <p className="text-gray-400 italic text-xs">No datasets configured.</p>
       )}
 
       {Object.entries(grouped).map(([cat, list]) => (
         <div key={cat} className="mb-3">
-          <h4 className="font-semibold text-gray-700 mb-1">{cat}</h4>
-          <div className="space-y-1">
-            {(list as any[]).map((d) => (
+          <div className="flex items-center justify-between">
+            <h4 className="font-semibold text-gray-700 mb-1">{cat}</h4>
+            {list.length > 0 && (
               <button
-                key={d.dataset_id}
-                onClick={() => handleSelect(d)}
-                className={`block w-full text-left px-2 py-1 rounded ${
-                  d.dataset_id === activeDataset
-                    ? "bg-blue-600 text-white"
-                    : "hover:bg-gray-100"
-                }`}
+                onClick={() => toggleCategory(cat)}
+                className="text-xs text-gray-500 hover:text-gray-700"
               >
-                {d.dataset_name}
-                {d.avg_score !== null && (
-                  <span className="float-right text-xs text-gray-500">
-                    {Number(d.avg_score).toFixed(1)}
-                  </span>
-                )}
+                {expandedCategories.has(cat) ? '−' : '+'}
               </button>
-            ))}
+            )}
           </div>
+          {expandedCategories.has(cat) && (
+            <div className="space-y-1 ml-2">
+              {list.map((d) => (
+                <div key={d.dataset_id}>
+                  <button
+                    onClick={() => {
+                      handleSelect('dataset', d.dataset_id, undefined, d.dataset_name);
+                      if (d.type === 'categorical') {
+                        loadCategoriesForDataset(d.dataset_id);
+                      }
+                    }}
+                    className={`block w-full text-left px-2 py-1 rounded text-xs ${
+                      activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category
+                        ? "bg-blue-600 text-white"
+                        : activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id
+                        ? "bg-blue-500 text-white"
+                        : "hover:bg-gray-100"
+                    }`}
+                  >
+                    {d.dataset_name}
+                    {d.avg_score !== null && (
+                      <span className="float-right text-xs opacity-75">
+                        {Number(d.avg_score).toFixed(1)}
+                      </span>
+                    )}
+                  </button>
+                  {d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
+                    <div className="ml-4 mt-1 space-y-1">
+                      <button
+                        onClick={() => handleSelect('category', d.dataset_id, 'overall', d.dataset_name)}
+                        className={`block w-full text-left px-2 py-1 rounded text-xs ${
+                          activeSelection.type === 'category' && activeSelection.category === 'overall'
+                            ? "bg-blue-500 text-white"
+                            : "bg-gray-50 hover:bg-gray-100"
+                        }`}
+                      >
+                        Overall
+                      </button>
+                      {loadingCategories[d.dataset_id] && (
+                        <div className="text-xs text-gray-400 px-2 py-1">Loading categories...</div>
+                      )}
+                      {!loadingCategories[d.dataset_id] && datasetCategories[d.dataset_id]?.map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => handleSelect('category', d.dataset_id, cat, d.dataset_name)}
+                          className={`block w-full text-left px-2 py-1 rounded text-xs ${
+                            activeSelection.type === 'category' && activeSelection.category === cat
+                              ? "bg-blue-500 text-white"
+                              : "bg-gray-50 hover:bg-gray-100"
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ))}
     </div>

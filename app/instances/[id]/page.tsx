@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabaseClient";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 
 // Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
@@ -46,14 +47,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showScoringModal, setShowScoringModal] = useState(false);
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
-
-  const categories = [
-    "SSC Framework P1",
-    "SSC Framework P2",
-    "SSC Framework P3",
-    "Hazards",
-    "Underlying Vulnerability",
-  ];
+  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string }>({ type: 'overall' });
 
   const fetchData = async () => {
     try {
@@ -173,7 +167,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         })
         .filter((f: any) => f !== null);
       
-      setFeatures(parsed);
+      // Load features based on current selection
+      await loadFeaturesForSelection(selectedLayer, parsed);
     } catch (err: any) {
       console.error("Error loading instance page:", err);
       setError(err?.message || "Failed to load instance data");
@@ -183,9 +178,111 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
+  // ✅ Load features for selected layer (overall, dataset, or category)
+  const loadFeaturesForSelection = async (
+    selection: { type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string },
+    overallFeatures?: any[]
+  ) => {
+    try {
+      if (selection.type === 'overall') {
+        // Use overall instance scores
+        if (overallFeatures) {
+          setFeatures(overallFeatures);
+          return;
+        }
+        
+        const { data: geoData } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("geojson")
+          .eq("instance_id", params.id);
+
+        const parsed = (geoData || [])
+          .map((g: any) => {
+            try {
+              return typeof g.geojson === 'string' ? JSON.parse(g.geojson) : g.geojson;
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter((f: any) => f !== null);
+        
+        setFeatures(parsed);
+      } else if (selection.type === 'dataset' && selection.datasetId) {
+        // Load scores for specific dataset
+        const { data: scores } = await supabase
+          .from("instance_dataset_scores")
+          .select("admin_pcode, score")
+          .eq("instance_id", params.id)
+          .eq("dataset_id", selection.datasetId);
+
+        if (!scores || scores.length === 0) {
+          setFeatures([]);
+          return;
+        }
+
+        // Get admin boundaries using RPC function
+        const adminPcodes = scores.map((s: any) => s.admin_pcode);
+        const { data: boundariesGeoJson } = await supabase.rpc('get_admin_boundaries_geojson', {
+          in_admin_pcodes: adminPcodes,
+          in_level: 'ADM3'
+        });
+
+        if (!boundariesGeoJson || !boundariesGeoJson.features) {
+          setFeatures([]);
+          return;
+        }
+
+        // Create score map
+        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
+
+        // Build GeoJSON features by joining boundaries with scores
+        const features = boundariesGeoJson.features
+          .map((feature: any) => {
+            const adminPcode = feature.properties?.admin_pcode;
+            const score = scoreMap.get(adminPcode);
+            if (score === undefined) return null;
+
+            return {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                admin_name: feature.properties?.name || feature.properties?.admin_name,
+                score: score,
+              },
+            };
+          })
+          .filter((f: any) => f !== null);
+
+        setFeatures(features);
+      } else if (selection.type === 'category' && selection.datasetId && selection.category) {
+        // For categorical datasets, if "overall" is selected, show dataset scores
+        // If a specific category is selected, we'd need category-specific scoring
+        // For now, show the dataset's overall scores (calculated from all categories)
+        if (selection.category === 'overall') {
+          await loadFeaturesForSelection({ type: 'dataset', datasetId: selection.datasetId }, overallFeatures);
+        } else {
+          // TODO: Implement category-specific score visualization
+          // For now, fall back to dataset view
+          await loadFeaturesForSelection({ type: 'dataset', datasetId: selection.datasetId }, overallFeatures);
+        }
+      }
+    } catch (err) {
+      console.error("Error loading features for selection:", err);
+      setFeatures([]);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [params.id]);
+
+  // ✅ Load features when selection changes
+  useEffect(() => {
+    if (!loading && instance && params.id) {
+      loadFeaturesForSelection(selectedLayer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -216,8 +313,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         weight: 2
       });
       const adminName = feature.properties.admin_name || feature.properties.name || 'Unknown';
+      let layerName = 'Overall Score';
+      if (selectedLayer.type === 'dataset') {
+        layerName = selectedLayer.datasetName || 'Dataset Score';
+      } else if (selectedLayer.type === 'category') {
+        if (selectedLayer.category === 'overall') {
+          layerName = `${selectedLayer.datasetName || 'Dataset'} - Overall`;
+        } else {
+          layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
+        }
+      }
       layer.bindPopup(
-        `<strong>${adminName}</strong><br/>Score: ${score.toFixed(2)}`
+        `<strong>${adminName}</strong><br/>${layerName}: ${score.toFixed(2)}`
       );
     }
   };
@@ -342,39 +449,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           {/* Score Layers */}
           <div className="bg-white border rounded-lg p-3 flex-1 overflow-y-auto">
             <h3 className="font-semibold mb-2 text-gray-800">Score Layers</h3>
-            {datasets.length === 0 ? (
-              <p className="text-gray-400 italic text-xs">No datasets configured for this instance.</p>
-            ) : (
-              <div className="space-y-3">
-                {categories.map((cat) => {
-                  const categoryDatasets = datasets.filter((d) => {
-                    const category = d.score_config?.category || d.category;
-                    return category === cat || category === `SSC Framework - ${cat.split(' ')[2]}`;
-                  });
-
-                  return (
-                    <div key={cat} className="border-b pb-2 last:border-b-0">
-                      <div className="font-medium text-gray-700 mb-1">{cat}</div>
-                      {categoryDatasets.length > 0 ? (
-                        <div className="space-y-1 ml-2">
-                          {categoryDatasets.map((d) => (
-                            <div
-                              key={d.id || d.dataset_id}
-                              className="text-sm text-gray-600 truncate"
-                              title={getDatasetName(d)}
-                            >
-                              {getDatasetName(d)}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-gray-400 italic text-xs ml-2">No datasets</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <ScoreLayerSelector
+              instanceId={params.id}
+              onSelect={(selection) => {
+                setSelectedLayer(selection);
+              }}
+            />
           </div>
 
           {/* Error Display */}
