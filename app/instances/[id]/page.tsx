@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabaseClient";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
+import InstanceMetricsPanel from "@/components/InstanceMetricsPanel";
 
 // Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
@@ -881,6 +882,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           </Link>
         </div>
       </div>
+
+      {/* Metrics Panel */}
+      <InstanceMetricsPanel instanceId={instanceId} />
 
       {/* Main Content */}
       <div className="flex gap-2">
