@@ -60,8 +60,8 @@ DECLARE
   v_threshold JSONB;
   v_found_threshold BOOLEAN;
 BEGIN
-  -- Get dataset admin level
-  SELECT admin_level INTO v_dataset_admin_level
+  -- Get dataset admin level (normalize to uppercase for comparison)
+  SELECT UPPER(TRIM(admin_level)) INTO v_dataset_admin_level
   FROM datasets
   WHERE id = in_dataset_id;
   
@@ -132,8 +132,9 @@ BEGIN
             MAX(dvn.value)
           INTO v_min_value, v_max_value
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
         ELSE
@@ -156,8 +157,9 @@ BEGIN
               ab3.admin_pcode,
               dvn.value AS disagg_value
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
               AND pop.admin_pcode = ab3.admin_pcode
             WHERE dvn.dataset_id = in_dataset_id
@@ -173,8 +175,9 @@ BEGIN
               ab3.admin_pcode,
               dvn.value AS disagg_value
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
               AND pop.admin_pcode = ab3.admin_pcode
             WHERE dvn.dataset_id = in_dataset_id
@@ -188,8 +191,9 @@ BEGIN
             MAX(dvn.value)
           INTO v_min_value, v_max_value
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
         ELSE
@@ -280,8 +284,9 @@ BEGIN
               ab3.admin_pcode,
               v_score
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             WHERE dvn.dataset_id = in_dataset_id
               AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
           ELSE
@@ -292,8 +297,9 @@ BEGIN
               ab3.admin_pcode,
               v_score
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             WHERE dvn.dataset_id = in_dataset_id;
           END IF;
         ELSE
@@ -306,8 +312,9 @@ BEGIN
               ab3.admin_pcode,
               v_score
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             WHERE dvn.dataset_id = in_dataset_id
               AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
           ELSE
@@ -318,8 +325,9 @@ BEGIN
               ab3.admin_pcode,
               v_score
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             WHERE dvn.dataset_id = in_dataset_id;
           END IF;
         END IF;
@@ -398,8 +406,9 @@ BEGIN
                 1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
             END AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
         ELSE
@@ -415,8 +424,9 @@ BEGIN
                 1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
             END AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id;
         END IF;
       ELSIF in_disaggregation_method = 'distribute' AND in_weight_dataset_id IS NOT NULL THEN
@@ -428,8 +438,9 @@ BEGIN
               ab3.admin_pcode,
               dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
               AND pop.admin_pcode = ab3.admin_pcode
             WHERE dvn.dataset_id = in_dataset_id
@@ -454,8 +465,9 @@ BEGIN
               ab3.admin_pcode,
               dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
               AND pop.admin_pcode = ab3.admin_pcode
             WHERE dvn.dataset_id = in_dataset_id
@@ -488,8 +500,9 @@ BEGIN
                 1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
             END AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
         ELSE
@@ -505,8 +518,9 @@ BEGIN
                 1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
             END AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id;
         END IF;
       END IF;
@@ -630,8 +644,9 @@ BEGIN
               LIMIT 1
             ) AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
             AND EXISTS (
@@ -655,8 +670,9 @@ BEGIN
               LIMIT 1
             ) AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND EXISTS (
               SELECT 1
@@ -674,8 +690,9 @@ BEGIN
               ab3.admin_pcode,
               dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
               AND pop.admin_pcode = ab3.admin_pcode
             WHERE dvn.dataset_id = in_dataset_id
@@ -708,8 +725,9 @@ BEGIN
               ab3.admin_pcode,
               dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
             FROM dataset_values_numeric dvn
-            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+              AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
             LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
               AND pop.admin_pcode = ab3.admin_pcode
             WHERE dvn.dataset_id = in_dataset_id
@@ -752,8 +770,9 @@ BEGIN
               LIMIT 1
             ) AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
             AND EXISTS (
@@ -777,8 +796,9 @@ BEGIN
               LIMIT 1
             ) AS score
           FROM dataset_values_numeric dvn
-          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
-          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND UPPER(TRIM(ab2.admin_level)) = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON (ab3.parent_pcode = ab2.admin_pcode OR ab3.admin_pcode LIKE ab2.admin_pcode || '%') 
+            AND UPPER(TRIM(ab3.admin_level)) = 'ADM3'
           WHERE dvn.dataset_id = in_dataset_id
             AND EXISTS (
               SELECT 1
