@@ -236,7 +236,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const adminPcodes = scores.map((s: any) => s.admin_pcode);
         const { data: boundaries, error: boundariesError } = await supabase
           .from("admin_boundaries")
-          .select("admin_pcode, admin_name, geometry")
+          .select("admin_pcode, name, geometry")
           .in("admin_pcode", adminPcodes)
           .eq("admin_level", "ADM3");
 
@@ -275,7 +275,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               type: "Feature",
               properties: {
                 admin_pcode: b.admin_pcode,
-                admin_name: b.admin_name,
+                admin_name: b.name,
                 score: score,
               },
               geometry: geometry,
