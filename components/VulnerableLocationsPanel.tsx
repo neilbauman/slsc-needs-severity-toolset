@@ -77,12 +77,33 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
           return;
         }
 
-        // Calculate score distribution
-        const { data: allScores } = await supabase
+        // Get affected ADM3 codes to only count affected locations
+        let affectedCodes: string[] = [];
+        if (instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
+          const { data: affectedData } = await supabase.rpc('get_affected_adm3', {
+            in_scope: instanceData.admin_scope
+          });
+          
+          if (affectedData && Array.isArray(affectedData)) {
+            affectedCodes = affectedData.map((item: any) => 
+              typeof item === 'string' ? item : (item.admin_pcode || item.pcode || item.code)
+            ).filter(Boolean);
+          }
+        }
+
+        // Calculate score distribution - only for affected locations
+        let scoreQuery = supabase
           .from('v_instance_admin_scores')
-          .select('avg_score')
+          .select('avg_score, admin_pcode')
           .eq('instance_id', instanceId)
           .not('avg_score', 'is', null);
+        
+        // Filter to only affected locations if we have the codes
+        if (affectedCodes.length > 0) {
+          scoreQuery = scoreQuery.in('admin_pcode', affectedCodes);
+        }
+        
+        const { data: allScores } = await scoreQuery;
 
         if (allScores) {
           const dist: ScoreDistribution = { score1: 0, score2: 0, score3: 0, score4: 0, score5: 0 };
@@ -317,24 +338,24 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
           </h3>
           {scoreDistribution && totalLocations > 0 ? (
             <div className="space-y-0.5 text-xs">
-              <div className="flex items-center justify-between p-0.5 rounded" style={{ backgroundColor: 'rgba(0, 255, 0, 0.1)' }}>
-                <span style={{ color: 'var(--gsc-gray)' }}>Score 1 (Low):</span>
-                <span className="font-semibold" style={{ color: '#00FF00' }}>{scoreDistribution.score1} ({((scoreDistribution.score1 / totalLocations) * 100).toFixed(0)}%)</span>
+              <div className="flex items-center justify-between p-0.5 rounded border" style={{ backgroundColor: '#f0fdf4', borderColor: '#00FF00' }}>
+                <span className="font-medium" style={{ color: 'var(--gsc-gray)' }}>Score 1 (Low):</span>
+                <span className="font-semibold" style={{ color: '#15803d' }}>{scoreDistribution.score1} ({((scoreDistribution.score1 / totalLocations) * 100).toFixed(0)}%)</span>
               </div>
-              <div className="flex items-center justify-between p-0.5 rounded" style={{ backgroundColor: 'rgba(204, 255, 0, 0.1)' }}>
-                <span style={{ color: 'var(--gsc-gray)' }}>Score 2:</span>
-                <span className="font-semibold" style={{ color: '#CCFF00' }}>{scoreDistribution.score2} ({((scoreDistribution.score2 / totalLocations) * 100).toFixed(0)}%)</span>
+              <div className="flex items-center justify-between p-0.5 rounded border" style={{ backgroundColor: '#fefce8', borderColor: '#CCFF00' }}>
+                <span className="font-medium" style={{ color: 'var(--gsc-gray)' }}>Score 2:</span>
+                <span className="font-semibold" style={{ color: '#a3a000' }}>{scoreDistribution.score2} ({((scoreDistribution.score2 / totalLocations) * 100).toFixed(0)}%)</span>
               </div>
-              <div className="flex items-center justify-between p-0.5 rounded" style={{ backgroundColor: 'rgba(255, 204, 0, 0.1)' }}>
-                <span style={{ color: 'var(--gsc-gray)' }}>Score 3:</span>
-                <span className="font-semibold" style={{ color: '#FFCC00' }}>{scoreDistribution.score3} ({((scoreDistribution.score3 / totalLocations) * 100).toFixed(0)}%)</span>
+              <div className="flex items-center justify-between p-0.5 rounded border" style={{ backgroundColor: '#fffbeb', borderColor: '#FFCC00' }}>
+                <span className="font-medium" style={{ color: 'var(--gsc-gray)' }}>Score 3:</span>
+                <span className="font-semibold" style={{ color: '#d97706' }}>{scoreDistribution.score3} ({((scoreDistribution.score3 / totalLocations) * 100).toFixed(0)}%)</span>
               </div>
-              <div className="flex items-center justify-between p-0.5 rounded" style={{ backgroundColor: 'rgba(211, 84, 0, 0.1)' }}>
-                <span style={{ color: 'var(--gsc-gray)' }}>Score 4:</span>
+              <div className="flex items-center justify-between p-0.5 rounded border" style={{ backgroundColor: '#fff7ed', borderColor: 'var(--gsc-orange)' }}>
+                <span className="font-medium" style={{ color: 'var(--gsc-gray)' }}>Score 4:</span>
                 <span className="font-semibold" style={{ color: 'var(--gsc-orange)' }}>{scoreDistribution.score4} ({((scoreDistribution.score4 / totalLocations) * 100).toFixed(0)}%)</span>
               </div>
-              <div className="flex items-center justify-between p-0.5 rounded" style={{ backgroundColor: 'rgba(99, 7, 16, 0.1)' }}>
-                <span style={{ color: 'var(--gsc-gray)' }}>Score 5 (Critical):</span>
+              <div className="flex items-center justify-between p-0.5 rounded border" style={{ backgroundColor: '#fef2f2', borderColor: 'var(--gsc-red)' }}>
+                <span className="font-medium" style={{ color: 'var(--gsc-gray)' }}>Score 5 (Critical):</span>
                 <span className="font-semibold" style={{ color: 'var(--gsc-red)' }}>{scoreDistribution.score5} ({((scoreDistribution.score5 / totalLocations) * 100).toFixed(0)}%)</span>
               </div>
               <div className="mt-1 pt-1 border-t" style={{ borderColor: 'var(--gsc-blue)' }}>
