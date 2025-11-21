@@ -255,6 +255,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         setFeatures(parsed);
       } else if (selection.type === 'dataset' && selection.datasetId) {
+        console.log(`Loading features for dataset: ${selection.datasetId}`);
+        
         // Load scores for specific dataset
         const { data: scores, error: scoresError } = await supabase
           .from("instance_dataset_scores")
@@ -275,8 +277,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         }
 
         // Create score map for this dataset
-        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
+        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.score)]));
         console.log(`Loaded ${scores.length} scores for dataset ${selection.datasetId}`);
+        console.log("Sample scores:", Array.from(scoreMap.entries()).slice(0, 5));
 
         // Get geometry from view - each row is a single Feature (not FeatureCollection)
         const { data: geoRows, error: geoError } = await supabase
@@ -314,6 +317,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               if (datasetScore === undefined) return null;
               
               // Update the feature with the dataset-specific score
+              // Create a new object to ensure React detects the change
               return {
                 ...feature,
                 properties: {
@@ -331,7 +335,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .filter((f: any) => f !== null);
         
         console.log(`Filtered to ${filteredFeatures.length} features with dataset scores`);
-        setFeatures(filteredFeatures);
+        console.log("Sample feature scores:", filteredFeatures.slice(0, 5).map((f: any) => ({
+          admin_pcode: f.properties?.admin_pcode,
+          score: f.properties?.score,
+          admin_name: f.properties?.admin_name
+        })));
+        
+        // Force a new array reference to ensure React detects the change
+        setFeatures([...filteredFeatures]);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
         // If a specific category is selected, we'd need category-specific scoring
@@ -360,6 +371,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   useEffect(() => {
     // Only reload if we have instance loaded
     if (!loading && instance && instanceId) {
+      console.log("Selection changed, loading features:", selectedLayer);
       loadFeaturesForSelection(selectedLayer, overallFeatures);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -385,7 +397,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   const onEachFeature = (feature: any, layer: any) => {
     if (feature.properties && feature.properties.score !== undefined) {
-      const score = feature.properties.score;
+      const score = Number(feature.properties.score);
       const color = getColor(score);
       layer.setStyle({ 
         color, 
@@ -406,6 +418,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       }
       layer.bindPopup(
         `<strong>${adminName}</strong><br/>${layerName}: ${score.toFixed(2)}`
+      );
+    } else {
+      // No score - use gray
+      layer.setStyle({ 
+        color: '#999', 
+        fillColor: '#ddd', 
+        fillOpacity: 0.3,
+        weight: 1
+      });
+      layer.bindPopup(
+        `<strong>${feature.properties?.admin_name || feature.properties?.name || 'Unknown'}</strong><br/>No score available`
       );
     }
   };
@@ -473,9 +496,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 gap-2 min-h-0">
-        {/* Map */}
-        <div className="flex-1 border rounded-lg overflow-hidden bg-white">
+      <div className="flex gap-2">
+        {/* Map - Fixed height for laptop viewing */}
+        <div className="flex-1 border rounded-lg overflow-hidden bg-white" style={{ height: '600px', minHeight: '600px' }}>
           {features.length === 0 && !loading ? (
             <div className="h-full flex items-center justify-center text-gray-500">
               <div className="text-center">
@@ -489,20 +512,29 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               zoom={6}
               style={{ height: "100%", width: "100%" }}
               scrollWheelZoom={true}
+              key={`map-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}`}
             >
               <TileLayer 
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
               />
               <MapBoundsController features={features} />
-              {features.map((f, idx) => (
-                <GeoJSON key={idx} data={f} onEachFeature={onEachFeature} />
-              ))}
+              {features.map((f, idx) => {
+                // Use a more stable key based on admin_pcode if available
+                const featureKey = f?.properties?.admin_pcode || `feature-${idx}`;
+                return (
+                  <GeoJSON 
+                    key={`${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${featureKey}`} 
+                    data={f} 
+                    onEachFeature={onEachFeature} 
+                  />
+                );
+              })}
             </MapContainer>
           )}
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar - Independent of map height */}
         <div className="w-72 space-y-2 flex flex-col">
           {/* Action Buttons */}
           <div className="bg-white border rounded-lg p-3 space-y-2">
