@@ -21,6 +21,11 @@ const InstanceDatasetConfigModal = dynamic(
   { ssr: false }
 );
 
+const DefineAffectedAreaModal = dynamic(
+  () => import("@/components/DefineAffectedAreaModal"),
+  { ssr: false }
+);
+
 // Component to handle map bounds after features load
 function MapBoundsController({ features }: { features: any[] }) {
   const map = useMap();
@@ -50,6 +55,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showScoringModal, setShowScoringModal] = useState(false);
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
+  const [showAffectedAreaModal, setShowAffectedAreaModal] = useState(false);
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string }>({ type: 'overall' });
 
   // Ensure instanceId exists
@@ -665,6 +671,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     await fetchData(); // Refresh data after scoring changes
   };
 
+  const handleAffectedAreaSaved = async () => {
+    setShowAffectedAreaModal(false);
+    await fetchData(); // Refresh data after affected area changes
+  };
+
   const getColor = (score: number) => {
     if (score <= 1) return "#00FF00"; // green
     if (score <= 2) return "#CCFF00"; // yellow-green
@@ -864,22 +875,32 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="mb-4 p-2 bg-white rounded-lg shadow-sm border">
+      <div className="mb-4 p-4 bg-white rounded-lg shadow-sm border">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-gray-800">
+            <h1 className="text-xl font-semibold text-gray-800">
               {instance?.name || `Instance ${instanceId}`}
             </h1>
             {instance?.description && (
               <p className="text-sm text-gray-600 mt-1">{instance.description}</p>
             )}
           </div>
-          <Link
-            href="/instances"
-            className="text-sm text-blue-600 hover:text-blue-800"
-          >
-            ← Back to Instances
-          </Link>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowAffectedAreaModal(true)}
+              className="btn btn-secondary"
+              disabled={!instance}
+              title="Edit affected area for this instance"
+            >
+              Edit Affected Area
+            </button>
+            <Link
+              href="/instances"
+              className="btn btn-secondary"
+            >
+              ← Back to Instances
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -937,20 +958,26 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           <div className="bg-white border rounded-lg p-3 space-y-2">
             <button
               onClick={() => setShowDatasetConfigModal(true)}
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm font-medium transition-colors"
+              disabled={!instance || refreshing}
+              className="btn btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Configure Datasets
             </button>
             <button
               onClick={() => setShowScoringModal(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm font-medium transition-colors"
+              disabled={!instance || refreshing}
+              className="btn btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Adjust Scoring
             </button>
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white py-2 rounded text-sm font-medium transition-colors"
+              className="btn w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: refreshing ? 'var(--gsc-light-gray)' : 'var(--gsc-green)',
+                color: refreshing ? 'var(--gsc-gray)' : '#fff'
+              }}
             >
               {refreshing ? "Refreshing..." : "Refresh Data"}
             </button>
@@ -995,6 +1022,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           onSaved={async () => {
             await fetchData(); // Refresh data after config changes
           }}
+        />
+      )}
+
+      {/* Define Affected Area Modal */}
+      {showAffectedAreaModal && instance && (
+        <DefineAffectedAreaModal
+          instance={instance}
+          onClose={() => setShowAffectedAreaModal(false)}
+          onSaved={handleAffectedAreaSaved}
         />
       )}
     </div>
