@@ -39,7 +39,9 @@ CREATE FUNCTION public.score_numeric_auto(
   in_thresholds JSONB DEFAULT NULL,
   in_scale_max NUMERIC DEFAULT 5,
   in_inverse BOOLEAN DEFAULT FALSE,
-  in_limit_to_affected BOOLEAN DEFAULT FALSE
+  in_limit_to_affected BOOLEAN DEFAULT FALSE,
+  in_disaggregation_method TEXT DEFAULT NULL,
+  in_weight_dataset_id UUID DEFAULT NULL
 )
 RETURNS void
 LANGUAGE plpgsql
@@ -119,7 +121,87 @@ BEGIN
     
     -- Calculate min/max based on scope
     -- If dataset is ADM4, we need to roll up to ADM3 first for min/max calculation
-    IF v_dataset_admin_level = 'ADM4' THEN
+    -- If dataset is ADM2, we need to disaggregate to ADM3 first for min/max calculation
+    IF v_dataset_admin_level = 'ADM2' THEN
+      -- Disaggregate ADM2 to ADM3 and calculate min/max from disaggregated values
+      IF in_disaggregation_method = 'inherit' OR in_disaggregation_method IS NULL THEN
+        -- Simple inheritance: all ADM3s get the same value as parent ADM2
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          SELECT 
+            MIN(dvn.value),
+            MAX(dvn.value)
+          INTO v_min_value, v_max_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
+        ELSE
+          SELECT 
+            MIN(dvn.value),
+            MAX(dvn.value)
+          INTO v_min_value, v_max_value
+          FROM dataset_values_numeric dvn
+          WHERE dvn.dataset_id = in_dataset_id;
+        END IF;
+      ELSIF in_disaggregation_method = 'distribute' AND in_weight_dataset_id IS NOT NULL THEN
+        -- Population-weighted distribution: ADM3 values are weighted by population
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          SELECT 
+            MIN(disagg_value),
+            MAX(disagg_value)
+          INTO v_min_value, v_max_value
+          FROM (
+            SELECT 
+              ab3.admin_pcode,
+              dvn.value AS disagg_value
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
+              AND pop.admin_pcode = ab3.admin_pcode
+            WHERE dvn.dataset_id = in_dataset_id
+              AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          ) disagg_data;
+        ELSE
+          SELECT 
+            MIN(disagg_value),
+            MAX(disagg_value)
+          INTO v_min_value, v_max_value
+          FROM (
+            SELECT 
+              ab3.admin_pcode,
+              dvn.value AS disagg_value
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
+              AND pop.admin_pcode = ab3.admin_pcode
+            WHERE dvn.dataset_id = in_dataset_id
+          ) disagg_data;
+        END IF;
+      ELSE
+        -- Default to inherit if method is invalid
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          SELECT 
+            MIN(dvn.value),
+            MAX(dvn.value)
+          INTO v_min_value, v_max_value
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
+        ELSE
+          SELECT 
+            MIN(dvn.value),
+            MAX(dvn.value)
+          INTO v_min_value, v_max_value
+          FROM dataset_values_numeric dvn
+          WHERE dvn.dataset_id = in_dataset_id;
+        END IF;
+      END IF;
+    ELSIF v_dataset_admin_level = 'ADM4' THEN
       -- Roll up ADM4 to ADM3 and calculate min/max from rolled-up values
       IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
         SELECT 
@@ -186,8 +268,62 @@ BEGIN
       v_score := (in_scale_max + 1) / 2.0;
       
       -- Insert scores for all affected areas (or all if not limited)
-      -- If dataset is ADM4, use rolled-up values; otherwise use direct values
-      IF v_dataset_admin_level = 'ADM4' THEN
+      -- If dataset is ADM2, disaggregate to ADM3; if ADM4, roll up to ADM3; otherwise use direct values
+      IF v_dataset_admin_level = 'ADM2' THEN
+        -- Disaggregate ADM2 to ADM3
+        IF in_disaggregation_method = 'inherit' OR in_disaggregation_method IS NULL THEN
+          IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+            INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+            SELECT 
+              in_instance_id,
+              in_dataset_id,
+              ab3.admin_pcode,
+              v_score
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            WHERE dvn.dataset_id = in_dataset_id
+              AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
+          ELSE
+            INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+            SELECT 
+              in_instance_id,
+              in_dataset_id,
+              ab3.admin_pcode,
+              v_score
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            WHERE dvn.dataset_id = in_dataset_id;
+          END IF;
+        ELSE
+          -- For distribute method with all same values, just inherit (distribution doesn't matter)
+          IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+            INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+            SELECT 
+              in_instance_id,
+              in_dataset_id,
+              ab3.admin_pcode,
+              v_score
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            WHERE dvn.dataset_id = in_dataset_id
+              AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
+          ELSE
+            INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+            SELECT 
+              in_instance_id,
+              in_dataset_id,
+              ab3.admin_pcode,
+              v_score
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            WHERE dvn.dataset_id = in_dataset_id;
+          END IF;
+        END IF;
+      ELSIF v_dataset_admin_level = 'ADM4' THEN
         IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
           INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
           SELECT 
@@ -244,8 +380,137 @@ BEGIN
     v_value_range := v_max_value - v_min_value;
     
     -- Normalize and insert scores
-    -- If dataset is ADM4, use rolled-up values; otherwise use direct values
-    IF v_dataset_admin_level = 'ADM4' THEN
+    -- If dataset is ADM2, disaggregate to ADM3; if ADM4, roll up to ADM3; otherwise use direct values
+    IF v_dataset_admin_level = 'ADM2' THEN
+      -- Disaggregate ADM2 to ADM3 and score
+      IF in_disaggregation_method = 'inherit' OR in_disaggregation_method IS NULL THEN
+        -- Simple inheritance: all ADM3s get the same value as parent ADM2
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            CASE
+              WHEN in_inverse THEN
+                in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+              ELSE
+                1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+            END AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            CASE
+              WHEN in_inverse THEN
+                in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+              ELSE
+                1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+            END AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id;
+        END IF;
+      ELSIF in_disaggregation_method = 'distribute' AND in_weight_dataset_id IS NOT NULL THEN
+        -- Population-weighted distribution: distribute ADM2 value to ADM3s based on population weights
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          WITH weighted_distribution AS (
+            SELECT 
+              ab3.admin_pcode,
+              dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
+              AND pop.admin_pcode = ab3.admin_pcode
+            WHERE dvn.dataset_id = in_dataset_id
+              AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          )
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            wd.admin_pcode,
+            CASE
+              WHEN in_inverse THEN
+                in_scale_max - ((wd.disagg_value - v_min_value) / v_value_range * (in_scale_max - 1))
+              ELSE
+                1 + ((wd.disagg_value - v_min_value) / v_value_range * (in_scale_max - 1))
+            END AS score
+          FROM weighted_distribution wd
+          WHERE wd.disagg_value IS NOT NULL;
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          WITH weighted_distribution AS (
+            SELECT 
+              ab3.admin_pcode,
+              dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
+              AND pop.admin_pcode = ab3.admin_pcode
+            WHERE dvn.dataset_id = in_dataset_id
+          )
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            wd.admin_pcode,
+            CASE
+              WHEN in_inverse THEN
+                in_scale_max - ((wd.disagg_value - v_min_value) / v_value_range * (in_scale_max - 1))
+              ELSE
+                1 + ((wd.disagg_value - v_min_value) / v_value_range * (in_scale_max - 1))
+            END AS score
+          FROM weighted_distribution wd
+          WHERE wd.disagg_value IS NOT NULL;
+        END IF;
+      ELSE
+        -- Default to inherit if method is invalid
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            CASE
+              WHEN in_inverse THEN
+                in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+              ELSE
+                1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+            END AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes);
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            CASE
+              WHEN in_inverse THEN
+                in_scale_max - ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+              ELSE
+                1 + ((dvn.value - v_min_value) / v_value_range * (in_scale_max - 1))
+            END AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id;
+        END IF;
+      END IF;
+    ELSIF v_dataset_admin_level = 'ADM4' THEN
       -- Roll up ADM4 to ADM3 and score
       IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
         INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
@@ -344,9 +609,186 @@ BEGIN
       RAISE EXCEPTION 'Thresholds required for threshold method';
     END IF;
     
-    -- Check if we need to roll up from ADM4 to ADM3
-    -- If dataset is ADM4, we need to aggregate to ADM3 before scoring
-    IF v_dataset_admin_level = 'ADM4' THEN
+    -- Check if we need to transform admin level
+    -- If dataset is ADM2, disaggregate to ADM3; if ADM4, roll up to ADM3
+    IF v_dataset_admin_level = 'ADM2' THEN
+      -- Disaggregate ADM2 to ADM3 before applying thresholds
+      IF in_disaggregation_method = 'inherit' OR in_disaggregation_method IS NULL THEN
+        -- Simple inheritance: all ADM3s get the same value as parent ADM2
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            (
+              SELECT (threshold->>'score')::NUMERIC
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+              ORDER BY (threshold->>'min')::NUMERIC DESC
+              LIMIT 1
+            ) AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+            );
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            (
+              SELECT (threshold->>'score')::NUMERIC
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+              ORDER BY (threshold->>'min')::NUMERIC DESC
+              LIMIT 1
+            ) AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+            );
+        END IF;
+      ELSIF in_disaggregation_method = 'distribute' AND in_weight_dataset_id IS NOT NULL THEN
+        -- Population-weighted distribution: distribute ADM2 value to ADM3s based on population weights
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          WITH weighted_distribution AS (
+            SELECT 
+              ab3.admin_pcode,
+              dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
+              AND pop.admin_pcode = ab3.admin_pcode
+            WHERE dvn.dataset_id = in_dataset_id
+              AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+          )
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            wd.admin_pcode,
+            (
+              SELECT (threshold->>'score')::NUMERIC
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= wd.disagg_value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > wd.disagg_value OR (threshold->>'max')::TEXT IS NULL)
+              ORDER BY (threshold->>'min')::NUMERIC DESC
+              LIMIT 1
+            ) AS score
+          FROM weighted_distribution wd
+          WHERE wd.disagg_value IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= wd.disagg_value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > wd.disagg_value OR (threshold->>'max')::TEXT IS NULL)
+            );
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          WITH weighted_distribution AS (
+            SELECT 
+              ab3.admin_pcode,
+              dvn.value * (pop.value / NULLIF(SUM(pop.value) OVER (PARTITION BY ab2.admin_pcode), 0)) AS disagg_value
+            FROM dataset_values_numeric dvn
+            INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+            INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+            LEFT JOIN dataset_values_numeric pop ON pop.dataset_id = in_weight_dataset_id 
+              AND pop.admin_pcode = ab3.admin_pcode
+            WHERE dvn.dataset_id = in_dataset_id
+          )
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            wd.admin_pcode,
+            (
+              SELECT (threshold->>'score')::NUMERIC
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= wd.disagg_value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > wd.disagg_value OR (threshold->>'max')::TEXT IS NULL)
+              ORDER BY (threshold->>'min')::NUMERIC DESC
+              LIMIT 1
+            ) AS score
+          FROM weighted_distribution wd
+          WHERE wd.disagg_value IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= wd.disagg_value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > wd.disagg_value OR (threshold->>'max')::TEXT IS NULL)
+            );
+        END IF;
+      ELSE
+        -- Default to inherit if method is invalid
+        IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            (
+              SELECT (threshold->>'score')::NUMERIC
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+              ORDER BY (threshold->>'min')::NUMERIC DESC
+              LIMIT 1
+            ) AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND ab3.admin_pcode = ANY(v_affected_adm3_codes)
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+            );
+        ELSE
+          INSERT INTO instance_dataset_scores (instance_id, dataset_id, admin_pcode, score)
+          SELECT 
+            in_instance_id,
+            in_dataset_id,
+            ab3.admin_pcode,
+            (
+              SELECT (threshold->>'score')::NUMERIC
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+              ORDER BY (threshold->>'min')::NUMERIC DESC
+              LIMIT 1
+            ) AS score
+          FROM dataset_values_numeric dvn
+          INNER JOIN admin_boundaries ab2 ON ab2.admin_pcode = dvn.admin_pcode AND ab2.admin_level = 'ADM2'
+          INNER JOIN admin_boundaries ab3 ON ab3.parent_pcode = ab2.admin_pcode AND ab3.admin_level = 'ADM3'
+          WHERE dvn.dataset_id = in_dataset_id
+            AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(in_thresholds) AS threshold
+              WHERE (threshold->>'min')::NUMERIC <= dvn.value
+                AND (COALESCE((threshold->>'max')::NUMERIC, 999999999) > dvn.value OR (threshold->>'max')::TEXT IS NULL)
+            );
+        END IF;
+      END IF;
+    ELSIF v_dataset_admin_level = 'ADM4' THEN
       -- Roll up ADM4 values to ADM3 using average (appropriate for density metrics)
       -- Use a CTE to aggregate values first
       IF in_limit_to_affected AND v_affected_adm3_codes IS NOT NULL AND array_length(v_affected_adm3_codes, 1) > 0 THEN
@@ -536,6 +978,6 @@ END;
 $$;
 
 -- Grant execute permission (with full signature)
-GRANT EXECUTE ON FUNCTION public.score_numeric_auto(UUID, UUID, TEXT, JSONB, NUMERIC, BOOLEAN, BOOLEAN) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.score_numeric_auto(UUID, UUID, TEXT, JSONB, NUMERIC, BOOLEAN, BOOLEAN) TO anon;
+GRANT EXECUTE ON FUNCTION public.score_numeric_auto(UUID, UUID, TEXT, JSONB, NUMERIC, BOOLEAN, BOOLEAN, TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.score_numeric_auto(UUID, UUID, TEXT, JSONB, NUMERIC, BOOLEAN, BOOLEAN, TEXT, UUID) TO anon;
 

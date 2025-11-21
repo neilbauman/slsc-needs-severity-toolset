@@ -30,6 +30,9 @@ export default function NumericScoringModal({
   const [message, setMessage] = useState("");
   const [loadingDataPreview, setLoadingDataPreview] = useState(false);
   const [scopeWarning, setScopeWarning] = useState<string | null>(null);
+  const [disaggregationMethod, setDisaggregationMethod] = useState<string>("inherit"); // "inherit" or "distribute"
+  const [weightDatasetId, setWeightDatasetId] = useState<string | null>(null);
+  const [availableDatasets, setAvailableDatasets] = useState<any[]>([]);
 
   // ✅ Load existing config
   useEffect(() => {
@@ -85,6 +88,8 @@ export default function NumericScoringModal({
           setScopeWarning("⚠️ Scores exist but scope setting changed. Re-apply scoring to update.");
         }
       }
+      if (cfg.disaggregationMethod) setDisaggregationMethod(cfg.disaggregationMethod);
+      if (cfg.weightDatasetId) setWeightDatasetId(cfg.weightDatasetId);
       
       // Show message if config was loaded
       if (Object.keys(cfg).length > 0) {
@@ -132,10 +137,48 @@ export default function NumericScoringModal({
     return () => clearTimeout(timer);
   }, [scope, instance?.id, dataset?.id]);
 
+  // Load available datasets for weight selection (only numeric datasets at ADM3 or ADM4)
+  useEffect(() => {
+    if (!instance?.id) return;
+    
+    const loadDatasets = async () => {
+      const { data, error } = await supabase
+        .from("instance_datasets")
+        .select("dataset_id, datasets!inner(id, name, admin_level, type)")
+        .eq("instance_id", instance.id);
+      
+      if (error) {
+        console.warn("Error loading datasets:", error);
+        return;
+      }
+      
+      // Filter to numeric datasets at ADM3 or ADM4 (for population weighting)
+      const numericDatasets = (data || [])
+        .map((d: any) => d.datasets)
+        .filter((d: any) => 
+          d.type === 'numeric' && 
+          (d.admin_level === 'ADM3' || d.admin_level === 'ADM4') &&
+          d.id !== dataset?.id // Exclude current dataset
+        );
+      
+      setAvailableDatasets(numericDatasets);
+    };
+    
+    loadDatasets();
+  }, [instance?.id, dataset?.id]);
+
   // ✅ Save config (upsert to handle both insert and update)
   const saveConfig = async () => {
     setSaving(true);
-    const config = { method, scaleMax, inverse, thresholds, scope };
+    const config = { 
+      method, 
+      scaleMax, 
+      inverse, 
+      thresholds, 
+      scope,
+      disaggregationMethod: transformationType === "disaggregation" ? disaggregationMethod : undefined,
+      weightDatasetId: transformationType === "disaggregation" && disaggregationMethod === "distribute" ? weightDatasetId : undefined,
+    };
 
     // Map method to database format (normalize to lowercase)
     const scoringMethod = method.toLowerCase();
@@ -216,6 +259,8 @@ export default function NumericScoringModal({
       in_scale_max: scaleMax,
       in_inverse: inverse,
       in_limit_to_affected: limitToAffected,
+      in_disaggregation_method: transformationType === "disaggregation" ? disaggregationMethod : null,
+      in_weight_dataset_id: transformationType === "disaggregation" && disaggregationMethod === "distribute" ? weightDatasetId : null,
     });
 
     if (error) {
@@ -570,6 +615,45 @@ export default function NumericScoringModal({
           <span className="font-medium text-blue-800">Scoring will be performed at: </span>
           <span className="text-blue-700">{INSTANCE_TARGET_LEVEL} level</span>
         </div>
+
+        {/* Disaggregation Method Selection (only shown for ADM2 datasets) */}
+        {needsTransformation && transformationType === "disaggregation" && (
+          <div className="mb-4 p-3 border rounded bg-gray-50">
+            <label className="block text-sm font-medium mb-2">
+              Disaggregation Method:
+            </label>
+            <select
+              value={disaggregationMethod}
+              onChange={(e) => setDisaggregationMethod(e.target.value)}
+              className="border rounded p-2 w-full text-sm mb-2"
+            >
+              <option value="inherit">Inherit (all ADM3s get same value as parent ADM2)</option>
+              <option value="distribute">Distribute (weighted by population)</option>
+            </select>
+            {disaggregationMethod === "distribute" && (
+              <div className="mt-2">
+                <label className="block text-sm font-medium mb-1">
+                  Population Dataset (for weighting):
+                </label>
+                <select
+                  value={weightDatasetId || ""}
+                  onChange={(e) => setWeightDatasetId(e.target.value || null)}
+                  className="border rounded p-2 w-full text-sm"
+                >
+                  <option value="">-- Select population dataset --</option>
+                  {availableDatasets.map((ds) => (
+                    <option key={ds.id} value={ds.id}>
+                      {ds.name} ({ds.admin_level})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-600 mt-1">
+                  Select a numeric dataset at ADM3 or ADM4 level to use for population-weighted distribution.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Method Selection */}
         <div className="mb-4">
