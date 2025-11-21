@@ -181,73 +181,94 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       let parsed: any[] = [];
       try {
         console.log("Loading overall scores for initial view");
-        const { data: overallScores, error: scoresError } = await supabase
-          .from("v_instance_admin_scores")
-          .select("admin_pcode, name, avg_score")
+        
+        // First, get all available admin_pcodes with geometry from geojson view
+        const { data: geoRows, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode, geojson")
           .eq("instance_id", instanceId);
 
-        if (scoresError) {
-          console.warn("Error loading overall scores:", scoresError);
-        } else if (overallScores && overallScores.length > 0) {
-          console.log(`Loaded ${overallScores.length} overall scores`);
-
-          // Create score map
-          const scoreMap = new Map(overallScores.map((s: any) => [s.admin_pcode, Number(s.avg_score)]));
+        if (geoError) {
+          console.warn("Error loading GeoJSON:", geoError);
+        } else if (!geoRows || geoRows.length === 0) {
+          console.warn("No geometry found for instance");
+        } else {
+          console.log(`Found ${geoRows.length} locations with geometry`);
           
-          // Get geometry from geojson view (grouped by admin_pcode to get unique geometry)
-          const adminPcodes = overallScores.map((s: any) => s.admin_pcode);
-          const { data: allGeoRows, error: geoError } = await supabase
-            .from("v_instance_admin_scores_geojson")
-            .select("admin_pcode, geojson")
-            .eq("instance_id", instanceId)
-            .in("admin_pcode", adminPcodes);
-          
-          if (!geoError && allGeoRows) {
-            // Group by admin_pcode and take first (they should all have same geometry per location)
-            const geoMap = new Map<string, any>();
-            allGeoRows.forEach((row: any) => {
-              if (!geoMap.has(row.admin_pcode)) {
-                try {
-                  const feature = typeof row.geojson === 'string' 
-                    ? JSON.parse(row.geojson) 
-                    : row.geojson;
-                  geoMap.set(row.admin_pcode, feature);
-                } catch (e) {
-                  console.warn("Error parsing GeoJSON for", row.admin_pcode, e);
-                }
+          // Group by admin_pcode to get unique geometry
+          const geoMap = new Map<string, any>();
+          geoRows.forEach((row: any) => {
+            if (!geoMap.has(row.admin_pcode)) {
+              try {
+                const feature = typeof row.geojson === 'string' 
+                  ? JSON.parse(row.geojson) 
+                  : row.geojson;
+                geoMap.set(row.admin_pcode, feature);
+              } catch (e) {
+                console.warn("Error parsing GeoJSON for", row.admin_pcode, e);
               }
-            });
+            }
+          });
+          
+          console.log(`Parsed ${geoMap.size} unique locations with geometry`);
+          
+          // Now get scores only for admin_pcodes that have geometry
+          const adminPcodesWithGeometry = Array.from(geoMap.keys());
+          
+          if (adminPcodesWithGeometry.length > 0) {
+            // Split into chunks if too many (Supabase IN clause limit is ~1000)
+            const chunkSize = 1000;
+            const chunks: string[][] = [];
+            for (let i = 0; i < adminPcodesWithGeometry.length; i += chunkSize) {
+              chunks.push(adminPcodesWithGeometry.slice(i, i + chunkSize));
+            }
             
-            console.log(`Found geometry for ${geoMap.size} locations`);
+            let allScores: any[] = [];
+            for (const chunk of chunks) {
+              const { data: scores, error: scoresError } = await supabase
+                .from("v_instance_admin_scores")
+                .select("admin_pcode, name, avg_score")
+                .eq("instance_id", instanceId)
+                .in("admin_pcode", chunk);
+              
+              if (scoresError) {
+                console.warn("Error loading scores for chunk:", scoresError);
+              } else if (scores) {
+                allScores = [...allScores, ...scores];
+              }
+            }
+            
+            console.log(`Loaded ${allScores.length} overall scores for locations with geometry`);
 
+            // Create score map
+            const scoreMap = new Map(allScores.map((s: any) => [s.admin_pcode, Number(s.avg_score)]));
+          
             // Combine scores with geometry
-            parsed = overallScores
-              .map((scoreRow: any) => {
-                const geoFeature = geoMap.get(scoreRow.admin_pcode);
+            parsed = adminPcodesWithGeometry
+              .map((pcode: string) => {
+                const geoFeature = geoMap.get(pcode);
                 if (!geoFeature) {
                   return null;
                 }
+                
+                const score = scoreMap.get(pcode);
                 
                 // Merge score into feature properties
                 return {
                   ...geoFeature,
                   properties: {
                     ...geoFeature.properties,
-                    admin_pcode: scoreRow.admin_pcode,
-                    admin_name: scoreRow.name || geoFeature.properties?.name || geoFeature.properties?.admin_name,
-                    score: scoreMap.get(scoreRow.admin_pcode),
-                    has_score: true,
+                    admin_pcode: pcode,
+                    admin_name: geoFeature.properties?.name || geoFeature.properties?.admin_name || allScores.find(s => s.admin_pcode === pcode)?.name || 'Unknown',
+                    score: score,
+                    has_score: score !== undefined,
                   }
                 };
               })
               .filter((f: any) => f !== null);
             
             console.log(`Created ${parsed.length} features with overall scores`);
-          } else {
-            console.warn("Error loading GeoJSON:", geoError);
           }
-        } else {
-          console.warn("No overall scores found. You may need to run 'score_final_aggregate' RPC first.");
         }
       } catch (e) {
         console.warn("Error loading overall scores:", e);
@@ -286,113 +307,103 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log("Loading overall scores from v_instance_admin_scores");
         
-        // Get overall scores (avg_score per location)
-        const { data: overallScores, error: scoresError } = await supabase
-          .from("v_instance_admin_scores")
-          .select("admin_pcode, name, avg_score")
-          .eq("instance_id", instanceId);
-
-        if (scoresError) {
-          console.error("Error fetching overall scores:", scoresError);
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
-        }
-
-        if (!overallScores || overallScores.length === 0) {
-          console.log("No overall scores found. You may need to run 'score_final_aggregate' RPC first.");
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
-        }
-
-        console.log(`Loaded ${overallScores.length} overall scores`);
-
-        // Create score map
-        const scoreMap = new Map(overallScores.map((s: any) => [s.admin_pcode, Number(s.avg_score)]));
-        
-        // Get geometry from the geojson view (we'll use any dataset's geometry, they should all be the same per location)
-        // Or try to get from admin_boundaries via RPC or direct query
+        // First, get all available admin_pcodes with geometry from geojson view
         const { data: geoRows, error: geoError } = await supabase
           .from("v_instance_admin_scores_geojson")
           .select("admin_pcode, geojson")
-          .eq("instance_id", instanceId)
-          .limit(1); // Just to get the structure
-        
-        // If that doesn't work, try getting unique admin_pcodes and their geometry
-        const adminPcodes = overallScores.map((s: any) => s.admin_pcode);
-        
-        // Try to get geometry from admin_boundaries using RPC or direct query
-        let geoMap = new Map<string, any>();
-        
-        // Try RPC first
-        try {
-          const { data: rpcGeo, error: rpcError } = await supabase.rpc('get_admin_boundaries_geojson', {
-            in_level: 'ADM3',
-            in_pcodes: adminPcodes
-          });
-          
-          if (!rpcError && rpcGeo) {
-            // RPC returns FeatureCollection
-            if (rpcGeo.features) {
-              rpcGeo.features.forEach((f: any) => {
-                if (f.properties?.admin_pcode) {
-                  geoMap.set(f.properties.admin_pcode, f);
-                }
-              });
+          .eq("instance_id", instanceId);
+
+        if (geoError) {
+          console.error("Error fetching GeoJSON:", geoError);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        if (!geoRows || geoRows.length === 0) {
+          console.log("No geometry found for instance");
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        console.log(`Found ${geoRows.length} locations with geometry`);
+
+        // Group by admin_pcode to get unique geometry
+        const geoMap = new Map<string, any>();
+        geoRows.forEach((row: any) => {
+          if (!geoMap.has(row.admin_pcode)) {
+            try {
+              const feature = typeof row.geojson === 'string' 
+                ? JSON.parse(row.geojson) 
+                : row.geojson;
+              geoMap.set(row.admin_pcode, feature);
+            } catch (e) {
+              console.warn("Error parsing GeoJSON for", row.admin_pcode, e);
             }
           }
-        } catch (rpcErr) {
-          console.warn("RPC get_admin_boundaries_geojson failed, trying alternative:", rpcErr);
+        });
+        
+        console.log(`Parsed ${geoMap.size} unique locations with geometry`);
+
+        // Get scores only for admin_pcodes that have geometry
+        const adminPcodesWithGeometry = Array.from(geoMap.keys());
+        
+        if (adminPcodesWithGeometry.length === 0) {
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        // Split into chunks if too many (Supabase IN clause limit is ~1000)
+        const chunkSize = 1000;
+        const chunks: string[][] = [];
+        for (let i = 0; i < adminPcodesWithGeometry.length; i += chunkSize) {
+          chunks.push(adminPcodesWithGeometry.slice(i, i + chunkSize));
         }
         
-        // If RPC didn't work, try to get from the geojson view by grouping
-        if (geoMap.size === 0) {
-          const { data: allGeoRows, error: allGeoError } = await supabase
-            .from("v_instance_admin_scores_geojson")
-            .select("admin_pcode, geojson")
+        let allScores: any[] = [];
+        for (const chunk of chunks) {
+          const { data: scores, error: scoresError } = await supabase
+            .from("v_instance_admin_scores")
+            .select("admin_pcode, name, avg_score")
             .eq("instance_id", instanceId)
-            .in("admin_pcode", adminPcodes);
+            .in("admin_pcode", chunk);
           
-          if (!allGeoError && allGeoRows) {
-            // Group by admin_pcode and take first (they should all have same geometry)
-            const geoByPcode = new Map<string, any>();
-            allGeoRows.forEach((row: any) => {
-              if (!geoByPcode.has(row.admin_pcode)) {
-                try {
-                  const feature = typeof row.geojson === 'string' 
-                    ? JSON.parse(row.geojson) 
-                    : row.geojson;
-                  geoByPcode.set(row.admin_pcode, feature);
-                } catch (e) {
-                  console.warn("Error parsing GeoJSON for", row.admin_pcode, e);
-                }
-              }
-            });
-            geoMap = geoByPcode;
+          if (scoresError) {
+            console.error("Error fetching overall scores:", scoresError);
+            setFeatures([]);
+            setLoadingFeatures(false);
+            return;
+          } else if (scores) {
+            allScores = [...allScores, ...scores];
           }
         }
         
-        console.log(`Found geometry for ${geoMap.size} locations`);
+        console.log(`Loaded ${allScores.length} overall scores for locations with geometry`);
+
+        // Create score map
+        const scoreMap = new Map(allScores.map((s: any) => [s.admin_pcode, Number(s.avg_score)]));
 
         // Combine scores with geometry
-        const features = overallScores
-          .map((scoreRow: any) => {
-            const geoFeature = geoMap.get(scoreRow.admin_pcode);
+        const features = adminPcodesWithGeometry
+          .map((pcode: string) => {
+            const geoFeature = geoMap.get(pcode);
             if (!geoFeature) {
-              console.warn(`No geometry found for ${scoreRow.admin_pcode}`);
               return null;
             }
+            
+            const score = scoreMap.get(pcode);
             
             // Merge score into feature properties
             return {
               ...geoFeature,
               properties: {
                 ...geoFeature.properties,
-                admin_pcode: scoreRow.admin_pcode,
-                admin_name: scoreRow.name || geoFeature.properties?.name || geoFeature.properties?.admin_name,
-                score: scoreMap.get(scoreRow.admin_pcode),
-                has_score: true,
+                admin_pcode: pcode,
+                admin_name: geoFeature.properties?.name || geoFeature.properties?.admin_name || allScores.find(s => s.admin_pcode === pcode)?.name || 'Unknown',
+                score: score,
+                has_score: score !== undefined,
               }
             };
           })

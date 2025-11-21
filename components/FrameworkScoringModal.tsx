@@ -233,17 +233,33 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
       },
     };
 
-    const { error } = await supabase.rpc('score_framework_aggregate', {
+    const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
       in_instance_id: instance.id,
       in_config: cfg,
     });
 
-    if (error) {
-      setError(error.message);
+    if (frameworkError) {
+      setError(frameworkError.message);
       setLoading(false);
       return;
     }
 
+    // Also compute final overall scores after framework aggregation
+    console.log("Computing final overall scores...");
+    const { error: finalError } = await supabase.rpc('score_final_aggregate', {
+      in_instance_id: instance.id,
+    });
+
+    if (finalError) {
+      console.warn("Error computing final overall scores:", finalError);
+      // Don't fail the whole operation if final aggregate fails
+      // The framework scores are still saved
+      setError(`Framework scores saved, but error computing overall scores: ${finalError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    console.log("Scoring configuration applied successfully");
     await onSaved();
     onClose();
     setLoading(false);
