@@ -469,24 +469,71 @@ export default function NumericScoringModal({
         }
       }
 
-      // Build query - use count for accurate totals
-      let query = supabase
-        .from("dataset_values_numeric")
-        .select("value, admin_pcode", { count: "exact" })
-        .eq("dataset_id", dataset.id);
-
-      // Filter by affected area if scope is "affected" and we have codes
-      if (scope === "affected" && affectedAdm3Codes.length > 0) {
-        query = query.in("admin_pcode", affectedAdm3Codes);
-      }
-      // For "country" scope, don't filter - get all data
-
-      // Fetch data - for country scope, we need to handle large datasets
-      // Supabase default limit is 1000, so we need to paginate
-      const batchSize = 1000;
+      // For ADM2 datasets that need disaggregation, show ADM2 values (which will be inherited)
+      const datasetLevel = dataset?.admin_level ? String(dataset.admin_level).trim().toUpperCase() : "";
+      const needsDisaggregation = datasetLevel === "ADM2";
+      
       let allData: any[] = [];
-      let hasMore = true;
-      let offset = 0;
+      
+      if (needsDisaggregation) {
+        // For ADM2 datasets, show the ADM2 values that will be disaggregated
+        // Filter by affected ADM2 areas if scope is "affected"
+        let query = supabase
+          .from("dataset_values_numeric")
+          .select("value, admin_pcode", { count: "exact" })
+          .eq("dataset_id", dataset.id);
+        
+        if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
+          query = query.in("admin_pcode", instance.admin_scope);
+        }
+        
+        const batchSize = 1000;
+        let hasMore = true;
+        let offset = 0;
+        
+        while (hasMore) {
+          const batchQuery = query.range(offset, offset + batchSize - 1);
+          const { data: batchData, error: batchError, count } = await batchQuery;
+          
+          if (batchError) {
+            console.error("Error loading ADM2 data:", batchError);
+            setDataPreview(null);
+            return;
+          }
+          
+          if (batchData && batchData.length > 0) {
+            allData = [...allData, ...batchData];
+            offset += batchSize;
+            
+            if (batchData.length < batchSize || (count !== null && allData.length >= count)) {
+              hasMore = false;
+            }
+          } else {
+            hasMore = false;
+          }
+          
+          if (allData.length >= 10000) {
+            hasMore = false;
+          }
+        }
+      } else {
+        // Build query - use count for accurate totals
+        let query = supabase
+          .from("dataset_values_numeric")
+          .select("value, admin_pcode", { count: "exact" })
+          .eq("dataset_id", dataset.id);
+
+        // Filter by affected area if scope is "affected" and we have codes
+        if (scope === "affected" && affectedAdm3Codes.length > 0) {
+          query = query.in("admin_pcode", affectedAdm3Codes);
+        }
+        // For "country" scope, don't filter - get all data
+
+        // Fetch data - for country scope, we need to handle large datasets
+        // Supabase default limit is 1000, so we need to paginate
+        const batchSize = 1000;
+        let hasMore = true;
+        let offset = 0;
       
       while (hasMore) {
         const batchQuery = query.range(offset, offset + batchSize - 1);
@@ -548,6 +595,7 @@ export default function NumericScoringModal({
         p25: p25.toFixed(2),
         p75: p75.toFixed(2),
         scope: scope === "affected" ? "affected area" : "entire country",
+        note: needsDisaggregation ? "Showing ADM2 values (will be inherited by ADM3s)" : undefined,
       });
     } catch (err) {
       console.error("Error loading data preview:", err);
@@ -896,6 +944,9 @@ export default function NumericScoringModal({
                 </span>
               )}
             </h4>
+            {dataPreview.note && (
+              <p className="text-xs text-blue-700 mb-2 italic">{dataPreview.note}</p>
+            )}
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
                 <div className="text-blue-600">Count</div>
