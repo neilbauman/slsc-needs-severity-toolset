@@ -273,19 +273,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (scoresError) {
           console.error("Error fetching dataset scores:", scoresError);
           setFeatures([]);
+          setLoadingFeatures(false);
           return;
         }
 
-        if (!scores || scores.length === 0) {
-          console.log("No scores found for dataset:", selection.datasetId);
-          setFeatures([]);
-          return;
+        // Create score map for this dataset (may be empty if no scores)
+        const scoreMap = new Map(scores?.map((s: any) => [s.admin_pcode, Number(s.score)]) || []);
+        console.log(`Loaded ${scores?.length || 0} scores for dataset ${selection.datasetId}`);
+        
+        // Load raw values for this dataset to show in tooltip
+        const { data: rawValues, error: rawValuesError } = await supabase
+          .from("dataset_values_numeric")
+          .select("admin_pcode, value")
+          .eq("dataset_id", selection.datasetId);
+        
+        if (rawValuesError) {
+          console.warn("Error fetching raw values:", rawValuesError);
         }
-
-        // Create score map for this dataset
-        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.score)]));
-        console.log(`Loaded ${scores.length} scores for dataset ${selection.datasetId}`);
-        console.log("Sample scores:", Array.from(scoreMap.entries()).slice(0, 5));
+        
+        // Create raw value map
+        const rawValueMap = new Map(rawValues?.map((v: any) => [v.admin_pcode, Number(v.value)]) || []);
+        console.log(`Loaded ${rawValues?.length || 0} raw values for dataset ${selection.datasetId}`);
 
         // Get geometry from view - each row is a single Feature (not FeatureCollection)
         const { data: geoRows, error: geoError } = await supabase
@@ -296,19 +304,21 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         if (geoError) {
           console.error("Error fetching GeoJSON:", geoError);
           setFeatures([]);
+          setLoadingFeatures(false);
           return;
         }
         
         if (!geoRows || geoRows.length === 0) {
           console.log("No GeoJSON features found for instance");
           setFeatures([]);
+          setLoadingFeatures(false);
           return;
         }
         
         console.log(`Loaded ${geoRows.length} GeoJSON features from view`);
         
-        // Parse and filter features - each row has a single Feature in the geojson field
-        const filteredFeatures = geoRows
+        // Parse ALL features (not just those with scores) - show locations without data in grey
+        const allFeatures = geoRows
           .map((row: any) => {
             try {
               // Parse the geojson field (it's a single Feature, not FeatureCollection)
@@ -318,19 +328,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               
               // Check if this admin_pcode has a score for this dataset
               const datasetScore = scoreMap.get(row.admin_pcode);
+              const rawValue = rawValueMap.get(row.admin_pcode);
               
-              // Only include features that have scores for this dataset
-              if (datasetScore === undefined) return null;
-              
-              // Update the feature with the dataset-specific score
-              // Create a new object to ensure React detects the change
+              // Include ALL features, even those without scores
+              // Update the feature with the dataset-specific score and raw value
               return {
                 ...feature,
                 properties: {
                   ...feature.properties,
                   admin_pcode: row.admin_pcode,
                   admin_name: feature.properties?.admin_name || feature.properties?.name,
-                  score: datasetScore, // Use dataset-specific score
+                  score: datasetScore, // May be undefined if no score
+                  raw_value: rawValue, // Raw data value for tooltip
+                  has_score: datasetScore !== undefined, // Flag to indicate if score exists
                 }
               };
             } catch (e) {
@@ -340,15 +350,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           })
           .filter((f: any) => f !== null);
         
-        console.log(`Filtered to ${filteredFeatures.length} features with dataset scores`);
-        console.log("Sample feature scores:", filteredFeatures.slice(0, 5).map((f: any) => ({
-          admin_pcode: f.properties?.admin_pcode,
-          score: f.properties?.score,
-          admin_name: f.properties?.admin_name
-        })));
+        console.log(`Processed ${allFeatures.length} features (${scoreMap.size} with scores, ${allFeatures.length - scoreMap.size} without scores)`);
         
         // Force a new array reference to ensure React detects the change
-        setFeatures([...filteredFeatures]);
+        setFeatures([...allFeatures]);
         setLoadingFeatures(false);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
@@ -404,20 +409,25 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   };
 
   const onEachFeature = (feature: any, layer: any) => {
-    if (feature.properties && feature.properties.score !== undefined) {
-      const score = Number(feature.properties.score);
-      const color = getColor(score);
-      const adminName = feature.properties.admin_name || feature.properties.name || 'Unknown';
-      let layerName = 'Overall Score';
-      if (selectedLayer.type === 'dataset') {
-        layerName = selectedLayer.datasetName || 'Dataset Score';
-      } else if (selectedLayer.type === 'category') {
-        if (selectedLayer.category === 'overall') {
-          layerName = `${selectedLayer.datasetName || 'Dataset'} - Overall`;
-        } else {
-          layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
-        }
+    const adminName = feature.properties?.admin_name || feature.properties?.name || 'Unknown';
+    const hasScore = feature.properties?.has_score === true;
+    const score = feature.properties?.score !== undefined ? Number(feature.properties.score) : null;
+    const rawValue = feature.properties?.raw_value !== undefined ? Number(feature.properties.raw_value) : null;
+    
+    let layerName = 'Overall Score';
+    if (selectedLayer.type === 'dataset') {
+      layerName = selectedLayer.datasetName || 'Dataset Score';
+    } else if (selectedLayer.type === 'category') {
+      if (selectedLayer.category === 'overall') {
+        layerName = `${selectedLayer.datasetName || 'Dataset'} - Overall`;
+      } else {
+        layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
       }
+    }
+    
+    if (hasScore && score !== null) {
+      // Has score - use color based on score
+      const color = getColor(score);
       
       // Set initial style with thin black borders
       layer.setStyle({ 
@@ -428,9 +438,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         opacity: 1
       });
       
-      // Bind tooltip for hover (shows name and score)
+      // Build tooltip text with name, raw value (if available), and score
+      let tooltipText = `<strong>${adminName}</strong>`;
+      if (rawValue !== null) {
+        // Format raw value appropriately (check if it's a percentage or regular number)
+        const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
+        tooltipText += `<br/>Value: ${formattedValue}`;
+      }
+      tooltipText += `<br/>${layerName}: ${score.toFixed(2)}`;
+      
+      // Bind tooltip for hover (shows name, value, and score)
       layer.bindTooltip(
-        `<strong>${adminName}</strong><br/>${layerName}: ${score.toFixed(2)}`,
+        tooltipText,
         {
           permanent: false,
           direction: 'top',
@@ -440,9 +459,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       );
       
       // Bind popup for click
-      layer.bindPopup(
-        `<strong>${adminName}</strong><br/>${layerName}: ${score.toFixed(2)}`
-      );
+      let popupText = `<strong>${adminName}</strong>`;
+      if (rawValue !== null) {
+        const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
+        popupText += `<br/>Value: ${formattedValue}`;
+      }
+      popupText += `<br/>${layerName}: ${score.toFixed(2)}`;
+      layer.bindPopup(popupText);
       
       // Add hover effects
       layer.on({
@@ -467,19 +490,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       });
     } else {
       // No score - use gray
-      const adminName = feature.properties?.admin_name || feature.properties?.name || 'Unknown';
-      
       layer.setStyle({ 
         color: '#000000', // Black border
-        fillColor: '#ddd', 
-        fillOpacity: 0.3,
+        fillColor: '#999999', // Grey fill
+        fillOpacity: 0.4,
         weight: 1, // Thin border
         opacity: 1
       });
       
+      // Build tooltip text with name (and raw value if available)
+      let tooltipText = `<strong>${adminName}</strong>`;
+      if (rawValue !== null) {
+        const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
+        tooltipText += `<br/>Value: ${formattedValue}`;
+        tooltipText += `<br/>No score available`;
+      } else {
+        tooltipText += `<br/>No data available`;
+      }
+      
       // Bind tooltip for hover
       layer.bindTooltip(
-        `<strong>${adminName}</strong><br/>No score available`,
+        tooltipText,
         {
           permanent: false,
           direction: 'top',
@@ -489,9 +520,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       );
       
       // Bind popup for click
-      layer.bindPopup(
-        `<strong>${adminName}</strong><br/>No score available`
-      );
+      let popupText = `<strong>${adminName}</strong>`;
+      if (rawValue !== null) {
+        const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
+        popupText += `<br/>Value: ${formattedValue}`;
+        popupText += `<br/>No score available`;
+      } else {
+        popupText += `<br/>No data available`;
+      }
+      layer.bindPopup(popupText);
       
       // Add hover effects
       layer.on({
@@ -499,18 +536,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           const hoverLayer = e.target;
           hoverLayer.setStyle({
             weight: 2,
-            fillOpacity: 0.5,
+            fillOpacity: 0.6,
             color: '#000000',
-            fillColor: '#ddd'
+            fillColor: '#999999'
           });
         },
         mouseout: (e: any) => {
           const hoverLayer = e.target;
           hoverLayer.setStyle({
             weight: 1,
-            fillOpacity: 0.3,
+            fillOpacity: 0.4,
             color: '#000000',
-            fillColor: '#ddd'
+            fillColor: '#999999'
           });
         }
       });
