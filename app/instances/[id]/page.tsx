@@ -232,135 +232,63 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           return;
         }
 
-        // Get admin boundaries - try RPC first, then fallback to direct query
-        const adminPcodes = scores.map((s: any) => s.admin_pcode);
+        // Get geometry from overall view and filter by dataset scores
+        // This is the most reliable approach since the RPC function may not exist
+        const { data: overallGeo, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("geojson")
+          .eq("instance_id", params.id);
         
-        // Try RPC function first (if it supports our parameters)
-        let boundaries: any[] = [];
-        let boundariesError: any = null;
-        
-        // Try with in_level parameter
-        const { data: rpcData, error: rpcError } = await supabase.rpc('get_admin_boundaries_geojson', {
-          in_level: 'ADM3'
-        });
-        
-        if (!rpcError && rpcData && rpcData.features) {
-          // Filter to only the admin_pcodes we need
-          const filteredFeatures = rpcData.features.filter((f: any) => 
-            adminPcodes.includes(f.properties?.admin_pcode)
-          );
-          
-          // Convert GeoJSON features to our format
-          boundaries = filteredFeatures.map((f: any) => ({
-            admin_pcode: f.properties?.admin_pcode,
-            name: f.properties?.name,
-            geometry: f.geometry
-          }));
-        } else {
-          // Fallback: try direct query (may need PostGIS conversion)
-          // Note: If geometry column doesn't exist, we'll need to use a view or RPC
-          const { data: directData, error: directError } = await supabase
-            .from("admin_boundaries")
-            .select("admin_pcode, name")
-            .in("admin_pcode", adminPcodes)
-            .eq("admin_level", "ADM3");
-          
-          if (directError) {
-            boundariesError = directError;
-          } else if (directData) {
-            // If we can't get geometry directly, we'll need to use the overall GeoJSON view
-            // and match by admin_pcode
-            boundaries = directData.map((b: any) => ({
-              admin_pcode: b.admin_pcode,
-              name: b.name,
-              geometry: null // Will need to get from overall view
-            }));
-          }
-        }
-
-        if (boundariesError) {
-          console.error("Error fetching boundaries:", boundariesError);
-        }
-
-        if (!boundaries || boundaries.length === 0) {
-          // If we couldn't get boundaries, try to get geometry from overall view
-          // and match by admin_pcode
-          const { data: overallGeo } = await supabase
-            .from("v_instance_admin_scores_geojson")
-            .select("geojson")
-            .eq("instance_id", params.id);
-          
-          if (overallGeo && overallGeo.length > 0) {
-            const parsed = overallGeo
-              .map((g: any) => {
-                try {
-                  return typeof g.geojson === 'string' ? JSON.parse(g.geojson) : g.geojson;
-                } catch (e) {
-                  return null;
-                }
-              })
-              .filter((f: any) => f !== null);
-            
-            // Filter to only features with scores for this dataset
-            const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
-            const filteredFeatures = parsed
-              .flatMap((fc: any) => fc.features || [])
-              .filter((f: any) => scoreMap.has(f.properties?.admin_pcode))
-              .map((f: any) => ({
-                ...f,
-                properties: {
-                  ...f.properties,
-                  score: scoreMap.get(f.properties?.admin_pcode),
-                }
-              }));
-            
-            setFeatures(filteredFeatures);
-            return;
-          }
-          
+        if (geoError) {
+          console.error("Error fetching overall GeoJSON:", geoError);
           setFeatures([]);
           return;
         }
-
-        // Create score map
-        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
-
-        // Build GeoJSON features
-        const features = boundaries
-          .map((b: any) => {
-            const score = scoreMap.get(b.admin_pcode);
-            if (score === undefined) return null;
-
-            // Geometry might already be in GeoJSON format from RPC
-            let geometry = b.geometry;
-            if (!geometry) {
-              // If no geometry, we can't create a feature
+        
+        if (!overallGeo || overallGeo.length === 0) {
+          setFeatures([]);
+          return;
+        }
+        
+        // Parse GeoJSON
+        const parsed = overallGeo
+          .map((g: any) => {
+            try {
+              return typeof g.geojson === 'string' ? JSON.parse(g.geojson) : g.geojson;
+            } catch (e) {
+              console.warn("Error parsing GeoJSON:", e);
               return null;
             }
-            
-            // If geometry is a string, try to parse it
-            if (typeof geometry === 'string') {
-              try {
-                geometry = JSON.parse(geometry);
-              } catch (e) {
-                console.warn("Error parsing geometry:", e);
-                return null;
-              }
-            }
-
-            return {
-              type: "Feature",
-              properties: {
-                admin_pcode: b.admin_pcode,
-                admin_name: b.name,
-                score: score,
-              },
-              geometry: geometry,
-            };
           })
           .filter((f: any) => f !== null);
-
-        setFeatures(features);
+        
+        // Create score map for this dataset
+        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
+        
+        // Filter to only features with scores for this dataset and update scores
+        const filteredFeatures = parsed
+          .flatMap((fc: any) => {
+            if (!fc || !fc.features) return [];
+            return fc.features.map((f: any) => {
+              const adminPcode = f.properties?.admin_pcode;
+              const datasetScore = scoreMap.get(adminPcode);
+              
+              // Only include features that have scores for this dataset
+              if (datasetScore === undefined) return null;
+              
+              return {
+                ...f,
+                properties: {
+                  ...f.properties,
+                  admin_name: f.properties?.admin_name || f.properties?.name,
+                  score: datasetScore, // Use dataset-specific score
+                }
+              };
+            });
+          })
+          .filter((f: any) => f !== null);
+        
+        setFeatures(filteredFeatures);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
         // If a specific category is selected, we'd need category-specific scoring
