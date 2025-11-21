@@ -540,7 +540,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   data={{
                     type: 'FeatureCollection',
                     features: features
-                  }}
+                  } as GeoJSON.FeatureCollection}
                   onEachFeature={onEachFeature}
                 />
               )}
