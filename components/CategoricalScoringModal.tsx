@@ -118,13 +118,13 @@ export default function CategoricalScoringModal({
           if (cfg.method) setMethod(cfg.method);
           if (cfg.threshold !== undefined) setThreshold(cfg.threshold);
           if (cfg.categoryScores?.length) {
-            const savedScores = new Map(
-              cfg.categoryScores.map((cs: any) => [cs.category, cs.score])
+            const savedScores = new Map<string, number>(
+              cfg.categoryScores.map((cs: any) => [cs.category, Number(cs.score)])
             );
             setRows((prev) =>
               prev.map((row) => ({
                 ...row,
-                score: savedScores.get(row.category) || '',
+                score: (savedScores.get(row.category) as number | undefined) || '',
               }))
             );
           }
