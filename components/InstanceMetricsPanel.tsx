@@ -55,6 +55,31 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
         let totalAffectedLocations = null;
 
         try {
+          // Get instance admin_scope to determine affected locations
+          const { data: instanceData } = await supabase
+            .from('instances')
+            .select('admin_scope')
+            .eq('id', instanceId)
+            .single();
+
+          if (instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
+            // Get affected ADM3 codes using the RPC function
+            const { data: affectedCodes, error: affectedError } = await supabase.rpc('get_affected_adm3', {
+              in_scope: instanceData.admin_scope
+            });
+
+            if (!affectedError && affectedCodes && Array.isArray(affectedCodes)) {
+              // Extract admin_pcode from the result (could be objects or strings)
+              const adm3Codes = affectedCodes.map((item: any) => 
+                typeof item === 'string' ? item : (item.admin_pcode || item.pcode || item.code)
+              ).filter(Boolean);
+              
+              if (adm3Codes.length > 0) {
+                totalAffectedLocations = adm3Codes.length;
+              }
+            }
+          }
+
           // Get overall scores to calculate average severity
           const { data: scoresData, error: scoresError } = await supabase
             .from('v_instance_admin_scores')
@@ -69,7 +94,11 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
             if (validScores.length > 0) {
               avgSeverity = validScores.reduce((sum: number, s: number) => sum + s, 0) / validScores.length;
               highSeverityCount = validScores.filter((s: number) => s >= 4).length;
-              totalAffectedLocations = validScores.length;
+              
+              // If totalAffectedLocations wasn't set from RPC, use distinct count from scores
+              if (totalAffectedLocations === null) {
+                totalAffectedLocations = new Set(scoresData.map((s: any) => s.admin_pcode)).size;
+              }
             }
           }
         } catch (e) {

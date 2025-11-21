@@ -68,56 +68,66 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
           return;
         }
 
-        // Get population and poverty data for these locations
+        // Batch fetch population and poverty data for all locations at once
         const adminPcodes = data.map((loc: any) => loc.admin_pcode);
-        const locationsWithData = await Promise.all(
-          data.map(async (loc: any) => {
-            let population: number | null = null;
-            let povertyRate: number | null = null;
+        const populationMap = new Map<string, number>();
+        const povertyMap = new Map<string, number>();
 
-            // Fetch population
-            if (instanceData?.population_dataset_id) {
-              const { data: popData } = await supabase
-                .from('dataset_values_numeric')
-                .select('value')
-                .eq('dataset_id', instanceData.population_dataset_id)
-                .eq('admin_pcode', loc.admin_pcode)
-                .single();
-              
-              if (popData) {
-                population = Number(popData.value) || null;
+        // Batch fetch population data
+        if (instanceData?.population_dataset_id && adminPcodes.length > 0) {
+          const { data: popData, error: popError } = await supabase
+            .from('dataset_values_numeric')
+            .select('admin_pcode, value')
+            .eq('dataset_id', instanceData.population_dataset_id)
+            .in('admin_pcode', adminPcodes);
+          
+          if (!popError && popData) {
+            popData.forEach((row: any) => {
+              const value = Number(row.value);
+              if (!isNaN(value)) {
+                populationMap.set(row.admin_pcode, value);
               }
-            }
+            });
+          }
+        }
 
-            // Fetch poverty rate
-            if (povertyDataset?.id) {
-              const { data: povData } = await supabase
-                .from('dataset_values_numeric')
-                .select('value')
-                .eq('dataset_id', povertyDataset.id)
-                .eq('admin_pcode', loc.admin_pcode)
-                .single();
-              
-              if (povData) {
-                povertyRate = Number(povData.value) || null;
+        // Batch fetch poverty rate data
+        if (povertyDataset?.id && adminPcodes.length > 0) {
+          const { data: povData, error: povError } = await supabase
+            .from('dataset_values_numeric')
+            .select('admin_pcode, value')
+            .eq('dataset_id', povertyDataset.id)
+            .in('admin_pcode', adminPcodes);
+          
+          if (!povError && povData) {
+            povData.forEach((row: any) => {
+              const value = Number(row.value);
+              if (!isNaN(value)) {
+                povertyMap.set(row.admin_pcode, value);
               }
-            }
+            });
+          }
+        }
 
-            // Calculate People in Need = population * (poverty_rate / 100)
-            let peopleInNeed: number | null = null;
-            if (population !== null && povertyRate !== null) {
-              peopleInNeed = Math.round(population * (povertyRate / 100));
-            }
+        // Map data to locations
+        const locationsWithData = data.map((loc: any) => {
+          const population = populationMap.get(loc.admin_pcode) ?? null;
+          const povertyRate = povertyMap.get(loc.admin_pcode) ?? null;
 
-            return {
-              admin_pcode: loc.admin_pcode,
-              name: loc.name || 'Unknown',
-              avg_score: Number(loc.avg_score) || 0,
-              population,
-              people_in_need: peopleInNeed,
-            };
-          })
-        );
+          // Calculate People in Need = population * (poverty_rate / 100)
+          let peopleInNeed: number | null = null;
+          if (population !== null && povertyRate !== null) {
+            peopleInNeed = Math.round(population * (povertyRate / 100));
+          }
+
+          return {
+            admin_pcode: loc.admin_pcode,
+            name: loc.name || 'Unknown',
+            avg_score: Number(loc.avg_score) || 0,
+            population,
+            people_in_need: peopleInNeed,
+          };
+        });
 
         setLocations(locationsWithData);
       } catch (err: any) {
