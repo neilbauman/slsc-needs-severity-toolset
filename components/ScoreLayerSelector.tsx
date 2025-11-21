@@ -5,12 +5,13 @@ import { supabase } from "@/lib/supabaseClient";
 
 export interface ScoreLayerSelectorProps {
   instanceId: string;
-  onSelect?: (selection: { type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string }) => void;
+  onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string }) => void;
 }
 
 export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerSelectorProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
-  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string }>({ type: 'overall' });
+  const [categoryScores, setCategoryScores] = useState<Record<string, number>>({}); // Average scores per category
+  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string }>({ type: 'overall' });
   const [loading, setLoading] = useState(true);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [datasetCategories, setDatasetCategories] = useState<Record<string, string[]>>({});
@@ -94,6 +95,34 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           Object.keys(scoreMap).forEach((datasetId) => {
             avgScores[datasetId] = scoreMap[datasetId].sum / scoreMap[datasetId].count;
           });
+          
+          // Calculate average score per category (aggregate of all datasets in category)
+          // Create a map of dataset_id to category
+          const datasetToCategory: Record<string, string> = {};
+          instanceDatasets.forEach((id: any) => {
+            const category = id.datasets?.category;
+            if (category) {
+              datasetToCategory[id.dataset_id] = category;
+            }
+          });
+          
+          const categoryScoreMap: Record<string, { sum: number; count: number }> = {};
+          scoresData.forEach((s: any) => {
+            const category = datasetToCategory[s.dataset_id];
+            if (category) {
+              if (!categoryScoreMap[category]) {
+                categoryScoreMap[category] = { sum: 0, count: 0 };
+              }
+              categoryScoreMap[category].sum += Number(s.score);
+              categoryScoreMap[category].count += 1;
+            }
+          });
+          
+          const categoryAvgs: Record<string, number> = {};
+          Object.keys(categoryScoreMap).forEach((category) => {
+            categoryAvgs[category] = categoryScoreMap[category].sum / categoryScoreMap[category].count;
+          });
+          setCategoryScores(categoryAvgs);
         }
 
         // Transform data
@@ -123,11 +152,11 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
   }, [instanceId]);
 
   // ✅ Handle selection
-  const handleSelect = (type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string) => {
+  const handleSelect = (type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string) => {
     const selection = { type, datasetId, category };
     setActiveSelection(selection);
     if (onSelect) {
-      onSelect({ ...selection, datasetName });
+      onSelect({ ...selection, datasetName, categoryName });
     }
   };
 
@@ -195,8 +224,8 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
 
       {Object.entries(grouped).map(([cat, list]) => (
         <div key={cat} className="mb-3">
-          <div className="flex items-center justify-between">
-            <h4 className="font-semibold text-gray-700 mb-1 text-sm">{cat}</h4>
+          <div className="flex items-center justify-between mb-1">
+            <h4 className="font-semibold text-gray-700 text-sm">{cat}</h4>
             {list.length > 0 && (
               <button
                 onClick={() => toggleCategory(cat)}
@@ -206,8 +235,28 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
               </button>
             )}
           </div>
+          
+          {/* Category Score Option (if category has datasets) */}
+          {list.length > 0 && (
+            <button
+              onClick={() => handleSelect('category_score', undefined, cat, undefined, cat)}
+              className={`block w-full text-left px-2 py-1.5 rounded text-sm mb-1 font-medium ${
+                activeSelection.type === 'category_score' && activeSelection.category === cat
+                  ? "bg-indigo-600 text-white"
+                  : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
+              }`}
+            >
+              {cat} Score
+              {categoryScores[cat] !== undefined && (
+                <span className="float-right text-sm opacity-75">
+                  {Number(categoryScores[cat]).toFixed(1)}
+                </span>
+              )}
+            </button>
+          )}
+          
           {expandedCategories.has(cat) && (
-            <div className="space-y-1 ml-2">
+            <div className="space-y-1 ml-2 mt-1">
               {list.map((d) => (
                 <div key={d.dataset_id}>
                   <button

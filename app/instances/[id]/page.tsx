@@ -49,7 +49,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showScoringModal, setShowScoringModal] = useState(false);
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
-  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string, datasetName?: string }>({ type: 'overall' });
+  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string }>({ type: 'overall' });
 
   // Ensure instanceId exists
   const instanceId = params?.id;
@@ -215,9 +215,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
-  // ✅ Load features for selected layer (overall, dataset, or category)
+  // ✅ Load features for selected layer (overall, dataset, category, or category_score)
   const loadFeaturesForSelection = async (
-    selection: { type: 'overall' | 'dataset' | 'category', datasetId?: string, category?: string },
+    selection: { type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, categoryName?: string },
     overallFeatures?: any[]
   ) => {
     try {
@@ -355,6 +355,117 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         // Force a new array reference to ensure React detects the change
         setFeatures([...allFeatures]);
         setLoadingFeatures(false);
+      } else if (selection.type === 'category_score' && selection.category) {
+        // Load category score - aggregate all dataset scores within this category
+        console.log(`Loading category score for: ${selection.category}`);
+        
+        // Get all datasets in this category
+        const { data: categoryDatasets } = await supabase
+          .from("instance_datasets")
+          .select("dataset_id, datasets!inner(id, name, category)")
+          .eq("instance_id", instanceId);
+        
+        const categoryDatasetIds = (categoryDatasets || [])
+          .filter((cd: any) => cd.datasets?.category === selection.category)
+          .map((cd: any) => cd.dataset_id);
+        
+        if (categoryDatasetIds.length === 0) {
+          console.log("No datasets found for category:", selection.category);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        // Load all scores for datasets in this category
+        const { data: categoryScores, error: categoryScoresError } = await supabase
+          .from("instance_dataset_scores")
+          .select("admin_pcode, score")
+          .eq("instance_id", instanceId)
+          .in("dataset_id", categoryDatasetIds);
+        
+        if (categoryScoresError) {
+          console.error("Error fetching category scores:", categoryScoresError);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        if (!categoryScores || categoryScores.length === 0) {
+          console.log("No scores found for category:", selection.category);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        // Aggregate scores by admin_pcode (average of all datasets in category)
+        const locationScoreMap: Record<string, { sum: number; count: number }> = {};
+        categoryScores.forEach((s: any) => {
+          if (!locationScoreMap[s.admin_pcode]) {
+            locationScoreMap[s.admin_pcode] = { sum: 0, count: 0 };
+          }
+          locationScoreMap[s.admin_pcode].sum += Number(s.score);
+          locationScoreMap[s.admin_pcode].count += 1;
+        });
+        
+        // Calculate average score per location
+        const avgCategoryScores = new Map<string, number>();
+        Object.keys(locationScoreMap).forEach((pcode) => {
+          avgCategoryScores.set(pcode, locationScoreMap[pcode].sum / locationScoreMap[pcode].count);
+        });
+        
+        console.log(`Computed category scores for ${avgCategoryScores.size} locations`);
+        
+        // Get geometry from view
+        const { data: geoRows, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode, geojson")
+          .eq("instance_id", instanceId);
+        
+        if (geoError) {
+          console.error("Error fetching GeoJSON:", geoError);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        if (!geoRows || geoRows.length === 0) {
+          console.log("No GeoJSON features found for instance");
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        // Map category scores to features
+        const categoryFeatures = geoRows
+          .map((row: any) => {
+            try {
+              const feature = typeof row.geojson === 'string' 
+                ? JSON.parse(row.geojson) 
+                : row.geojson;
+              
+              const categoryScore = avgCategoryScores.get(row.admin_pcode);
+              
+              // Include all features, but only those with scores will show colors
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: row.admin_pcode,
+                  admin_name: feature.properties?.admin_name || feature.properties?.name,
+                  score: categoryScore, // Category aggregated score
+                  has_score: categoryScore !== undefined,
+                }
+              };
+            } catch (e) {
+              console.warn("Error parsing GeoJSON feature:", e, row);
+              return null;
+            }
+          })
+          .filter((f: any) => f !== null);
+        
+        console.log(`Mapped ${categoryFeatures.length} features with category scores`);
+        setFeatures([...categoryFeatures]);
+        setLoadingFeatures(false);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
         // If a specific category is selected, we'd need category-specific scoring
@@ -388,7 +499,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       loadFeaturesForSelection(selectedLayer, overallFeatures);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category]);
+  }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category, selectedLayer.categoryName]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -414,16 +525,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     const score = feature.properties?.score !== undefined ? Number(feature.properties.score) : null;
     const rawValue = feature.properties?.raw_value !== undefined ? Number(feature.properties.raw_value) : null;
     
-    let layerName = 'Overall Score';
-    if (selectedLayer.type === 'dataset') {
-      layerName = selectedLayer.datasetName || 'Dataset Score';
-    } else if (selectedLayer.type === 'category') {
-      if (selectedLayer.category === 'overall') {
-        layerName = `${selectedLayer.datasetName || 'Dataset'} - Overall`;
-      } else {
-        layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
+      let layerName = 'Overall Score';
+      if (selectedLayer.type === 'dataset') {
+        layerName = selectedLayer.datasetName || 'Dataset Score';
+      } else if (selectedLayer.type === 'category_score') {
+        layerName = `${selectedLayer.categoryName || selectedLayer.category || 'Category'} Score`;
+      } else if (selectedLayer.type === 'category') {
+        if (selectedLayer.category === 'overall') {
+          layerName = `${selectedLayer.datasetName || 'Dataset'} - Overall`;
+        } else {
+          layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
+        }
       }
-    }
     
     if (hasScore && score !== null) {
       // Has score - use color based on score
