@@ -55,12 +55,33 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
           .limit(1)
           .single();
 
-        // Get top locations by score (highest = most vulnerable)
-        const { data, error: fetchError } = await supabase
+        // Get affected ADM3 codes first - we need these to filter locations
+        let affectedCodes: string[] = [];
+        if (instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
+          const { data: affectedData } = await supabase.rpc('get_affected_adm3', {
+            in_scope: instanceData.admin_scope
+          });
+          
+          if (affectedData && Array.isArray(affectedData)) {
+            affectedCodes = affectedData.map((item: any) => 
+              typeof item === 'string' ? item : (item.admin_pcode || item.pcode || item.code)
+            ).filter(Boolean);
+          }
+        }
+
+        // Get top locations by score (highest = most vulnerable) - ONLY from affected area
+        let locationsQuery = supabase
           .from('v_instance_admin_scores')
           .select('admin_pcode, name, avg_score')
           .eq('instance_id', instanceId)
-          .not('avg_score', 'is', null)
+          .not('avg_score', 'is', null);
+        
+        // Filter to only affected locations
+        if (affectedCodes.length > 0) {
+          locationsQuery = locationsQuery.in('admin_pcode', affectedCodes);
+        }
+        
+        const { data, error: fetchError } = await locationsQuery
           .order('avg_score', { ascending: false })
           .limit(showAll ? 50 : 5);
 
@@ -77,21 +98,7 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
           return;
         }
 
-        // Get affected ADM3 codes to only count affected locations
-        let affectedCodes: string[] = [];
-        if (instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
-          const { data: affectedData } = await supabase.rpc('get_affected_adm3', {
-            in_scope: instanceData.admin_scope
-          });
-          
-          if (affectedData && Array.isArray(affectedData)) {
-            affectedCodes = affectedData.map((item: any) => 
-              typeof item === 'string' ? item : (item.admin_pcode || item.pcode || item.code)
-            ).filter(Boolean);
-          }
-        }
-
-        // Calculate score distribution - only for affected locations
+        // Calculate score distribution - only for affected locations (affectedCodes already set above)
         let scoreQuery = supabase
           .from('v_instance_admin_scores')
           .select('avg_score, admin_pcode')
@@ -121,17 +128,17 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
         const populationMap = new Map<string, number>();
         const povertyMap = new Map<string, number>();
 
-        // Batch fetch population data - try both ADM3 and ADM4 levels
+        // Batch fetch population data - aggregate from ADM4 to ADM3 if needed
         if (instanceData?.population_dataset_id && adminPcodes.length > 0) {
-          // First try exact match
-          const { data: popData, error: popError } = await supabase
+          // First try exact ADM3 match
+          const { data: popDataAdm3, error: popError } = await supabase
             .from('dataset_values_numeric')
             .select('admin_pcode, value')
             .eq('dataset_id', instanceData.population_dataset_id)
             .in('admin_pcode', adminPcodes);
           
-          if (!popError && popData) {
-            popData.forEach((row: any) => {
+          if (!popError && popDataAdm3) {
+            popDataAdm3.forEach((row: any) => {
               const value = Number(row.value);
               if (!isNaN(value)) {
                 populationMap.set(row.admin_pcode, value);
@@ -139,36 +146,50 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
             });
           }
 
-          // If we have admin_scope, try to get ADM4 population and aggregate to ADM3
-          if (instanceData.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
-            const { data: popDataAdm4 } = await supabase
-              .from('dataset_values_numeric')
-              .select('admin_pcode, value')
-              .eq('dataset_id', instanceData.population_dataset_id);
+          // Get dataset admin level to check if we need to aggregate
+          const { data: popDataset } = await supabase
+            .from('datasets')
+            .select('admin_level')
+            .eq('id', instanceData.population_dataset_id)
+            .single();
+
+          // If population is at ADM4, aggregate to ADM3
+          if (popDataset?.admin_level && popDataset.admin_level.toUpperCase() === 'ADM4') {
+            // Get all ADM4 boundaries that belong to our ADM3 codes
+            const { data: boundaries } = await supabase
+              .from('admin_boundaries')
+              .select('admin_pcode, parent_pcode')
+              .in('parent_pcode', adminPcodes)
+              .eq('admin_level', 'ADM4');
             
-            if (popDataAdm4) {
-              // Get admin boundaries to map ADM4 to ADM3
-              const { data: boundaries } = await supabase
-                .from('admin_boundaries')
-                .select('admin_pcode, parent_pcode')
-                .in('admin_pcode', popDataAdm4.map((p: any) => p.admin_pcode));
+            if (boundaries && boundaries.length > 0) {
+              const adm4Codes = boundaries.map((b: any) => b.admin_pcode);
               
-              if (boundaries) {
+              // Get ADM4 population values
+              const { data: popDataAdm4 } = await supabase
+                .from('dataset_values_numeric')
+                .select('admin_pcode, value')
+                .eq('dataset_id', instanceData.population_dataset_id)
+                .in('admin_pcode', adm4Codes);
+              
+              if (popDataAdm4) {
+                // Create map of ADM4 to ADM3
                 const adm4ToAdm3 = new Map(boundaries.map((b: any) => [b.admin_pcode, b.parent_pcode]));
                 const adm3PopMap = new Map<string, number>();
                 
+                // Aggregate ADM4 population to ADM3
                 popDataAdm4.forEach((row: any) => {
                   const adm3Code = adm4ToAdm3.get(row.admin_pcode);
                   if (adm3Code && adminPcodes.includes(adm3Code)) {
                     const value = Number(row.value);
-                    if (!isNaN(value)) {
+                    if (!isNaN(value) && value > 0) {
                       const current = adm3PopMap.get(adm3Code) || 0;
                       adm3PopMap.set(adm3Code, current + value);
                     }
                   }
                 });
                 
-                // Merge into population map
+                // Merge into population map (only if not already set from ADM3 direct match)
                 adm3PopMap.forEach((value, code) => {
                   if (!populationMap.has(code)) {
                     populationMap.set(code, value);
