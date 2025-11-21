@@ -265,7 +265,7 @@ export default function NumericScoringModal({
         in_method: rpcMethod,
         in_thresholds: thresholds.length > 0 ? thresholds : null,
         in_scale_max: scaleMax,
-        in_inverse: inverse,
+        in_inverse: rpcInverse,
         in_limit_to_affected: limitToAffected,
         in_disaggregation_method: disaggregationMethod || null,
         in_weight_dataset_id: disaggregationMethod === "distribute" ? weightDatasetId : null,
@@ -280,7 +280,7 @@ export default function NumericScoringModal({
         in_method: rpcMethod,
         in_thresholds: thresholds.length > 0 ? thresholds : null,
         in_scale_max: scaleMax,
-        in_inverse: inverse,
+        in_inverse: rpcInverse,
         in_limit_to_affected: limitToAffected,
         in_disaggregation_method: null,
         in_weight_dataset_id: null,
@@ -297,7 +297,7 @@ export default function NumericScoringModal({
           in_method: rpcMethod,
           in_thresholds: thresholds.length > 0 ? thresholds : null,
           in_scale_max: scaleMax,
-          in_inverse: inverse,
+          in_inverse: rpcInverse,
           in_limit_to_affected: limitToAffected,
         });
         rpcData = oldResult.data;
