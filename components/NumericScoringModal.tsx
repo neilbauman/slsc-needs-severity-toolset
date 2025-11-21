@@ -234,11 +234,15 @@ export default function NumericScoringModal({
 
     // Map method name to what RPC expects
     // The RPC expects: 'minmax' for normalization, 'threshold' (singular) for thresholds
-    const rpcMethod = method === "Normalization" 
+    // Handle both capitalized and lowercase method names
+    const normalizedMethod = method.toLowerCase();
+    const rpcMethod = normalizedMethod === "normalization" || normalizedMethod === "minmax"
       ? "minmax" 
-      : method === "Thresholds" 
+      : normalizedMethod === "thresholds" || normalizedMethod === "threshold"
         ? "threshold" 
-        : method.toLowerCase();
+        : normalizedMethod === "zscore" || normalizedMethod === "z-score"
+          ? "zscore"
+          : normalizedMethod; // Fallback to lowercase version
 
     console.log("Applying scoring with:", {
       method: rpcMethod,
