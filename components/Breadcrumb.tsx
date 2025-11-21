@@ -17,19 +17,22 @@ export default function Breadcrumb() {
       // Only try to fetch if it looks like a UUID
       if (instanceId && instanceId.length > 10 && instanceId.includes('-')) {
         const supabase = createClient()
-        supabase
-          .from('instances')
-          .select('name')
-          .eq('id', instanceId)
-          .single()
-          .then(({ data, error }) => {
+        const loadInstanceName = async () => {
+          try {
+            const { data, error } = await supabase
+              .from('instances')
+              .select('name')
+              .eq('id', instanceId)
+              .single()
+            
             if (!error && data?.name) {
               setInstanceName(data.name)
             }
-          })
-          .catch(() => {
+          } catch (err) {
             // Silently fail - will just show the UUID
-          })
+          }
+        }
+        loadInstanceName()
       }
     } else {
       setInstanceName(null)
