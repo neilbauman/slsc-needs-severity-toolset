@@ -232,64 +232,21 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           return;
         }
 
-        // Get admin boundaries using RPC function
+        // Get admin boundaries directly from table (RPC function signature may vary)
         const adminPcodes = scores.map((s: any) => s.admin_pcode);
-        const { data: boundariesGeoJson, error: rpcError } = await supabase.rpc('get_admin_boundaries_geojson', {
-          in_admin_pcodes: adminPcodes,
-          in_level: 'ADM3'
-        });
+        const { data: boundaries, error: boundariesError } = await supabase
+          .from("admin_boundaries")
+          .select("admin_pcode, admin_name, geometry")
+          .in("admin_pcode", adminPcodes)
+          .eq("admin_level", "ADM3");
 
-        if (rpcError) {
-          console.error("Error fetching boundaries:", rpcError);
-          // Fallback: try to get boundaries directly from admin_boundaries table
-          const { data: boundaries } = await supabase
-            .from("admin_boundaries")
-            .select("admin_pcode, admin_name, geometry")
-            .in("admin_pcode", adminPcodes)
-            .eq("admin_level", "ADM3");
-
-          if (!boundaries || boundaries.length === 0) {
-            setFeatures([]);
-            return;
-          }
-
-          // Create score map
-          const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
-
-          // Build GeoJSON features manually
-          const features = boundaries
-            .map((b: any) => {
-              const score = scoreMap.get(b.admin_pcode);
-              if (score === undefined) return null;
-
-              // Try to parse geometry if it's a string
-              let geometry = b.geometry;
-              if (typeof geometry === 'string') {
-                try {
-                  geometry = JSON.parse(geometry);
-                } catch (e) {
-                  console.warn("Error parsing geometry:", e);
-                  return null;
-                }
-              }
-
-              return {
-                type: "Feature",
-                properties: {
-                  admin_pcode: b.admin_pcode,
-                  admin_name: b.admin_name,
-                  score: score,
-                },
-                geometry: geometry,
-              };
-            })
-            .filter((f: any) => f !== null);
-
-          setFeatures(features);
+        if (boundariesError) {
+          console.error("Error fetching boundaries:", boundariesError);
+          setFeatures([]);
           return;
         }
 
-        if (!boundariesGeoJson || !boundariesGeoJson.features) {
+        if (!boundaries || boundaries.length === 0) {
           setFeatures([]);
           return;
         }
@@ -297,20 +254,31 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         // Create score map
         const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
 
-        // Build GeoJSON features by joining boundaries with scores
-        const features = boundariesGeoJson.features
-          .map((feature: any) => {
-            const adminPcode = feature.properties?.admin_pcode;
-            const score = scoreMap.get(adminPcode);
+        // Build GeoJSON features manually
+        const features = boundaries
+          .map((b: any) => {
+            const score = scoreMap.get(b.admin_pcode);
             if (score === undefined) return null;
 
+            // Try to parse geometry if it's a string
+            let geometry = b.geometry;
+            if (typeof geometry === 'string') {
+              try {
+                geometry = JSON.parse(geometry);
+              } catch (e) {
+                console.warn("Error parsing geometry:", e);
+                return null;
+              }
+            }
+
             return {
-              ...feature,
+              type: "Feature",
               properties: {
-                ...feature.properties,
-                admin_name: feature.properties?.name || feature.properties?.admin_name,
+                admin_pcode: b.admin_pcode,
+                admin_name: b.admin_name,
                 score: score,
               },
+              geometry: geometry,
             };
           })
           .filter((f: any) => f !== null);

@@ -21,7 +21,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
     const loadDatasets = async () => {
       setLoading(true);
       try {
-        // Load instance_datasets with dataset info
+        // Load instance_datasets with dataset info (including category)
         const { data: instanceDatasets, error: idError } = await supabase
           .from("instance_datasets")
           .select(`
@@ -30,7 +30,8 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
               id,
               name,
               type,
-              admin_level
+              admin_level,
+              category
             )
           `)
           .eq("instance_id", instanceId);
