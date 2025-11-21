@@ -244,10 +244,16 @@ export default function NumericScoringModal({
           ? "zscore"
           : normalizedMethod; // Fallback to lowercase version
 
+    // RPC logic: in_inverse = TRUE means "inverse" (higher values = lower scores)
+    // UI logic: inverse = TRUE means "higher values = higher scores" (checked)
+    // So we need to flip it: when UI says "higher = higher" (inverse=true), RPC should get inverse=false
+    const rpcInverse = !inverse;
+
     console.log("Applying scoring with:", {
       method: rpcMethod,
       scaleMax,
-      inverse,
+      inverse: inverse,
+      rpcInverse: rpcInverse,
       scope,
       limitToAffected,
       thresholdsCount: thresholds.length,
