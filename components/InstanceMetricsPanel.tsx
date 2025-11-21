@@ -123,8 +123,14 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
 
   if (error) {
     return (
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-        <p className="text-yellow-800 text-sm">⚠️ {error}</p>
+      <div 
+        className="border rounded-lg p-4 mb-4"
+        style={{
+          backgroundColor: 'rgba(217, 84, 0, 0.1)',
+          borderColor: 'var(--gsc-orange)'
+        }}
+      >
+        <p className="text-sm" style={{ color: 'var(--gsc-orange)' }}>⚠️ {error}</p>
       </div>
     );
   }
@@ -145,77 +151,172 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
       {/* Total Population in Affected Area */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 shadow-sm">
-        <div className="text-xs font-medium text-blue-700 uppercase tracking-wide mb-1">
+      <div 
+        className="border rounded-lg p-4 shadow-sm"
+        style={{
+          backgroundColor: 'rgba(0, 75, 135, 0.05)',
+          borderColor: 'rgba(0, 75, 135, 0.2)'
+        }}
+      >
+        <div 
+          className="text-xs font-medium uppercase tracking-wide mb-1"
+          style={{ color: 'var(--gsc-blue)' }}
+        >
           Total Population
         </div>
-        <div className="text-2xl font-bold text-blue-900">
+        <div 
+          className="text-2xl font-bold"
+          style={{ color: 'var(--gsc-blue)' }}
+        >
           {formatNumber(total_population)}
         </div>
-        <div className="text-xs text-blue-600 mt-1">Affected Area</div>
+        <div 
+          className="text-xs mt-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
+          Affected Area
+        </div>
       </div>
 
       {/* People of Concern */}
-      <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 shadow-sm">
-        <div className="text-xs font-medium text-orange-700 uppercase tracking-wide mb-1">
+      <div 
+        className="border rounded-lg p-4 shadow-sm"
+        style={{
+          backgroundColor: 'rgba(211, 84, 0, 0.05)',
+          borderColor: 'rgba(211, 84, 0, 0.2)'
+        }}
+      >
+        <div 
+          className="text-xs font-medium uppercase tracking-wide mb-1"
+          style={{ color: 'var(--gsc-orange)' }}
+        >
           People of Concern
         </div>
-        <div className="text-2xl font-bold text-orange-900">
+        <div 
+          className="text-2xl font-bold"
+          style={{ color: 'var(--gsc-orange)' }}
+        >
           {formatNumber(people_concern)}
         </div>
-        <div className="text-xs text-orange-600 mt-1">
+        <div 
+          className="text-xs mt-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
           Severity ≥ 3 ({formatPercentage(people_concern, total_population)})
         </div>
       </div>
 
       {/* People in Need */}
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 shadow-sm">
-        <div className="text-xs font-medium text-red-700 uppercase tracking-wide mb-1">
+      <div 
+        className="border rounded-lg p-4 shadow-sm"
+        style={{
+          backgroundColor: 'rgba(99, 7, 16, 0.05)',
+          borderColor: 'rgba(99, 7, 16, 0.2)'
+        }}
+      >
+        <div 
+          className="text-xs font-medium uppercase tracking-wide mb-1"
+          style={{ color: 'var(--gsc-red)' }}
+        >
           People in Need
         </div>
-        <div className="text-2xl font-bold text-red-900">
+        <div 
+          className="text-2xl font-bold"
+          style={{ color: 'var(--gsc-red)' }}
+        >
           {formatNumber(people_need)}
         </div>
-        <div className="text-xs text-red-600 mt-1">
+        <div 
+          className="text-xs mt-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
           PoC × Poverty Rate ({formatPercentage(people_need, total_population)})
         </div>
       </div>
 
       {/* Average Severity Score */}
-      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 shadow-sm">
-        <div className="text-xs font-medium text-purple-700 uppercase tracking-wide mb-1">
+      <div 
+        className="border rounded-lg p-4 shadow-sm"
+        style={{
+          backgroundColor: 'rgba(0, 75, 135, 0.05)',
+          borderColor: 'rgba(0, 75, 135, 0.2)'
+        }}
+      >
+        <div 
+          className="text-xs font-medium uppercase tracking-wide mb-1"
+          style={{ color: 'var(--gsc-blue)' }}
+        >
           Avg Severity
         </div>
-        <div className="text-2xl font-bold text-purple-900">
+        <div 
+          className="text-2xl font-bold"
+          style={{ color: 'var(--gsc-blue)' }}
+        >
           {avg_severity !== null && avg_severity !== undefined ? avg_severity.toFixed(2) : 'N/A'}
         </div>
-        <div className="text-xs text-purple-600 mt-1">Out of 5.0</div>
+        <div 
+          className="text-xs mt-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
+          Out of 5.0
+        </div>
       </div>
 
       {/* High Severity Locations */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 shadow-sm">
-        <div className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-1">
+      <div 
+        className="border rounded-lg p-4 shadow-sm"
+        style={{
+          backgroundColor: 'rgba(211, 84, 0, 0.08)',
+          borderColor: 'rgba(211, 84, 0, 0.3)'
+        }}
+      >
+        <div 
+          className="text-xs font-medium uppercase tracking-wide mb-1"
+          style={{ color: 'var(--gsc-orange)' }}
+        >
           High Severity
         </div>
-        <div className="text-2xl font-bold text-amber-900">
+        <div 
+          className="text-2xl font-bold"
+          style={{ color: 'var(--gsc-orange)' }}
+        >
           {formatNumber(high_severity_count)}
         </div>
-        <div className="text-xs text-amber-600 mt-1">
+        <div 
+          className="text-xs mt-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
           Locations (≥ 4) {total_affected_locations ? `(${formatPercentage(high_severity_count, total_affected_locations)})` : ''}
         </div>
       </div>
 
       {/* Total Affected Locations */}
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm">
-        <div className="text-xs font-medium text-gray-700 uppercase tracking-wide mb-1">
+      <div 
+        className="border rounded-lg p-4 shadow-sm"
+        style={{
+          backgroundColor: 'var(--gsc-light-gray)',
+          borderColor: 'rgba(55, 65, 81, 0.2)'
+        }}
+      >
+        <div 
+          className="text-xs font-medium uppercase tracking-wide mb-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
           Affected Locations
         </div>
-        <div className="text-2xl font-bold text-gray-900">
+        <div 
+          className="text-2xl font-bold"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
           {formatNumber(total_affected_locations)}
         </div>
-        <div className="text-xs text-gray-600 mt-1">Admin Units</div>
+        <div 
+          className="text-xs mt-1"
+          style={{ color: 'var(--gsc-gray)' }}
+        >
+          Admin Units
+        </div>
       </div>
     </div>
   );
 }
-

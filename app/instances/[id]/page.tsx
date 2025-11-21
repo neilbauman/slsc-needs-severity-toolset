@@ -64,12 +64,28 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   if (!instanceId) {
     return (
       <div className="p-4">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h2 className="text-red-800 font-semibold mb-2">Invalid Instance ID</h2>
-          <p className="text-red-600 text-sm mb-4">No instance ID provided.</p>
+        <div 
+          className="border rounded-lg p-4"
+          style={{
+            backgroundColor: 'rgba(99, 7, 16, 0.05)',
+            borderColor: 'var(--gsc-red)'
+          }}
+        >
+          <h2 
+            className="font-semibold mb-2"
+            style={{ color: 'var(--gsc-red)' }}
+          >
+            Invalid Instance ID
+          </h2>
+          <p 
+            className="text-sm mb-4"
+            style={{ color: 'var(--gsc-gray)' }}
+          >
+            No instance ID provided.
+          </p>
           <Link
             href="/instances"
-            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+            className="btn btn-danger text-sm"
           >
             Back to Instances
           </Link>
@@ -841,7 +857,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     return (
       <div className="p-4">
         <div className="text-center py-8">
-          <div className="text-gray-600">Loading instance data...</div>
+          <div style={{ color: 'var(--gsc-gray)' }}>Loading instance data...</div>
         </div>
       </div>
     );
@@ -850,19 +866,35 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   if (error && !instance) {
     return (
       <div className="p-4">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <h2 className="text-red-800 font-semibold mb-2">Error Loading Instance</h2>
-          <p className="text-red-600 text-sm mb-4">{error}</p>
+        <div 
+          className="border rounded-lg p-4"
+          style={{
+            backgroundColor: 'rgba(99, 7, 16, 0.05)',
+            borderColor: 'var(--gsc-red)'
+          }}
+        >
+          <h2 
+            className="font-semibold mb-2"
+            style={{ color: 'var(--gsc-red)' }}
+          >
+            Error Loading Instance
+          </h2>
+          <p 
+            className="text-sm mb-4"
+            style={{ color: 'var(--gsc-gray)' }}
+          >
+            {error}
+          </p>
           <div className="flex gap-2">
             <button
               onClick={fetchData}
-              className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+              className="btn btn-danger text-sm"
             >
               Try Again
             </button>
             <Link
               href="/instances"
-              className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+              className="btn btn-secondary text-sm"
             >
               Back to Instances
             </Link>
@@ -878,11 +910,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       <div className="mb-4 p-4 bg-white rounded-lg shadow-sm border">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-gray-800">
-              {instance?.name || `Instance ${instanceId}`}
+            <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-gray)' }}>
+              {instance?.name || 'Loading...'}
             </h1>
             {instance?.description && (
-              <p className="text-sm text-gray-600 mt-1">{instance.description}</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--gsc-gray)' }}>
+                {instance.description}
+              </p>
             )}
           </div>
           <div className="flex items-center gap-3">
@@ -912,14 +946,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         {/* Map - Fixed height for laptop viewing */}
         <div className="flex-1 border rounded-lg overflow-hidden bg-white" style={{ height: '600px', minHeight: '600px' }}>
           {features.length === 0 && !loading && !loadingFeatures ? (
-            <div className="h-full flex items-center justify-center text-gray-500">
+            <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
               <div className="text-center">
                 <p className="mb-2">No map data available</p>
                 <p className="text-sm">Scores may not have been calculated yet.</p>
               </div>
             </div>
           ) : loadingFeatures ? (
-            <div className="h-full flex items-center justify-center text-gray-500">
+            <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
               <div className="text-center">
                 <p className="mb-2">Loading map data...</p>
                 <p className="text-sm">Switching to selected dataset...</p>
@@ -985,7 +1019,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
           {/* Score Layers */}
           <div className="bg-white border rounded-lg p-3 flex-1 overflow-y-auto">
-            <h3 className="font-semibold mb-2 text-gray-800">Score Layers</h3>
+            <h3 
+              className="font-semibold mb-2"
+              style={{ color: 'var(--gsc-gray)' }}
+            >
+              Score Layers
+            </h3>
             <ScoreLayerSelector
               instanceId={instanceId}
               onSelect={(selection) => {
@@ -996,8 +1035,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
           {/* Error Display */}
           {error && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2">
-              <p className="text-xs text-yellow-800">
+            <div 
+              className="border rounded-lg p-2"
+              style={{
+                backgroundColor: 'rgba(211, 84, 0, 0.1)',
+                borderColor: 'var(--gsc-orange)'
+              }}
+            >
+              <p 
+                className="text-xs"
+                style={{ color: 'var(--gsc-orange)' }}
+              >
                 ⚠️ Some data may be incomplete: {error}
               </p>
             </div>
