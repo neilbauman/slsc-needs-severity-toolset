@@ -179,8 +179,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         })
         .filter((f: any) => f !== null);
       
-      // Load features based on current selection
-      await loadFeaturesForSelection(selectedLayer, parsed);
+      // Set initial features (overall view)
+      setFeatures(parsed);
     } catch (err: any) {
       console.error("Error loading instance page:", err);
       setError(err?.message || "Failed to load instance data");
@@ -234,10 +234,60 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
         // Get admin boundaries using RPC function
         const adminPcodes = scores.map((s: any) => s.admin_pcode);
-        const { data: boundariesGeoJson } = await supabase.rpc('get_admin_boundaries_geojson', {
+        const { data: boundariesGeoJson, error: rpcError } = await supabase.rpc('get_admin_boundaries_geojson', {
           in_admin_pcodes: adminPcodes,
           in_level: 'ADM3'
         });
+
+        if (rpcError) {
+          console.error("Error fetching boundaries:", rpcError);
+          // Fallback: try to get boundaries directly from admin_boundaries table
+          const { data: boundaries } = await supabase
+            .from("admin_boundaries")
+            .select("admin_pcode, admin_name, geometry")
+            .in("admin_pcode", adminPcodes)
+            .eq("admin_level", "ADM3");
+
+          if (!boundaries || boundaries.length === 0) {
+            setFeatures([]);
+            return;
+          }
+
+          // Create score map
+          const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, s.score]));
+
+          // Build GeoJSON features manually
+          const features = boundaries
+            .map((b: any) => {
+              const score = scoreMap.get(b.admin_pcode);
+              if (score === undefined) return null;
+
+              // Try to parse geometry if it's a string
+              let geometry = b.geometry;
+              if (typeof geometry === 'string') {
+                try {
+                  geometry = JSON.parse(geometry);
+                } catch (e) {
+                  console.warn("Error parsing geometry:", e);
+                  return null;
+                }
+              }
+
+              return {
+                type: "Feature",
+                properties: {
+                  admin_pcode: b.admin_pcode,
+                  admin_name: b.admin_name,
+                  score: score,
+                },
+                geometry: geometry,
+              };
+            })
+            .filter((f: any) => f !== null);
+
+          setFeatures(features);
+          return;
+        }
 
         if (!boundariesGeoJson || !boundariesGeoJson.features) {
           setFeatures([]);
@@ -288,9 +338,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     fetchData();
   }, [params.id]);
 
-  // ✅ Load features when selection changes
+  // ✅ Load features when selection changes (but not on initial load)
   useEffect(() => {
-    if (!loading && instance && params.id) {
+    // Only reload if we have initial features loaded and selection changed from 'overall'
+    if (!loading && instance && params.id && features.length > 0 && selectedLayer.type !== 'overall') {
       loadFeaturesForSelection(selectedLayer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

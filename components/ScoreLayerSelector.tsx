@@ -98,8 +98,9 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
         // Transform data
         const transformed = instanceDatasets.map((id: any) => {
           const dataset = id.datasets;
-          const config = configMap.get(id.dataset_id) || {};
-          const category = config.category || "Uncategorized";
+          const config: any = configMap.get(id.dataset_id) || {};
+          // Use dataset.category first, then config.category, then default
+          const category = dataset?.category || config?.category || "Uncategorized";
           
           return {
             dataset_id: id.dataset_id,
