@@ -190,9 +190,12 @@ export default function NumericScoringModal({
     const limitToAffected = scope === "affected";
 
     // Map method name to what RPC expects
-    // The RPC likely expects: 'minmax' for normalization, 'threshold' for thresholds
-    // But let's try passing it as-is first, and if that doesn't work, we'll normalize
-    const rpcMethod = method === "Normalization" ? "minmax" : method.toLowerCase();
+    // The RPC expects: 'minmax' for normalization, 'threshold' (singular) for thresholds
+    const rpcMethod = method === "Normalization" 
+      ? "minmax" 
+      : method === "Thresholds" 
+        ? "threshold" 
+        : method.toLowerCase();
 
     console.log("Applying scoring with:", {
       method: rpcMethod,
