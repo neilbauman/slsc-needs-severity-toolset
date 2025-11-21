@@ -21,7 +21,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
     const loadDatasets = async () => {
       setLoading(true);
       try {
-        // Load instance_datasets with dataset info and config
+        // Load instance_datasets with dataset info
         const { data: instanceDatasets, error: idError } = await supabase
           .from("instance_datasets")
           .select(`
@@ -31,9 +31,6 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
               name,
               type,
               admin_level
-            ),
-            instance_dataset_config (
-              score_config
             )
           `)
           .eq("instance_id", instanceId);
@@ -45,40 +42,63 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           return;
         }
 
-        // Get average scores for each dataset
-        const datasetIds = (instanceDatasets || [])
+        if (!instanceDatasets || instanceDatasets.length === 0) {
+          setDatasets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Get dataset IDs
+        const datasetIds = instanceDatasets
           .map((id: any) => id.dataset_id)
           .filter((id: string) => id);
 
+        if (datasetIds.length === 0) {
+          setDatasets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Load configs separately (no direct FK relationship)
+        const { data: configs } = await supabase
+          .from("instance_dataset_config")
+          .select("dataset_id, score_config")
+          .eq("instance_id", instanceId)
+          .in("dataset_id", datasetIds);
+
+        // Create config map
+        const configMap = new Map(
+          (configs || []).map((c: any) => [c.dataset_id, c.score_config])
+        );
+
+        // Get average scores for each dataset
         let avgScores: Record<string, number> = {};
-        if (datasetIds.length > 0) {
-          const { data: scoresData } = await supabase
-            .from("instance_dataset_scores")
-            .select("dataset_id, score")
-            .eq("instance_id", instanceId)
-            .in("dataset_id", datasetIds);
+        const { data: scoresData } = await supabase
+          .from("instance_dataset_scores")
+          .select("dataset_id, score")
+          .eq("instance_id", instanceId)
+          .in("dataset_id", datasetIds);
 
-          if (scoresData) {
-            // Calculate average score per dataset
-            const scoreMap: Record<string, { sum: number; count: number }> = {};
-            scoresData.forEach((s: any) => {
-              if (!scoreMap[s.dataset_id]) {
-                scoreMap[s.dataset_id] = { sum: 0, count: 0 };
-              }
-              scoreMap[s.dataset_id].sum += Number(s.score);
-              scoreMap[s.dataset_id].count += 1;
-            });
+        if (scoresData) {
+          // Calculate average score per dataset
+          const scoreMap: Record<string, { sum: number; count: number }> = {};
+          scoresData.forEach((s: any) => {
+            if (!scoreMap[s.dataset_id]) {
+              scoreMap[s.dataset_id] = { sum: 0, count: 0 };
+            }
+            scoreMap[s.dataset_id].sum += Number(s.score);
+            scoreMap[s.dataset_id].count += 1;
+          });
 
-            Object.keys(scoreMap).forEach((datasetId) => {
-              avgScores[datasetId] = scoreMap[datasetId].sum / scoreMap[datasetId].count;
-            });
-          }
+          Object.keys(scoreMap).forEach((datasetId) => {
+            avgScores[datasetId] = scoreMap[datasetId].sum / scoreMap[datasetId].count;
+          });
         }
 
         // Transform data
-        const transformed = (instanceDatasets || []).map((id: any) => {
+        const transformed = instanceDatasets.map((id: any) => {
           const dataset = id.datasets;
-          const config = id.instance_dataset_config?.[0]?.score_config || {};
+          const config = configMap.get(id.dataset_id) || {};
           const category = config.category || "Uncategorized";
           
           return {
@@ -157,7 +177,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
       <div className="mb-3">
         <button
           onClick={() => handleSelect('overall')}
-          className={`block w-full text-left px-2 py-1 rounded font-semibold ${
+          className={`block w-full text-left px-2 py-1.5 rounded font-semibold text-sm ${
             activeSelection.type === 'overall'
               ? "bg-blue-600 text-white"
               : "bg-gray-100 hover:bg-gray-200"
@@ -168,17 +188,17 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
       </div>
 
       {Object.keys(grouped).length === 0 && (
-        <p className="text-gray-400 italic text-xs">No datasets configured.</p>
+        <p className="text-gray-400 italic text-sm">No datasets configured.</p>
       )}
 
       {Object.entries(grouped).map(([cat, list]) => (
         <div key={cat} className="mb-3">
           <div className="flex items-center justify-between">
-            <h4 className="font-semibold text-gray-700 mb-1">{cat}</h4>
+            <h4 className="font-semibold text-gray-700 mb-1 text-sm">{cat}</h4>
             {list.length > 0 && (
               <button
                 onClick={() => toggleCategory(cat)}
-                className="text-xs text-gray-500 hover:text-gray-700"
+                className="text-sm text-gray-500 hover:text-gray-700 px-1"
               >
                 {expandedCategories.has(cat) ? '−' : '+'}
               </button>
@@ -195,7 +215,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                         loadCategoriesForDataset(d.dataset_id);
                       }
                     }}
-                    className={`block w-full text-left px-2 py-1 rounded text-xs ${
+                    className={`block w-full text-left px-2 py-1.5 rounded text-sm ${
                       activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category
                         ? "bg-blue-600 text-white"
                         : activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id
@@ -205,7 +225,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                   >
                     {d.dataset_name}
                     {d.avg_score !== null && (
-                      <span className="float-right text-xs opacity-75">
+                      <span className="float-right text-sm opacity-75">
                         {Number(d.avg_score).toFixed(1)}
                       </span>
                     )}
@@ -214,7 +234,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                     <div className="ml-4 mt-1 space-y-1">
                       <button
                         onClick={() => handleSelect('category', d.dataset_id, 'overall', d.dataset_name)}
-                        className={`block w-full text-left px-2 py-1 rounded text-xs ${
+                        className={`block w-full text-left px-2 py-1 rounded text-sm ${
                           activeSelection.type === 'category' && activeSelection.category === 'overall'
                             ? "bg-blue-500 text-white"
                             : "bg-gray-50 hover:bg-gray-100"
@@ -223,13 +243,13 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                         Overall
                       </button>
                       {loadingCategories[d.dataset_id] && (
-                        <div className="text-xs text-gray-400 px-2 py-1">Loading categories...</div>
+                        <div className="text-sm text-gray-400 px-2 py-1">Loading categories...</div>
                       )}
                       {!loadingCategories[d.dataset_id] && datasetCategories[d.dataset_id]?.map((cat) => (
                         <button
                           key={cat}
                           onClick={() => handleSelect('category', d.dataset_id, cat, d.dataset_name)}
-                          className={`block w-full text-left px-2 py-1 rounded text-xs ${
+                          className={`block w-full text-left px-2 py-1 rounded text-sm ${
                             activeSelection.type === 'category' && activeSelection.category === cat
                               ? "bg-blue-500 text-white"
                               : "bg-gray-50 hover:bg-gray-100"

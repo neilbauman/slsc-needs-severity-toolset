@@ -120,19 +120,31 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 name,
                 type,
                 admin_level
-              ),
-              instance_dataset_config (
-                score_config
               )
             `)
             .eq("instance_id", params.id);
 
           if (!fallbackError && fallbackData) {
+            // Load configs separately
+            const datasetIds = fallbackData.map((d: any) => d.dataset_id).filter(Boolean);
+            let configMap = new Map();
+            if (datasetIds.length > 0) {
+              const { data: configs } = await supabase
+                .from("instance_dataset_config")
+                .select("dataset_id, score_config")
+                .eq("instance_id", params.id)
+                .in("dataset_id", datasetIds);
+              
+              configMap = new Map(
+                (configs || []).map((c: any) => [c.dataset_id, c.score_config])
+              );
+            }
+
             dsData = fallbackData.map((d: any) => ({
               id: d.id,
               dataset_id: d.dataset_id,
               dataset_name: d.datasets?.name || `Dataset ${d.dataset_id}`,
-              score_config: d.instance_dataset_config?.[0]?.score_config || null,
+              score_config: configMap.get(d.dataset_id) || null,
             }));
           }
         }
