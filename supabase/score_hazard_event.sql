@@ -197,6 +197,10 @@ BEGIN
       BEGIN
         v_magnitude_field := COALESCE(v_hazard_event.magnitude_field, 'value');
 
+        -- Pre-filter features by distance for performance (for all methods except intersection which does its own filtering)
+        -- For intersection, we'll do distance filtering inside the loop
+        -- For other methods, we can optimize by only checking nearby features
+        
         -- Iterate through features in the GeoJSON
         FOR v_feature IN
           SELECT * FROM jsonb_array_elements(v_hazard_event.metadata->'original_geojson'->'features')
@@ -208,6 +212,24 @@ BEGIN
             -- Extract magnitude value from feature properties
             IF v_feature->'properties'->v_magnitude_field IS NULL THEN
               CONTINUE; -- Skip features without magnitude
+            END IF;
+            
+            -- Quick distance check for performance (skip features that are clearly too far)
+            -- Only for methods that need it (centroid, point_on_surface, within_distance)
+            IF v_matching_method IN ('centroid', 'point_on_surface', 'within_distance') THEN
+              IF v_point IS NOT NULL THEN
+                DECLARE
+                  v_quick_distance NUMERIC;
+                BEGIN
+                  v_quick_distance := ST_Distance(v_point, v_feature_geom);
+                  -- Skip if feature is more than 200km away (for performance)
+                  IF v_quick_distance > 200000 THEN
+                    CONTINUE;
+                  END IF;
+                EXCEPTION WHEN OTHERS THEN
+                  -- If distance check fails, continue anyway
+                END;
+              END IF;
             END IF;
             
             DECLARE
@@ -236,29 +258,106 @@ BEGIN
                 
               ELSIF v_matching_method = 'intersection' THEN
                 -- Use first contour that intersects the boundary
-                IF ST_Intersects(v_boundary_geom, v_feature_geom) THEN
-                  IF v_nearest_magnitude IS NULL THEN
-                    v_nearest_magnitude := v_feature_magnitude;
+                -- Pre-filter with ST_DWithin for performance (within 50km)
+                IF ST_DWithin(v_boundary_geom, v_feature_geom, 50000) THEN
+                  IF ST_Intersects(v_boundary_geom, v_feature_geom) THEN
+                    IF v_nearest_magnitude IS NULL THEN
+                      v_nearest_magnitude := v_feature_magnitude;
+                      -- For intersection, use first match and exit early for performance
+                      EXIT;
+                    END IF;
                   END IF;
                 END IF;
                 
               ELSIF v_matching_method = 'overlap' THEN
                 -- Find contour with maximum overlap
+                -- For line-based contours, we need a different approach
+                -- Instead of buffering, use the length of line that passes through the boundary
                 BEGIN
-                  v_intersection_geom := ST_Intersection(v_boundary_geom::GEOMETRY, v_feature_geom::GEOMETRY)::GEOGRAPHY;
-                  IF v_intersection_geom IS NOT NULL THEN
-                    v_overlap_area := ST_Area(v_intersection_geom);
-                    IF v_max_overlap IS NULL OR v_overlap_area > v_max_overlap THEN
-                      v_max_overlap := v_overlap_area;
-                      v_best_magnitude := v_feature_magnitude;
-                    END IF;
-                  END IF;
+                  DECLARE
+                    v_intersection_geom GEOGRAPHY;
+                    v_intersection_length NUMERIC;
+                    v_boundary_area NUMERIC;
+                  BEGIN
+                    -- For lines, calculate the length of the line segment that intersects the boundary
+                    -- For polygons, calculate the area of intersection
+                    BEGIN
+                      v_intersection_geom := ST_Intersection(v_boundary_geom::GEOMETRY, v_feature_geom::GEOMETRY)::GEOGRAPHY;
+                      
+                      IF v_intersection_geom IS NOT NULL THEN
+                        -- Determine if intersection is a line or polygon
+                        DECLARE
+                          v_geom_type TEXT;
+                        BEGIN
+                          v_geom_type := ST_GeometryType(v_intersection_geom::GEOMETRY);
+                          
+                          IF v_geom_type LIKE '%Line%' THEN
+                            -- For line intersections, use length as overlap measure
+                            v_intersection_length := ST_Length(v_intersection_geom);
+                            -- Use length as the overlap metric (normalize by boundary perimeter for comparison)
+                            v_boundary_area := ST_Perimeter(v_boundary_geom);
+                            IF v_boundary_area > 0 AND v_intersection_length > 0 THEN
+                              -- Use intersection length as overlap metric
+                              IF v_max_overlap IS NULL OR v_intersection_length > v_max_overlap THEN
+                                v_max_overlap := v_intersection_length;
+                                v_best_magnitude := v_feature_magnitude;
+                              END IF;
+                            END IF;
+                          ELSIF v_geom_type LIKE '%Polygon%' OR v_geom_type LIKE '%MultiPolygon%' THEN
+                            -- For polygon intersections, use area
+                            v_overlap_area := ST_Area(v_intersection_geom);
+                            v_boundary_area := ST_Area(v_boundary_geom);
+                            IF v_boundary_area > 0 AND v_overlap_area > 0 THEN
+                              -- Only consider meaningful overlaps (> 0.1% of boundary area)
+                              IF (v_overlap_area / v_boundary_area) > 0.001 THEN
+                                IF v_max_overlap IS NULL OR v_overlap_area > v_max_overlap THEN
+                                  v_max_overlap := v_overlap_area;
+                                  v_best_magnitude := v_feature_magnitude;
+                                END IF;
+                              END IF;
+                            END IF;
+                          END IF;
+                        END;
+                      END IF;
+                    EXCEPTION WHEN OTHERS THEN
+                      -- If intersection fails, check if line is within boundary using ST_Within
+                      BEGIN
+                        IF ST_Within(v_feature_geom::GEOMETRY, v_boundary_geom::GEOMETRY) THEN
+                          -- Line is completely within boundary, use its length
+                          v_intersection_length := ST_Length(v_feature_geom);
+                          IF v_max_overlap IS NULL OR v_intersection_length > v_max_overlap THEN
+                            v_max_overlap := v_intersection_length;
+                            v_best_magnitude := v_feature_magnitude;
+                          END IF;
+                        ELSE
+                          -- Fall back to distance for lines that don't intersect
+                          v_distance := ST_Distance(v_boundary_geom, v_feature_geom);
+                          IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
+                            v_min_distance := v_distance;
+                            -- Only use as fallback if no overlap found yet
+                            IF v_best_magnitude IS NULL AND v_nearest_magnitude IS NULL THEN
+                              v_nearest_magnitude := v_feature_magnitude;
+                            END IF;
+                          END IF;
+                        END IF;
+                      EXCEPTION WHEN OTHERS THEN
+                        -- Final fallback to distance
+                        v_distance := ST_Distance(v_boundary_geom, v_feature_geom);
+                        IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
+                          v_min_distance := v_distance;
+                          IF v_best_magnitude IS NULL AND v_nearest_magnitude IS NULL THEN
+                            v_nearest_magnitude := v_feature_magnitude;
+                          END IF;
+                        END IF;
+                      END;
+                    END;
+                  END;
                 EXCEPTION WHEN OTHERS THEN
-                  -- If intersection fails, try distance as fallback
+                  -- Final fallback to distance
                   v_distance := ST_Distance(v_boundary_geom, v_feature_geom);
                   IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
                     v_min_distance := v_distance;
-                    IF v_nearest_magnitude IS NULL THEN
+                    IF v_best_magnitude IS NULL AND v_nearest_magnitude IS NULL THEN
                       v_nearest_magnitude := v_feature_magnitude;
                     END IF;
                   END IF;
