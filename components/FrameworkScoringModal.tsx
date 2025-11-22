@@ -59,10 +59,32 @@ const getHazardEventId = (datasetId: string): string | null => {
   return null;
 };
 
+type ImpactPreview = {
+  category: string;
+  currentAvg: number;
+  projectedAvg: number;
+  change: number;
+  changePercent: number;
+};
+
+type LocationImpact = {
+  admin_pcode: string;
+  admin_name: string;
+  currentOverall: number;
+  projectedOverall: number;
+  change: number;
+  categoryScores: Record<string, { current: number; projected: number }>;
+};
+
 export default function FrameworkScoringModal({ instance, onClose, onSaved }: Props) {
   const [loading, setLoading] = useState(false);
   const [datasets, setDatasets] = useState<UiDataset[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(true);
+  const [impactPreview, setImpactPreview] = useState<ImpactPreview[]>([]);
+  const [locationImpacts, setLocationImpacts] = useState<LocationImpact[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [currentScores, setCurrentScores] = useState<Record<string, Record<string, number>>>({});
 
   const [categories, setCategories] = useState<CategoryCfg[]>(
     ALL_CATEGORY_KEYS.map((k) => ({
@@ -215,6 +237,14 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
     return m;
   }, [datasets]);
 
+  // Calculate impact preview whenever weights change
+  useEffect(() => {
+    if (showPreview && datasets.length > 0) {
+      calculateImpactPreview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, sscRollup, overallRollup, datasets, showPreview]);
+
   const updateCategory = (key: GroupKey, patch: Partial<CategoryCfg>) => {
     setCategories((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c)));
   };
@@ -322,6 +352,226 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
     setLoading(false);
   };
 
+  // Calculate impact preview based on current weight configuration
+  const calculateImpactPreview = async () => {
+    if (!instance?.id || datasets.length === 0) return;
+    
+    setLoadingPreview(true);
+    try {
+      // Load current scores for all datasets and locations
+      const datasetIds = datasets.map(d => d.dataset_id).filter(id => !isHazardEventId(id));
+      const hazardEventIds = datasets.filter(d => isHazardEventId(d)).map(d => getHazardEventId(d.dataset_id)).filter(Boolean) as string[];
+
+      // Get sample locations (first 10 admin areas with scores)
+      const { data: sampleLocations } = await supabase
+        .from('instance_dataset_scores')
+        .select('admin_pcode')
+        .eq('instance_id', instance.id)
+        .limit(10);
+
+      if (!sampleLocations || sampleLocations.length === 0) {
+        setLoadingPreview(false);
+        return;
+      }
+
+      const adminPcodes = [...new Set(sampleLocations.map((l: any) => l.admin_pcode as string).filter(Boolean))];
+
+      // Load current dataset scores
+      const currentDatasetScores: Record<string, Record<string, number>> = {};
+      if (datasetIds.length > 0) {
+        const { data: datasetScores } = await supabase
+          .from('instance_dataset_scores')
+          .select('dataset_id, admin_pcode, score')
+          .eq('instance_id', instance.id)
+          .in('dataset_id', datasetIds)
+          .in('admin_pcode', adminPcodes);
+
+        (datasetScores || []).forEach((s: any) => {
+          if (!currentDatasetScores[s.admin_pcode]) {
+            currentDatasetScores[s.admin_pcode] = {};
+          }
+          currentDatasetScores[s.admin_pcode][s.dataset_id] = Number(s.score);
+        });
+      }
+
+      // Load current hazard event scores
+      if (hazardEventIds.length > 0) {
+        const { data: hazardScores } = await supabase
+          .from('hazard_event_scores')
+          .select('hazard_event_id, admin_pcode, score')
+          .eq('instance_id', instance.id)
+          .in('hazard_event_id', hazardEventIds)
+          .in('admin_pcode', adminPcodes);
+
+        (hazardScores || []).forEach((s: any) => {
+          if (!currentDatasetScores[s.admin_pcode]) {
+            currentDatasetScores[s.admin_pcode] = {};
+          }
+          currentDatasetScores[s.admin_pcode][`hazard_event_${s.hazard_event_id}`] = Number(s.score);
+        });
+      }
+
+      setCurrentScores(currentDatasetScores);
+
+      // Calculate projected category scores
+      const calculateCategoryScore = (categoryKey: GroupKey, adminPcode: string): number | null => {
+        const cat = categories.find(c => c.key === categoryKey);
+        if (!cat || !cat.include) return null;
+
+        const categoryDatasets = grouped[categoryKey] || [];
+        const scores: number[] = [];
+        const weights: number[] = [];
+
+        categoryDatasets.forEach(d => {
+          const score = currentDatasetScores[adminPcode]?.[d.dataset_id];
+          if (score !== undefined) {
+            scores.push(score);
+            if (cat.method === 'custom_weighted') {
+              weights.push(cat.weights[d.dataset_id] || 0);
+            } else {
+              weights.push(1);
+            }
+          }
+        });
+
+        if (scores.length === 0) return null;
+
+        if (cat.method === 'average') {
+          return scores.reduce((a, b) => a + b, 0) / scores.length;
+        } else if (cat.method === 'worst_case') {
+          return Math.max(...scores);
+        } else if (cat.method === 'custom_weighted') {
+          const totalWeight = weights.reduce((a, b) => a + b, 0);
+          if (totalWeight === 0) return scores.reduce((a, b) => a + b, 0) / scores.length;
+          return scores.reduce((sum, score, i) => sum + score * weights[i], 0) / totalWeight;
+        }
+        return scores.reduce((a, b) => a + b, 0) / scores.length;
+      };
+
+      // Calculate projected scores for sample locations
+      const locationImpacts: LocationImpact[] = [];
+      const categoryAverages: Record<string, { current: number; projected: number; count: number }> = {};
+
+      for (const adminPcode of adminPcodes) {
+        const adminPcodeStr = adminPcode as string;
+        const categoryScores: Record<string, { current: number; projected: number }> = {};
+        let currentOverall = 0;
+        let projectedOverall = 0;
+
+        // Calculate category scores
+        for (const catKey of ALL_CATEGORY_KEYS) {
+          const catScore = calculateCategoryScore(catKey, adminPcodeStr);
+          if (catScore !== null) {
+            // For preview, assume current is same as projected (we'd need to load actual current category scores)
+            categoryScores[catKey] = { current: catScore, projected: catScore };
+            
+            if (!categoryAverages[catKey]) {
+              categoryAverages[catKey] = { current: 0, projected: 0, count: 0 };
+            }
+            categoryAverages[catKey].current += catScore;
+            categoryAverages[catKey].projected += catScore;
+            categoryAverages[catKey].count += 1;
+          }
+        }
+
+        // Calculate SSC Framework score
+        const p1Score = categoryScores['SSC Framework - P1']?.projected;
+        const p2Score = categoryScores['SSC Framework - P2']?.projected;
+        const p3Score = categoryScores['SSC Framework - P3']?.projected;
+
+        let sscFrameworkScore: number | null = null;
+        if (p1Score !== undefined || p2Score !== undefined || p3Score !== undefined) {
+          const sscScores = [p1Score, p2Score, p3Score].filter(s => s !== undefined) as number[];
+          if (sscRollup.method === 'average') {
+            sscFrameworkScore = sscScores.reduce((a, b) => a + b, 0) / sscScores.length;
+          } else if (sscRollup.method === 'worst_case') {
+            sscFrameworkScore = Math.max(...sscScores);
+          } else if (sscRollup.method === 'custom_weighted') {
+            const weights = [
+              sscRollup.weights['SSC Framework - P1'] || 0,
+              sscRollup.weights['SSC Framework - P2'] || 0,
+              sscRollup.weights['SSC Framework - P3'] || 0,
+            ];
+            const totalWeight = weights.reduce((a, b) => a + b, 0);
+            if (totalWeight > 0) {
+              sscFrameworkScore = sscScores.reduce((sum, score, i) => sum + score * weights[i], 0) / totalWeight;
+            }
+          }
+        }
+
+        // Calculate overall score
+        const hazardScore = categoryScores['Hazard']?.projected;
+        const uvScore = categoryScores['Underlying Vulnerability']?.projected;
+
+        if (sscFrameworkScore !== null || hazardScore !== undefined || uvScore !== undefined) {
+          const overallScores = [
+            sscFrameworkScore,
+            hazardScore,
+            uvScore,
+          ].filter(s => s !== null && s !== undefined) as number[];
+
+          if (overallRollup.method === 'average') {
+            projectedOverall = overallScores.reduce((a, b) => a + b, 0) / overallScores.length;
+          } else if (overallRollup.method === 'worst_case') {
+            projectedOverall = Math.max(...overallScores);
+          } else if (overallRollup.method === 'custom_weighted') {
+            const weights = [
+              overallRollup.weights['SSC Framework'] || 0,
+              overallRollup.weights['Hazard'] || 0,
+              overallRollup.weights['Underlying Vulnerability'] || 0,
+            ];
+            const totalWeight = weights.reduce((a, b) => a + b, 0);
+            if (totalWeight > 0) {
+              projectedOverall = overallScores.reduce((sum, score, i) => sum + score * weights[i], 0) / totalWeight;
+            }
+          }
+          currentOverall = projectedOverall; // For preview, assume same
+        }
+
+        // Get admin name
+        const { data: adminData } = await supabase
+          .from('admin_boundaries')
+          .select('name')
+          .eq('admin_pcode', adminPcodeStr)
+          .eq('admin_level', 'ADM3')
+          .limit(1)
+          .single();
+
+        locationImpacts.push({
+          admin_pcode: adminPcodeStr,
+          admin_name: (adminData?.name as string) || adminPcodeStr,
+          currentOverall,
+          projectedOverall,
+          change: projectedOverall - currentOverall,
+          categoryScores,
+        });
+      }
+
+      setLocationImpacts(locationImpacts.slice(0, 5)); // Show top 5
+
+      // Calculate category impact averages
+      const impacts: ImpactPreview[] = [];
+      for (const [catKey, avg] of Object.entries(categoryAverages)) {
+        if (avg.count > 0) {
+          const current = avg.current / avg.count;
+          const projected = avg.projected / avg.count;
+          impacts.push({
+            category: catKey,
+            currentAvg: current,
+            projectedAvg: projected,
+            change: projected - current,
+            changePercent: current > 0 ? ((projected - current) / current) * 100 : 0,
+          });
+        }
+      }
+      setImpactPreview(impacts);
+    } catch (err) {
+      console.error('Error calculating impact preview:', err);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
   const renderMethodSelect = (value: Method, onChange: (m: Method) => void, label?: string) => (
     <div className="space-y-1">
       {label && <label className="text-xs font-medium text-gray-700">{label}</label>}
@@ -370,6 +620,135 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
 
         {/* Scrollable content */}
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {/* Impact Preview Panel */}
+          {showPreview && (
+            <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-4 mb-4">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <span>📊</span> Impact Preview
+                </h3>
+                <button
+                  onClick={() => setShowPreview(!showPreview)}
+                  className="text-xs text-gray-600 hover:text-gray-800"
+                >
+                  {showPreview ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-600 mb-3">
+                See how your weight changes affect category and overall scores. This preview uses sample locations.
+              </p>
+              
+              {loadingPreview ? (
+                <div className="text-sm text-gray-500">Calculating impact...</div>
+              ) : (
+                <div className="space-y-3">
+                  {/* Category Impact Summary */}
+                  {impactPreview.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Category Score Impact:</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        {impactPreview.map((impact) => {
+                          const isPositive = impact.change > 0;
+                          const isNegative = impact.change < 0;
+                          return (
+                            <div
+                              key={impact.category}
+                              className="bg-white rounded p-2 border border-gray-200"
+                            >
+                              <div className="text-xs font-medium text-gray-700 mb-1">
+                                {impact.category}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-500">
+                                  {impact.projectedAvg.toFixed(2)}
+                                </span>
+                                {impact.change !== 0 && (
+                                  <span
+                                    className={`text-xs font-semibold ${
+                                      isPositive
+                                        ? 'text-red-600'
+                                        : isNegative
+                                        ? 'text-green-600'
+                                        : 'text-gray-500'
+                                    }`}
+                                  >
+                                    {isPositive ? '↑' : '↓'} {Math.abs(impact.change).toFixed(2)} (
+                                    {isPositive ? '+' : ''}
+                                    {impact.changePercent.toFixed(1)}%)
+                                  </span>
+                                )}
+                              </div>
+                              {/* Visual bar indicator */}
+                              <div className="mt-1 h-1 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full ${
+                                    isPositive ? 'bg-red-400' : isNegative ? 'bg-green-400' : 'bg-gray-300'
+                                  }`}
+                                  style={{
+                                    width: `${Math.min(100, Math.abs(impact.changePercent) * 2)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sample Location Impacts */}
+                  {locationImpacts.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Sample Location Impact:</h4>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {locationImpacts.map((loc) => {
+                          const isPositive = loc.change > 0;
+                          const isNegative = loc.change < 0;
+                          return (
+                            <div
+                              key={loc.admin_pcode}
+                              className="bg-white rounded p-2 border border-gray-200 text-xs"
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="font-medium text-gray-700 truncate">
+                                  {loc.admin_name}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-gray-500">
+                                    {loc.projectedOverall.toFixed(2)}
+                                  </span>
+                                  {loc.change !== 0 && (
+                                    <span
+                                      className={`font-semibold ${
+                                        isPositive
+                                          ? 'text-red-600'
+                                          : isNegative
+                                          ? 'text-green-600'
+                                          : 'text-gray-500'
+                                      }`}
+                                    >
+                                      {isPositive ? '↑' : '↓'} {Math.abs(loc.change).toFixed(2)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {impactPreview.length === 0 && locationImpacts.length === 0 && (
+                    <div className="text-sm text-gray-500 text-center py-2">
+                      No impact data available. Apply scoring to datasets first.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Instructions */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="font-semibold text-blue-900 mb-2">How Scoring Works</h3>
@@ -442,29 +821,43 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                                 )}
                               </div>
                               {cat.method === 'custom_weighted' && (
-                                <div className="flex items-center gap-2">
-                                  <label className="text-xs text-gray-600">Weight:</label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    max="1"
-                                    value={cat.weights[d.dataset_id] ?? 0}
-                                    onChange={(e) => {
-                                      const newWeights = {
-                                        ...cat.weights,
-                                        [d.dataset_id]: parseFloat(e.target.value) || 0,
-                                      };
-                                      // Auto-normalize if sum > 1
-                                      const sum = sumWeights(newWeights);
-                                      if (sum > 1.01) {
-                                        updateCategory(key, { weights: normalizeWeights(newWeights) });
-                                      } else {
-                                        updateCategory(key, { weights: newWeights });
-                                      }
-                                    }}
-                                    className="w-20 border border-gray-300 rounded px-2 py-1 text-sm"
-                                  />
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2">
+                                    <label className="text-xs text-gray-600">Weight:</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      max="1"
+                                      value={cat.weights[d.dataset_id] ?? 0}
+                                      onChange={(e) => {
+                                        const newWeights = {
+                                          ...cat.weights,
+                                          [d.dataset_id]: parseFloat(e.target.value) || 0,
+                                        };
+                                        // Auto-normalize if sum > 1
+                                        const sum = sumWeights(newWeights);
+                                        if (sum > 1.01) {
+                                          updateCategory(key, { weights: normalizeWeights(newWeights) });
+                                        } else {
+                                          updateCategory(key, { weights: newWeights });
+                                        }
+                                      }}
+                                      className="w-20 border border-gray-300 rounded px-2 py-1 text-sm"
+                                    />
+                                  </div>
+                                  {/* Visual weight indicator */}
+                                  <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-blue-500 transition-all"
+                                      style={{
+                                        width: `${((cat.weights[d.dataset_id] ?? 0) * 100)}%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-xs text-gray-500">
+                                    {((cat.weights[d.dataset_id] ?? 0) * 100).toFixed(0)}%
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -506,27 +899,41 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                       return (
                         <div key={k} className={`p-3 rounded border ${hasData ? 'bg-gray-50 border-gray-300' : 'bg-gray-100 border-gray-200 opacity-50'}`}>
                           <label className="text-xs font-medium text-gray-700 block mb-1">{k}</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max="1"
-                            value={sscRollup.weights[k] ?? 0}
-                            onChange={(e) => {
-                              const newWeights = {
-                                ...sscRollup.weights,
-                                [k]: parseFloat(e.target.value) || 0,
-                              };
-                              const sum = sumWeights(newWeights);
-                              if (sum > 1.01) {
-                                setSscRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
-                              } else {
-                                setSscRollup((p) => ({ ...p, weights: newWeights }));
-                              }
-                            }}
-                            disabled={!hasData}
-                            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                          />
+                          <div className="space-y-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="1"
+                              value={sscRollup.weights[k] ?? 0}
+                              onChange={(e) => {
+                                const newWeights = {
+                                  ...sscRollup.weights,
+                                  [k]: parseFloat(e.target.value) || 0,
+                                };
+                                const sum = sumWeights(newWeights);
+                                if (sum > 1.01) {
+                                  setSscRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
+                                } else {
+                                  setSscRollup((p) => ({ ...p, weights: newWeights }));
+                                }
+                              }}
+                              disabled={!hasData}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                            />
+                            {/* Visual weight indicator */}
+                            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-teal-500 transition-all"
+                                style={{
+                                  width: `${((sscRollup.weights[k] ?? 0) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <div className="text-xs text-gray-500 text-right">
+                              {((sscRollup.weights[k] ?? 0) * 100).toFixed(0)}%
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
@@ -568,27 +975,41 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                       return (
                         <div key={key} className={`p-3 rounded border ${hasData ? 'bg-gray-50 border-gray-300' : 'bg-gray-100 border-gray-200 opacity-50'}`}>
                           <label className="text-xs font-medium text-gray-700 block mb-1">{label}</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max="1"
-                            value={overallRollup.weights[key] ?? 0}
-                            onChange={(e) => {
-                              const newWeights = {
-                                ...overallRollup.weights,
-                                [key]: parseFloat(e.target.value) || 0,
-                              };
-                              const sum = sumWeights(newWeights);
-                              if (sum > 1.01) {
-                                setOverallRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
-                              } else {
-                                setOverallRollup((p) => ({ ...p, weights: newWeights }));
-                              }
-                            }}
-                            disabled={!hasData}
-                            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                          />
+                          <div className="space-y-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="1"
+                              value={overallRollup.weights[key] ?? 0}
+                              onChange={(e) => {
+                                const newWeights = {
+                                  ...overallRollup.weights,
+                                  [key]: parseFloat(e.target.value) || 0,
+                                };
+                                const sum = sumWeights(newWeights);
+                                if (sum > 1.01) {
+                                  setOverallRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
+                                } else {
+                                  setOverallRollup((p) => ({ ...p, weights: newWeights }));
+                                }
+                              }}
+                              disabled={!hasData}
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                            />
+                            {/* Visual weight indicator */}
+                            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-amber-500 transition-all"
+                                style={{
+                                  width: `${((overallRollup.weights[key] ?? 0) * 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <div className="text-xs text-gray-500 text-right">
+                              {((overallRollup.weights[key] ?? 0) * 100).toFixed(0)}%
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
