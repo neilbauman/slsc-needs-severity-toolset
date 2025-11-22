@@ -1104,10 +1104,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       // Has score - use color based on score
       const color = getColor(score);
       
-      // Make hazard events more visually prominent with higher opacity and thicker borders
+      // Make hazard events more visually prominent with higher opacity (keep border same thickness)
       const isHazardEvent = selectedLayer.type === 'hazard_event';
       const fillOpacity = isHazardEvent ? 0.75 : 0.6; // More opaque for hazard events
-      const borderWeight = isHazardEvent ? 2 : 1; // Thicker border for hazard events
+      const borderWeight = 1; // Same border thickness for all datasets
       
       // Set initial style with thin black borders
       layer.setStyle({ 
@@ -1155,13 +1155,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       popupText += `<br/>${layerName}: ${score.toFixed(2)}`;
       layer.bindPopup(popupText);
       
-      // Add hover effects - make hazard events more prominent
+      // Add hover effects - make hazard events more prominent with higher opacity
       // isHazardEvent already defined above, reuse it
       layer.on({
         mouseover: (e: any) => {
           const hoverLayer = e.target;
           hoverLayer.setStyle({
-            weight: isHazardEvent ? 3 : 2, // Even thicker border on hover for hazard events
+            weight: 2, // Same border thickness on hover for all datasets
             fillOpacity: isHazardEvent ? 0.9 : 0.8,
             color: '#000000',
             fillColor: color
@@ -1170,7 +1170,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         mouseout: (e: any) => {
           const hoverLayer = e.target;
           hoverLayer.setStyle({
-            weight: isHazardEvent ? 2 : 1, // Back to thicker border for hazard events
+            weight: 1, // Same border thickness for all datasets
             fillOpacity: isHazardEvent ? 0.75 : 0.6,
             color: '#000000',
             fillColor: color
