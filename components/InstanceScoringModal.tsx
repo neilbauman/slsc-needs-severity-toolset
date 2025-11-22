@@ -77,14 +77,14 @@ export default function InstanceScoringModal({
   // Snap to nearest multiple of 5
   const snapToStep = (value: number, step = 5) => Math.round(value / step) * step;
 
-  // Normalize dataset weights within a category (with debouncing to prevent UI jumping)
+  // Normalize dataset weights within a category (only on release, less aggressive)
   const normalizeCategory = useCallback((cat: string) => {
     if (isNormalizing) return; // Prevent re-entry during normalization
     
     setIsNormalizing(true);
     
-    // Use setTimeout to debounce and allow UI to settle
-    setTimeout(() => {
+    // Use requestAnimationFrame to normalize after current render cycle
+    requestAnimationFrame(() => {
       const categoryData = categories[cat] as CategoryData;
       if (!categoryData) {
         setIsNormalizing(false);
@@ -99,34 +99,35 @@ export default function InstanceScoringModal({
         const equalWeight = 100 / ds.length;
         const newWeights = { ...weights };
         ds.forEach((d) => {
-          newWeights[d.id] = snapToStep(equalWeight, 5);
+          newWeights[d.id] = Math.round(equalWeight);
         });
         setWeights(newWeights);
         setIsNormalizing(false);
         return;
       }
 
-      // Only normalize if total is significantly off from 100%
-      // This allows users to adjust weights freely as long as they're close to 100%
-      if (Math.abs(total - 100) < 0.5) {
-        // Already close to 100%, just snap to exact 100%
+      // Only normalize if total is significantly off from 100% (more than 2%)
+      // This allows users to adjust weights freely as long as they're reasonably close
+      if (Math.abs(total - 100) < 2) {
+        // Close to 100%, just make minor adjustment to exact 100%
         const scale = 100 / total;
         const newWeights = { ...weights };
         let sum = 0;
         
         ds.forEach((d) => {
           const scaled = (weights[d.id] || 0) * scale;
-          newWeights[d.id] = scaled;
-          sum += scaled;
+          // Round to 1 decimal for smoother experience
+          newWeights[d.id] = Math.round(scaled * 10) / 10;
+          sum += newWeights[d.id];
         });
         
-        // Adjust for any rounding differences
+        // Adjust for any rounding differences (add/subtract from largest)
         const diff = 100 - sum;
-        if (Math.abs(diff) > 0.01 && ds.length > 0) {
+        if (Math.abs(diff) > 0.05 && ds.length > 0) {
           const largest = ds.reduce((a, b) =>
             (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
           );
-          newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
+          newWeights[largest.id] = Math.max(0, Math.min(100, Math.round((newWeights[largest.id] + diff) * 10) / 10));
         }
         
         setWeights(newWeights);
@@ -134,38 +135,40 @@ export default function InstanceScoringModal({
         return;
       }
 
-      // If total is far from 100%, normalize proportionally
+      // If total is far from 100%, normalize proportionally but preserve relative ratios
       const newWeights = { ...weights };
+      const scale = 100 / total;
 
       let sum = 0;
       ds.forEach((d) => {
-        const normalized = (weights[d.id] || 0) / total * 100;
-        newWeights[d.id] = normalized;
-        sum += normalized;
+        const normalized = (weights[d.id] || 0) * scale;
+        // Round to 1 decimal for smoother experience
+        newWeights[d.id] = Math.round(normalized * 10) / 10;
+        sum += newWeights[d.id];
       });
 
-      // Adjust for rounding
+      // Adjust for rounding (add/subtract from largest)
       const diff = 100 - sum;
-      if (Math.abs(diff) > 0.01 && ds.length > 0) {
+      if (Math.abs(diff) > 0.05 && ds.length > 0) {
         const largest = ds.reduce((a, b) =>
           (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
         );
-        newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
+        newWeights[largest.id] = Math.max(0, Math.min(100, Math.round((newWeights[largest.id] + diff) * 10) / 10));
       }
 
       setWeights(newWeights);
       setIsNormalizing(false);
-    }, 150); // 150ms debounce to prevent UI jumping
+    });
   }, [categories, weights, isNormalizing]);
 
-  // Normalize all category weights (with debouncing)
+  // Normalize all category weights (only on release, less aggressive)
   const normalizeAllCategories = useCallback(() => {
     if (isNormalizing) return; // Prevent re-entry during normalization
     
     setIsNormalizing(true);
     
-    // Use setTimeout to debounce and allow UI to settle
-    setTimeout(() => {
+    // Use requestAnimationFrame to normalize after current render cycle
+    requestAnimationFrame(() => {
       const categoryValues = Object.values(categories) as CategoryData[];
       const total = categoryValues.reduce((sum, catData) => {
         return sum + (catData.categoryWeight || 0);
@@ -176,21 +179,57 @@ export default function InstanceScoringModal({
         return;
       }
 
-      // Always normalize to ensure they sum to exactly 100%
+      // Only normalize if significantly off (more than 2%)
+      if (Math.abs(total - 100) < 2) {
+        // Close to 100%, just make minor adjustment
+        const scale = 100 / total;
+        const newCats: Record<string, CategoryData> = { ...categories };
+        let sum = 0;
+
+        Object.keys(newCats).forEach((cat) => {
+          const catData = newCats[cat] as CategoryData;
+          const currentWeight = catData.categoryWeight || 0;
+          // Round to 1 decimal for smoother experience
+          catData.categoryWeight = Math.round(currentWeight * scale * 10) / 10;
+          sum += catData.categoryWeight;
+        });
+
+        // Adjust for rounding
+        const diff = 100 - sum;
+        if (Math.abs(diff) > 0.05) {
+          const largestCat = Object.keys(newCats).reduce((a, b) => {
+            const aData = newCats[a] as CategoryData;
+            const bData = newCats[b] as CategoryData;
+            return aData.categoryWeight > bData.categoryWeight ? a : b;
+          });
+          const largestCatData = newCats[largestCat] as CategoryData;
+          largestCatData.categoryWeight = Math.max(
+            0,
+            Math.min(100, Math.round((largestCatData.categoryWeight + diff) * 10) / 10)
+          );
+        }
+
+        setCategories(newCats);
+        setIsNormalizing(false);
+        return;
+      }
+
+      // If far from 100%, normalize proportionally
       const newCats: Record<string, CategoryData> = { ...categories };
+      const scale = 100 / total;
       let sum = 0;
 
       Object.keys(newCats).forEach((cat) => {
         const catData = newCats[cat] as CategoryData;
         const currentWeight = catData.categoryWeight || 0;
-        // Normalize proportionally to 100%
-        const newWeight = (currentWeight / total) * 100;
-        catData.categoryWeight = newWeight;
-        sum += newWeight;
+        // Round to 1 decimal for smoother experience
+        catData.categoryWeight = Math.round(currentWeight * scale * 10) / 10;
+        sum += catData.categoryWeight;
       });
 
+      // Adjust for rounding
       const diff = 100 - sum;
-      if (diff !== 0) {
+      if (Math.abs(diff) > 0.05) {
         const largestCat = Object.keys(newCats).reduce((a, b) => {
           const aData = newCats[a] as CategoryData;
           const bData = newCats[b] as CategoryData;
@@ -199,13 +238,13 @@ export default function InstanceScoringModal({
         const largestCatData = newCats[largestCat] as CategoryData;
         largestCatData.categoryWeight = Math.max(
           0,
-          Math.min(100, largestCatData.categoryWeight + diff)
+          Math.min(100, Math.round((largestCatData.categoryWeight + diff) * 10) / 10)
         );
       }
 
       setCategories(newCats);
       setIsNormalizing(false);
-    }, 100); // 100ms debounce
+    });
   }, [categories, isNormalizing]);
 
   const handleWeightChange = (datasetId: string, value: number) => {
@@ -828,12 +867,13 @@ export default function InstanceScoringModal({
                       handleCategoryWeightChange(cat, parseFloat(e.target.value));
                     }}
                     onMouseUp={(e) => {
-                      e.preventDefault();
-                      normalizeAllCategories();
+                      // Don't prevent default - let the slider finish its interaction
+                      // Small delay to ensure slider value is fully updated
+                      setTimeout(() => normalizeAllCategories(), 50);
                     }}
                     onTouchEnd={(e) => {
-                      e.preventDefault();
-                      normalizeAllCategories();
+                      // Don't prevent default - let the slider finish its interaction
+                      setTimeout(() => normalizeAllCategories(), 50);
                     }}
                     className="w-20 h-1.5 rounded-lg appearance-none cursor-pointer"
                     style={{
@@ -876,12 +916,13 @@ export default function InstanceScoringModal({
                               handleWeightChange(d.id, parseFloat(e.target.value));
                             }}
                             onMouseUp={(e) => {
-                              e.preventDefault();
-                              normalizeCategory(cat);
+                              // Don't prevent default - let the slider finish its interaction
+                              // Small delay to ensure slider value is fully updated
+                              setTimeout(() => normalizeCategory(cat), 50);
                             }}
                             onTouchEnd={(e) => {
-                              e.preventDefault();
-                              normalizeCategory(cat);
+                              // Don't prevent default - let the slider finish its interaction
+                              setTimeout(() => normalizeCategory(cat), 50);
                             }}
                         className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer"
                         style={{
