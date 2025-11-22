@@ -210,14 +210,23 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
           const idx = next.findIndex((c) => c.key === key);
           if (idx >= 0) {
             next[idx].weights = weights;
-            // If no datasets, set include to false
-            if (ds.length === 0) {
-              next[idx].include = false;
-            }
+            next[idx].include = true; // Ensure it's included if datasets exist
+          }
+        } else {
+          // If no datasets, set include to false
+          const idx = next.findIndex((c) => c.key === key);
+          if (idx >= 0) {
+            next[idx].include = false;
           }
         }
       }
       setCategories(next);
+      
+      // Debug: Log hazard events
+      const hazardEvents = mapped.filter(d => isHazardEventId(d.dataset_id));
+      if (hazardEvents.length > 0) {
+        console.log('Hazard events loaded:', hazardEvents.map(d => d.dataset_name));
+      }
     };
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -600,7 +609,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[90vh] flex flex-col">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-center border-b px-6 py-4 bg-gray-50">
           <div>
@@ -812,16 +821,25 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                       {/* Dataset List */}
                       <div>
                         <h4 className="text-sm font-medium text-gray-700 mb-2">Datasets in this Category:</h4>
-                        <div className="space-y-2">
+                        <div className="space-y-3">
                           {list.map((d) => (
-                            <div key={d.dataset_id} className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-200">
-                              <div className="flex-1">
-                                <div className="font-medium text-sm text-gray-900">{d.dataset_name}</div>
-                                {d.avg_score !== null && (
-                                  <div className="text-xs text-gray-500">
-                                    Avg Score: {Number(d.avg_score).toFixed(2)}
+                            <div key={d.dataset_id} className="p-3 bg-gray-50 rounded border border-gray-200">
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm text-gray-900 flex items-center gap-2">
+                                    {d.dataset_name}
+                                    {isHazardEventId(d.dataset_id) && (
+                                      <span className="text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded">
+                                        Hazard Event
+                                      </span>
+                                    )}
                                   </div>
-                                )}
+                                  {d.avg_score !== null && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      Avg Score: {Number(d.avg_score).toFixed(2)}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                               {cat.method === 'custom_weighted' && (
                                 <div className="flex items-center gap-3">
@@ -901,39 +919,40 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                       const hasData = cat && cat.include && grouped[k].length > 0;
                       return (
                         <div key={k} className={`p-3 rounded border ${hasData ? 'bg-gray-50 border-gray-300' : 'bg-gray-100 border-gray-200 opacity-50'}`}>
-                          <label className="text-xs font-medium text-gray-700 block mb-1">{k}</label>
-                          <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-700 block mb-2">{k}</label>
+                          <div className="space-y-2">
+                            {/* Slider */}
                             <input
-                              type="number"
-                              step="0.01"
+                              type="range"
                               min="0"
-                              max="1"
-                              value={sscRollup.weights[k] ?? 0}
+                              max="100"
+                              step="1"
+                              value={((sscRollup.weights[k] ?? 0) * 100)}
                               onChange={(e) => {
+                                const newValue = parseFloat(e.target.value) / 100;
                                 const newWeights = {
                                   ...sscRollup.weights,
-                                  [k]: parseFloat(e.target.value) || 0,
+                                  [k]: newValue,
                                 };
-                                const sum = sumWeights(newWeights);
-                                if (sum > 1.01) {
-                                  setSscRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
-                                } else {
-                                  setSscRollup((p) => ({ ...p, weights: newWeights }));
-                                }
+                                setSscRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
                               }}
                               disabled={!hasData}
-                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                              style={{
+                                background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${((sscRollup.weights[k] ?? 0) * 100)}%, #e5e7eb ${((sscRollup.weights[k] ?? 0) * 100)}%, #e5e7eb 100%)`
+                              }}
                             />
-                            {/* Visual weight indicator */}
-                            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                            {/* Visual weight bar */}
+                            <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-teal-500 transition-all"
+                                className="h-full bg-teal-500 transition-all duration-200"
                                 style={{
                                   width: `${((sscRollup.weights[k] ?? 0) * 100)}%`,
                                 }}
                               />
                             </div>
-                            <div className="text-xs text-gray-500 text-right">
+                            {/* Percentage display */}
+                            <div className="text-xs font-semibold text-gray-700 text-center">
                               {((sscRollup.weights[k] ?? 0) * 100).toFixed(0)}%
                             </div>
                           </div>
@@ -977,39 +996,40 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                         : true; // SSC Framework always has data if P1/P2/P3 exist
                       return (
                         <div key={key} className={`p-3 rounded border ${hasData ? 'bg-gray-50 border-gray-300' : 'bg-gray-100 border-gray-200 opacity-50'}`}>
-                          <label className="text-xs font-medium text-gray-700 block mb-1">{label}</label>
-                          <div className="space-y-1">
+                          <label className="text-xs font-medium text-gray-700 block mb-2">{label}</label>
+                          <div className="space-y-2">
+                            {/* Slider */}
                             <input
-                              type="number"
-                              step="0.01"
+                              type="range"
                               min="0"
-                              max="1"
-                              value={overallRollup.weights[key] ?? 0}
+                              max="100"
+                              step="1"
+                              value={((overallRollup.weights[key] ?? 0) * 100)}
                               onChange={(e) => {
+                                const newValue = parseFloat(e.target.value) / 100;
                                 const newWeights = {
                                   ...overallRollup.weights,
-                                  [key]: parseFloat(e.target.value) || 0,
+                                  [key]: newValue,
                                 };
-                                const sum = sumWeights(newWeights);
-                                if (sum > 1.01) {
-                                  setOverallRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
-                                } else {
-                                  setOverallRollup((p) => ({ ...p, weights: newWeights }));
-                                }
+                                setOverallRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
                               }}
                               disabled={!hasData}
-                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                              style={{
+                                background: `linear-gradient(to right, #f59e0b 0%, #f59e0b ${((overallRollup.weights[key] ?? 0) * 100)}%, #e5e7eb ${((overallRollup.weights[key] ?? 0) * 100)}%, #e5e7eb 100%)`
+                              }}
                             />
-                            {/* Visual weight indicator */}
-                            <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                            {/* Visual weight bar */}
+                            <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
                               <div
-                                className="h-full bg-amber-500 transition-all"
+                                className="h-full bg-amber-500 transition-all duration-200"
                                 style={{
                                   width: `${((overallRollup.weights[key] ?? 0) * 100)}%`,
                                 }}
                               />
                             </div>
-                            <div className="text-xs text-gray-500 text-right">
+                            {/* Percentage display */}
+                            <div className="text-xs font-semibold text-gray-700 text-center">
                               {((overallRollup.weights[key] ?? 0) * 100).toFixed(0)}%
                             </div>
                           </div>
