@@ -59,6 +59,8 @@ DECLARE
   v_use_distance_scoring BOOLEAN := FALSE; -- Flag to use distance-based scoring
   v_track_distance NUMERIC; -- Distance from admin area to track
   v_hazard_geometry GEOGRAPHY; -- Combined geometry of all track features
+  v_track_geometries JSONB; -- LineString geometries extracted from GeoJSON
+  v_geom_type TEXT; -- Geometry type of a feature
 BEGIN
   -- Validate and set matching method
   v_matching_method := LOWER(COALESCE(in_matching_method, 'centroid'));
@@ -94,9 +96,92 @@ BEGIN
     RAISE NOTICE 'Using magnitude-based scoring mode';
   END IF;
 
-  -- For distance-based scoring, get the combined track geometry
+  -- For distance-based scoring, extract only LineString/MultiLineString features (track)
+  -- and exclude Polygon/MultiPolygon features (cone)
   IF v_use_distance_scoring THEN
-    v_hazard_geometry := v_hazard_event.geometry;
+    -- Extract only LineString/MultiLineString geometries from original GeoJSON
+    -- Also log what geometry types are actually in the GeoJSON for debugging
+    DECLARE
+      v_all_geom_types TEXT[];
+    BEGIN
+      -- Get all geometry types for debugging
+      SELECT array_agg(DISTINCT (f->'geometry'->>'type')::TEXT) INTO v_all_geom_types
+      FROM jsonb_array_elements(v_hazard_event.metadata->'original_geojson'->'features') AS f;
+      
+      RAISE NOTICE 'Geometry types found in GeoJSON: %', array_to_string(v_all_geom_types, ', ');
+      
+      -- Extract LineString/MultiLineString geometries
+      -- Use case-insensitive matching and handle potential nulls
+      v_track_geometries := (
+        SELECT jsonb_agg(f->'geometry')
+        FROM jsonb_array_elements(v_hazard_event.metadata->'original_geojson'->'features') AS f
+        WHERE f->'geometry' IS NOT NULL
+          AND LOWER(COALESCE(f->'geometry'->>'type', '')) IN ('linestring', 'multilinestring')
+      );
+      
+      IF v_track_geometries IS NULL OR jsonb_array_length(v_track_geometries) = 0 THEN
+        RAISE WARNING 'No LineString/MultiLineString features found! Found types: %', array_to_string(v_all_geom_types, ', ');
+      ELSE
+        RAISE NOTICE 'Found % LineString/MultiLineString features for track extraction', jsonb_array_length(v_track_geometries);
+      END IF;
+    END;
+    
+    -- If we found LineString features, create a combined geometry from them
+    IF v_track_geometries IS NOT NULL AND jsonb_array_length(v_track_geometries) > 0 THEN
+      BEGIN
+        -- Convert each LineString geometry and collect them
+        DECLARE
+          v_line_geoms GEOGRAPHY[];
+          v_single_geom GEOGRAPHY;
+        BEGIN
+          v_line_geoms := ARRAY[]::GEOGRAPHY[];
+          
+          -- Convert each LineString from JSON to PostGIS geometry
+          FOR i IN 0..jsonb_array_length(v_track_geometries) - 1 LOOP
+            BEGIN
+              v_single_geom := ST_GeomFromGeoJSON((v_track_geometries->i)::text)::GEOGRAPHY;
+              v_line_geoms := array_append(v_line_geoms, v_single_geom);
+            EXCEPTION WHEN OTHERS THEN
+              -- Skip invalid geometries
+              CONTINUE;
+            END;
+          END LOOP;
+          
+          -- Combine LineStrings using ST_Collect (creates MultiLineString if multiple, LineString if single)
+          IF array_length(v_line_geoms, 1) = 1 THEN
+            v_hazard_geometry := v_line_geoms[1];
+          ELSIF array_length(v_line_geoms, 1) > 1 THEN
+            -- Use ST_Collect with unnest to combine LineStrings into MultiLineString
+            -- This properly combines multiple LineStrings for distance calculation
+            SELECT ST_Collect(geom)::GEOGRAPHY INTO v_hazard_geometry
+            FROM unnest(v_line_geoms) AS geom;
+          ELSE
+            RAISE EXCEPTION 'No valid LineString geometries found';
+          END IF;
+          
+          RAISE NOTICE 'Extracted % LineString features for track distance calculation, geometry type: %', 
+            array_length(v_line_geoms, 1), ST_GeometryType(v_hazard_geometry::GEOMETRY);
+          
+          -- Verify the combined geometry is a LineString type
+          IF ST_GeometryType(v_hazard_geometry::GEOMETRY) NOT LIKE '%Line%' THEN
+            RAISE WARNING 'WARNING: Combined track geometry is not a LineString type: %. Distance calculation may be incorrect.', 
+              ST_GeometryType(v_hazard_geometry::GEOMETRY);
+          END IF;
+          
+          -- Verify the combined geometry is a LineString type
+          IF ST_GeometryType(v_hazard_geometry::GEOMETRY) NOT LIKE '%Line%' THEN
+            RAISE WARNING 'WARNING: Combined track geometry is not a LineString type: %', ST_GeometryType(v_hazard_geometry::GEOMETRY);
+          END IF;
+        END;
+      EXCEPTION WHEN OTHERS THEN
+        -- Do NOT fallback to full geometry - this will cause distance 0 for points inside polygons
+        RAISE EXCEPTION 'Failed to extract track geometry: %. Cannot use full geometry (includes polygons) for distance-based scoring.', SQLERRM;
+      END;
+    ELSE
+      -- No LineString features found - this is a critical error for distance-based scoring
+      -- We cannot use the full geometry because it includes polygons (cone) which will return distance 0
+      RAISE EXCEPTION 'CRITICAL ERROR: No LineString/MultiLineString features found in GeoJSON for distance-based scoring. Cannot calculate distances using polygon geometry (cone). Please ensure the GeoJSON contains LineString features for the track.';
+    END IF;
   END IF;
 
   -- Get affected admin areas if limiting
@@ -211,28 +296,80 @@ BEGIN
     IF v_use_distance_scoring THEN
       BEGIN
         -- Calculate distance from admin area point to the track
-        IF v_point IS NOT NULL THEN
-          v_track_distance := ST_Distance(v_point, v_hazard_geometry);
-        ELSE
-          -- Use boundary geometry if point not available
-          v_track_distance := ST_Distance(v_boundary_geom, v_hazard_geometry);
-        END IF;
+        -- ST_Distance works correctly with LineString and MultiLineString (from ST_Collect)
+        -- For LineString/MultiLineString, ST_Distance returns the minimum distance to any point on the line
+        DECLARE
+          v_geom_type TEXT;
+        BEGIN
+          v_geom_type := ST_GeometryType(v_hazard_geometry::GEOMETRY);
+          
+          -- Verify we're using a LineString type, not a Polygon
+          IF v_geom_type NOT LIKE '%Line%' THEN
+            RAISE WARNING 'Warning: Track geometry is not a LineString (type: %). Distance calculation may be incorrect.', v_geom_type;
+          END IF;
+          
+          IF v_point IS NOT NULL THEN
+            v_track_distance := ST_Distance(v_point, v_hazard_geometry);
+          ELSE
+            -- Use boundary geometry if point not available
+            v_track_distance := ST_Distance(v_boundary_geom, v_hazard_geometry);
+          END IF;
+          
+          -- Debug: Log distance for first few locations to verify calculation
+          IF v_processed_count <= 5 THEN
+            RAISE NOTICE 'Admin %: distance to track = % meters (%.2f km), geometry type: %', 
+              v_admin_pcode, v_track_distance, v_track_distance / 1000.0, v_geom_type;
+          END IF;
+          
+          -- Additional check: if distance is 0 or very small, warn
+          IF v_track_distance < 100 AND v_processed_count <= 5 THEN
+            RAISE NOTICE 'Warning: Admin % has very small distance (%m) - check if track extraction worked correctly', 
+              v_admin_pcode, v_track_distance;
+          END IF;
+        END;
         
         -- Map distance to score using distance ranges
+        -- Ranges are in meters (converted from km in frontend)
         v_score := NULL;
         FOR v_range IN SELECT * FROM jsonb_array_elements(in_distance_ranges)
         LOOP
-          IF v_track_distance >= (v_range->>'min')::NUMERIC 
-             AND v_track_distance < (v_range->>'max')::NUMERIC THEN
-            v_score := (v_range->>'score')::NUMERIC;
-            EXIT;
-          END IF;
+          DECLARE
+            v_range_min NUMERIC := (v_range->>'min')::NUMERIC;
+            v_range_max NUMERIC := (v_range->>'max')::NUMERIC;
+          BEGIN
+            -- Check if distance falls within this range
+            -- Note: ranges should be non-overlapping with min inclusive, max exclusive
+            IF v_track_distance >= v_range_min AND v_track_distance < v_range_max THEN
+              v_score := (v_range->>'score')::NUMERIC;
+              -- Debug for first few locations
+              IF v_processed_count <= 5 THEN
+                RAISE NOTICE 'Admin %: distance %m (%.2f km) matches range [%, %)m, score = %', 
+                  v_admin_pcode, v_track_distance, v_track_distance / 1000.0, v_range_min, v_range_max, v_score;
+              END IF;
+              EXIT;
+            END IF;
+          END;
         END LOOP;
 
         -- If no range matched, use the last range (furthest = lowest score)
         IF v_score IS NULL THEN
-          v_range := (SELECT jsonb_array_elements(in_distance_ranges) ORDER BY (value->>'max')::NUMERIC DESC LIMIT 1);
-          v_score := (v_range->>'score')::NUMERIC;
+          -- Find the range with the highest max value
+          SELECT * INTO v_range 
+          FROM jsonb_array_elements(in_distance_ranges) 
+          ORDER BY (value->>'max')::NUMERIC DESC 
+          LIMIT 1;
+          
+          IF v_range IS NOT NULL THEN
+            v_score := (v_range->>'score')::NUMERIC;
+            IF v_processed_count <= 5 THEN
+              RAISE NOTICE 'Admin %: distance %m (%.2f km) did not match any range, using last range score = %', 
+                v_admin_pcode, v_track_distance, v_track_distance / 1000.0, v_score;
+            END IF;
+          ELSE
+            -- Fallback: if no ranges at all, default to score 1
+            v_score := 1;
+            RAISE NOTICE 'Admin %: No distance ranges found, defaulting to score 1', v_admin_pcode;
+          END IF;
         END IF;
 
         -- Insert or update score
