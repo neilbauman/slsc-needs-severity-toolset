@@ -115,10 +115,17 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
         if (allScores) {
           const dist: ScoreDistribution = { score1: 0, score2: 0, score3: 0, score4: 0, score5: 0 };
           allScores.forEach((s: any) => {
-            const score = Math.round(Number(s.avg_score));
-            if (score >= 1 && score <= 5) {
-              dist[`score${score}` as keyof ScoreDistribution]++;
-            }
+            const score = Number(s.avg_score);
+            if (isNaN(score) || score < 1 || score > 5) return;
+            
+            // Use Math.floor to match the top panel's threshold logic
+            // Score >= 3.0 means it should be counted as Score 3 or higher
+            // Math.floor ensures: 2.9 → 2, 3.0 → 3, 3.9 → 3, 4.0 → 4
+            // This aligns with "Areas of Concern (≥3)" which counts exact scores >= 3.0
+            const scoreBucket = Math.floor(score);
+            // Clamp to valid range (1-5)
+            const bucket = Math.max(1, Math.min(5, scoreBucket));
+            dist[`score${bucket}` as keyof ScoreDistribution]++;
           });
           setScoreDistribution(dist);
         }
