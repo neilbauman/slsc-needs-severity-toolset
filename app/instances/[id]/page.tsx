@@ -70,6 +70,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [hazardEvents, setHazardEvents] = useState<any[]>([]);
   const [hazardEventLayers, setHazardEventLayers] = useState<any[]>([]);
   const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set()); // Track which hazard events are visible
+  const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string> }>>({}); // Feature-level filters per hazard event
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
 
   // Ensure instanceId exists
@@ -1301,29 +1302,57 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               {/* Render hazard event layers as overlays - only if visible */}
               {hazardEventLayers
                 .filter((layer) => visibleHazardEvents.has(layer.id))
-                .map((layer) => (
-                  <GeoJSON
-                    key={`hazard-${layer.id}`}
-                    data={layer.geojson as GeoJSON.FeatureCollection}
-                    style={(feature: any) => {
+                .map((layer) => {
+                  const filter = hazardEventFilters[layer.id] || {};
+                  // Filter features based on magnitude range or visible feature IDs
+                  const filteredFeatures = (layer.geojson as GeoJSON.FeatureCollection).features.filter((feature: any, idx: number) => {
+                    // Check magnitude range filter
+                    if (filter.minMagnitude !== undefined || filter.maxMagnitude !== undefined) {
                       const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
-                      const color = feature?.properties?.color || '#ff0000';
-                      const weight = feature?.properties?.weight || 2;
-                      return {
-                        color: color,
-                        weight: weight,
-                        opacity: 0.7,
-                      };
-                    }}
-                    onEachFeature={(feature, leafletLayer) => {
-                      const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
-                      const units = feature?.properties?.units || '';
-                      leafletLayer.bindPopup(
-                        `<strong>${layer.name}</strong><br/>Magnitude: ${magnitude} ${units}`
-                      );
-                    }}
-                  />
-                ))}
+                      const magValue = Number(magnitude);
+                      if (!isNaN(magValue)) {
+                        if (filter.minMagnitude !== undefined && magValue < filter.minMagnitude) return false;
+                        if (filter.maxMagnitude !== undefined && magValue > filter.maxMagnitude) return false;
+                      }
+                    }
+                    // Check feature ID filter (if specific features are selected)
+                    if (filter.visibleFeatureIds && filter.visibleFeatureIds.size > 0) {
+                      // Use feature index as ID if no explicit ID exists
+                      const featureId = feature?.id || feature?.properties?.id || `feature-${idx}`;
+                      if (!filter.visibleFeatureIds.has(featureId)) return false;
+                    }
+                    return true;
+                  });
+
+                  const filteredGeoJSON: GeoJSON.FeatureCollection = {
+                    type: 'FeatureCollection',
+                    features: filteredFeatures,
+                  };
+
+                  return (
+                    <GeoJSON
+                      key={`hazard-${layer.id}`}
+                      data={filteredGeoJSON}
+                      style={(feature: any) => {
+                        const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
+                        const color = feature?.properties?.color || '#ff0000';
+                        const weight = feature?.properties?.weight || 2;
+                        return {
+                          color: color,
+                          weight: weight,
+                          opacity: 0.7,
+                        };
+                      }}
+                      onEachFeature={(feature, leafletLayer) => {
+                        const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
+                        const units = feature?.properties?.units || '';
+                        leafletLayer.bindPopup(
+                          `<strong>${layer.name}</strong><br/>Magnitude: ${magnitude} ${units}`
+                        );
+                      }}
+                    />
+                  );
+                })}
             </MapContainer>
           )}
         </div>
@@ -1402,7 +1431,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             />
             {/* Hazard Event Actions */}
             {selectedHazardEvent && (
-              <div className="mt-2 pt-2 border-t">
+              <div className="mt-2 pt-2 border-t space-y-2">
                 <button
                   onClick={() => setShowHazardScoringModal(true)}
                   className="btn btn-primary w-full text-xs py-1 px-2"
@@ -1410,6 +1439,167 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 >
                   Score Hazard Event
                 </button>
+                
+                {/* Feature Filter Panel */}
+                {(() => {
+                  const layer = hazardEventLayers.find(l => l.id === selectedHazardEvent.id);
+                  if (!layer || !layer.geojson?.features) return null;
+                  
+                  const features = layer.geojson.features;
+                  const magnitudeField = layer.magnitude_field || 'value';
+                  const filter = hazardEventFilters[selectedHazardEvent.id] || {};
+                  
+                  // Get unique magnitude values for range selection
+                  const magnitudes = features
+                    .map((f: any) => Number(f?.properties?.[magnitudeField] || f?.properties?.value))
+                    .filter((m: number) => !isNaN(m))
+                    .sort((a: number, b: number) => a - b);
+                  const minMag = magnitudes.length > 0 ? Math.min(...magnitudes) : undefined;
+                  const maxMag = magnitudes.length > 0 ? Math.max(...magnitudes) : undefined;
+                  
+                  return (
+                    <div className="border rounded p-2 bg-gray-50 text-xs">
+                      <div className="font-semibold mb-2">Filter Features</div>
+                      
+                      {/* Magnitude Range Filter */}
+                      {minMag !== undefined && maxMag !== undefined && (
+                        <div className="space-y-1 mb-2">
+                          <label className="block text-xs font-medium">Magnitude Range:</label>
+                          <div className="flex gap-1 items-center">
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={filter.minMagnitude ?? minMag}
+                              onChange={(e) => {
+                                const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                setHazardEventFilters(prev => ({
+                                  ...prev,
+                                  [selectedHazardEvent.id]: {
+                                    ...prev[selectedHazardEvent.id],
+                                    minMagnitude: val,
+                                  }
+                                }));
+                              }}
+                              className="border rounded px-1 py-0.5 w-16 text-xs"
+                              placeholder="Min"
+                              min={minMag}
+                              max={maxMag}
+                            />
+                            <span className="text-gray-500">to</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={filter.maxMagnitude ?? maxMag}
+                              onChange={(e) => {
+                                const val = e.target.value ? parseFloat(e.target.value) : undefined;
+                                setHazardEventFilters(prev => ({
+                                  ...prev,
+                                  [selectedHazardEvent.id]: {
+                                    ...prev[selectedHazardEvent.id],
+                                    maxMagnitude: val,
+                                  }
+                                }));
+                              }}
+                              className="border rounded px-1 py-0.5 w-16 text-xs"
+                              placeholder="Max"
+                              min={minMag}
+                              max={maxMag}
+                            />
+                            <button
+                              onClick={() => {
+                                setHazardEventFilters(prev => {
+                                  const newFilters = { ...prev };
+                                  delete newFilters[selectedHazardEvent.id];
+                                  return newFilters;
+                                });
+                              }}
+                              className="text-xs px-1 py-0.5 bg-gray-200 hover:bg-gray-300 rounded"
+                              title="Clear filters"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Showing {features.filter((f: any) => {
+                              const mag = Number(f?.properties?.[magnitudeField] || f?.properties?.value);
+                              if (isNaN(mag)) return true;
+                              const min = filter.minMagnitude ?? minMag;
+                              const max = filter.maxMagnitude ?? maxMag;
+                              return mag >= min && mag <= max;
+                            }).length} of {features.length} features
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Feature List (for small datasets) */}
+                      {features.length <= 20 && (
+                        <div className="mt-2 max-h-32 overflow-y-auto">
+                          <div className="font-medium mb-1">Individual Features:</div>
+                          {features.map((feature: any, idx: number) => {
+                            const featureId = feature?.id || feature?.properties?.id || `feature-${idx}`;
+                            const magnitude = feature?.properties?.[magnitudeField] || feature?.properties?.value;
+                            const isVisible = !filter.visibleFeatureIds || filter.visibleFeatureIds.size === 0 || filter.visibleFeatureIds.has(featureId);
+                            
+                            return (
+                              <label key={idx} className="flex items-center gap-1 text-xs cursor-pointer hover:bg-gray-100 px-1 py-0.5 rounded">
+                                <input
+                                  type="checkbox"
+                                  checked={isVisible}
+                                  onChange={(e) => {
+                                    setHazardEventFilters(prev => {
+                                      const current = prev[selectedHazardEvent.id] || {};
+                                      const visibleIds = new Set(current.visibleFeatureIds || []);
+                                      
+                                      if (e.target.checked) {
+                                        // If this is the first feature being checked, show all by default
+                                        if (visibleIds.size === 0) {
+                                          // Don't add to set - empty set means all visible
+                                          return {
+                                            ...prev,
+                                            [selectedHazardEvent.id]: {
+                                              ...current,
+                                              visibleFeatureIds: new Set(), // Empty = all visible
+                                            }
+                                          };
+                                        } else {
+                                          visibleIds.add(featureId);
+                                        }
+                                      } else {
+                                        // If unchecking, we need to track which are hidden
+                                        // First time: add all others to visible set
+                                        if (visibleIds.size === 0) {
+                                          features.forEach((f: any, i: number) => {
+                                            const fid = f?.id || f?.properties?.id || `feature-${i}`;
+                                            if (fid !== featureId) visibleIds.add(fid);
+                                          });
+                                        } else {
+                                          visibleIds.delete(featureId);
+                                        }
+                                      }
+                                      
+                                      return {
+                                        ...prev,
+                                        [selectedHazardEvent.id]: {
+                                          ...current,
+                                          visibleFeatureIds: visibleIds,
+                                        }
+                                      };
+                                    });
+                                  }}
+                                  className="cursor-pointer"
+                                />
+                                <span className="flex-1">
+                                  Feature {idx + 1}
+                                  {magnitude !== undefined && ` (${magnitude})`}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
