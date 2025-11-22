@@ -53,11 +53,11 @@ export default function HazardEventScoringModal({
   const [distanceThreshold, setDistanceThreshold] = useState<number>(10000);
   const [scoringMode, setScoringMode] = useState<'magnitude' | 'distance'>('magnitude'); // 'magnitude' or 'distance'
   const [distanceRanges, setDistanceRanges] = useState<DistanceRange[]>([
-    { min: 0, max: 50000, score: 5 },      // 0-50km: highest risk
-    { min: 50000, max: 100000, score: 4 }, // 50-100km: high risk
-    { min: 100000, max: 200000, score: 3 }, // 100-200km: medium risk
-    { min: 200000, max: 300000, score: 2 }, // 200-300km: low risk
-    { min: 300000, max: 1000000, score: 1 }, // 300km+: minimal risk
+    { min: 0, max: 50, score: 5 },      // 0-50km: highest risk (stored as km, converted to meters)
+    { min: 50, max: 100, score: 4 }, // 50-100km: high risk
+    { min: 100, max: 200, score: 3 }, // 100-200km: medium risk
+    { min: 200, max: 300, score: 2 }, // 200-300km: low risk
+    { min: 300, max: 1000, score: 1 }, // 300km+: minimal risk
   ]);
 
   // Detect scoring mode and load statistics
@@ -155,7 +155,13 @@ export default function HazardEventScoringModal({
           setRanges(cfg.ranges);
         }
         if (cfg.distance_ranges) {
-          setDistanceRanges(cfg.distance_ranges);
+          // Convert saved meters to km for display
+          const rangesInKm = cfg.distance_ranges.map((r: any) => ({
+            min: (r.min || 0) / 1000,
+            max: (r.max || 0) / 1000,
+            score: r.score,
+          }));
+          setDistanceRanges(rangesInKm);
         }
         if (cfg.scoring_mode) {
           setScoringMode(cfg.scoring_mode);
@@ -186,7 +192,8 @@ export default function HazardEventScoringModal({
       const parsed = value === '' ? '' : Math.max(1, Math.min(5, parseInt(value) || 1));
       newRanges[index].score = parsed;
     } else {
-      const parsed = parseFloat(value) || 0;
+      // For distance fields, parse as float (in km)
+      const parsed = value === '' ? 0 : parseFloat(value) || 0;
       newRanges[index][field] = parsed;
     }
     setDistanceRanges(newRanges);
@@ -203,7 +210,7 @@ export default function HazardEventScoringModal({
       const lastRange = distanceRanges[distanceRanges.length - 1];
       setDistanceRanges([
         ...distanceRanges,
-        { min: lastRange.max, max: lastRange.max + 50000, score: '' },
+        { min: lastRange.max, max: lastRange.max + 50, score: '' }, // Add 50km increments
       ]);
     }
   };
@@ -280,7 +287,13 @@ export default function HazardEventScoringModal({
     setSaving(true);
     const config = {
       ranges: scoringMode === 'magnitude' ? ranges.filter(r => r.score !== '') : null,
-      distance_ranges: scoringMode === 'distance' ? distanceRanges.filter(r => r.score !== '') : null,
+      distance_ranges: scoringMode === 'distance' 
+        ? distanceRanges.filter(r => r.score !== '').map(r => ({
+            min: r.min * 1000, // Convert km to meters for storage
+            max: r.max * 1000,
+            score: r.score,
+          }))
+        : null,
       scoring_mode: scoringMode,
     };
 
@@ -368,12 +381,12 @@ export default function HazardEventScoringModal({
       // Don't include in_distance_ranges for magnitude-based scoring
       delete rpcParams.in_distance_ranges;
     } else {
-      // Distance-based scoring
+      // Distance-based scoring - convert km to meters for backend
       const distRanges = distanceRanges
         .filter((r) => r.score !== '')
         .map((r) => ({
-          min: Number(r.min),
-          max: Number(r.max),
+          min: Number(r.min) * 1000, // Convert km to meters
+          max: Number(r.max) * 1000, // Convert km to meters
           score: Number(r.score),
         }));
       rpcParams.in_distance_ranges = distRanges;
@@ -552,10 +565,10 @@ export default function HazardEventScoringModal({
             <thead>
               <tr className="bg-gray-100 border-b">
                 <th className="text-left p-2 font-medium">
-                  {scoringMode === 'magnitude' ? 'Min' : 'Min (meters)'}
+                  {scoringMode === 'magnitude' ? 'Min' : 'Min (km)'}
                 </th>
                 <th className="text-left p-2 font-medium">
-                  {scoringMode === 'magnitude' ? 'Max' : 'Max (meters)'}
+                  {scoringMode === 'magnitude' ? 'Max' : 'Max (km)'}
                 </th>
                 <th className="text-left p-2 font-medium w-32">Score (1–5)</th>
                 <th className="text-left p-2 font-medium w-20">Actions</th>
@@ -567,33 +580,47 @@ export default function HazardEventScoringModal({
                   <td className="p-2">
                     <input
                       type="number"
-                      step={scoringMode === 'magnitude' ? "0.1" : "1000"}
+                      step={scoringMode === 'magnitude' ? "0.1" : "1"}
                       value={range.min}
                       onChange={(e) => scoringMode === 'magnitude' 
                         ? handleRangeChange(i, 'min', e.target.value)
                         : handleDistanceRangeChange(i, 'min', e.target.value)}
                       className="border border-gray-300 rounded px-2 py-1 w-24"
+                      style={{ 
+                        // Remove spinner arrows for better typing experience
+                        MozAppearance: 'textfield',
+                        WebkitAppearance: 'none',
+                      }}
+                      onWheel={(e) => {
+                        // Prevent accidental changes when scrolling
+                        e.currentTarget.blur();
+                      }}
                     />
                     {scoringMode === 'distance' && (
-                      <span className="text-xs text-gray-500 ml-1">
-                        ({(range.min / 1000).toFixed(0)}km)
-                      </span>
+                      <span className="text-xs text-gray-500 ml-1">km</span>
                     )}
                   </td>
                   <td className="p-2">
                     <input
                       type="number"
-                      step={scoringMode === 'magnitude' ? "0.1" : "1000"}
+                      step={scoringMode === 'magnitude' ? "0.1" : "1"}
                       value={range.max}
                       onChange={(e) => scoringMode === 'magnitude'
                         ? handleRangeChange(i, 'max', e.target.value)
                         : handleDistanceRangeChange(i, 'max', e.target.value)}
                       className="border border-gray-300 rounded px-2 py-1 w-24"
+                      style={{ 
+                        // Remove spinner arrows for better typing experience
+                        MozAppearance: 'textfield',
+                        WebkitAppearance: 'none',
+                      }}
+                      onWheel={(e) => {
+                        // Prevent accidental changes when scrolling
+                        e.currentTarget.blur();
+                      }}
                     />
                     {scoringMode === 'distance' && (
-                      <span className="text-xs text-gray-500 ml-1">
-                        ({(range.max / 1000).toFixed(0)}km)
-                      </span>
+                      <span className="text-xs text-gray-500 ml-1">km</span>
                     )}
                   </td>
                   <td className="p-2">
@@ -626,7 +653,7 @@ export default function HazardEventScoringModal({
           <p className="text-xs text-gray-600 mt-2">
             {scoringMode === 'magnitude' 
               ? 'Ranges should be non-overlapping and cover the full magnitude range. Higher magnitudes should map to higher scores (5 = most vulnerable).'
-              : 'Ranges should be non-overlapping and cover the full distance range. Closer distances should map to higher scores (5 = most vulnerable). Distance is measured from the admin area to the nearest point on the storm track.'}
+              : 'Ranges should be non-overlapping and cover the full distance range. Closer distances should map to higher scores (5 = most vulnerable). Distance is measured in kilometers from the admin area to the nearest point on the storm track.'}
           </p>
         </div>
 
