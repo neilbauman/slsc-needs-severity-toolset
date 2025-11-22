@@ -9,6 +9,7 @@ interface MetricsData {
   people_need: number;
   avg_severity?: number;
   high_severity_count?: number;
+  areas_of_concern_count?: number;
   total_affected_locations?: number;
 }
 
@@ -53,6 +54,7 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
         // Also get additional metrics from overall scores
         let avgSeverity = null;
         let highSeverityCount = null;
+        let areasOfConcernCount = null; // Locations with severity ≥ 3
         let totalAffectedLocations = null;
 
         try {
@@ -95,6 +97,7 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
             if (validScores.length > 0) {
               avgSeverity = validScores.reduce((sum: number, s: number) => sum + s, 0) / validScores.length;
               highSeverityCount = validScores.filter((s: number) => s >= 4).length;
+              areasOfConcernCount = validScores.filter((s: number) => s >= 3).length; // Locations with severity ≥ 3
               
               // If totalAffectedLocations wasn't set from RPC, use distinct count from scores
               if (totalAffectedLocations === null) {
@@ -112,6 +115,7 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
           people_need: Number(summary.people_need) || 0,
           avg_severity: avgSeverity,
           high_severity_count: highSeverityCount,
+          areas_of_concern_count: areasOfConcernCount,
           total_affected_locations: totalAffectedLocations,
         });
       } catch (err: any) {
@@ -175,6 +179,7 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
     people_need,
     avg_severity,
     high_severity_count,
+    areas_of_concern_count,
     total_affected_locations,
   } = metrics;
 
@@ -292,7 +297,7 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
         </div>
       </div>
 
-      {/* High Severity Locations */}
+      {/* Areas of Concern */}
       <div 
         className="border rounded p-2 shadow-sm"
         style={{
@@ -304,19 +309,19 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
           className="text-xs font-medium uppercase tracking-wide mb-0.5"
           style={{ color: 'var(--gsc-orange)' }}
         >
-          High Severity
+          Areas of Concern
         </div>
         <div 
           className="text-lg font-bold"
           style={{ color: 'var(--gsc-orange)' }}
         >
-          {formatNumber(high_severity_count)}
+          {formatNumber(areas_of_concern_count)}
         </div>
         <div 
           className="text-xs mt-0.5"
           style={{ color: 'var(--gsc-gray)' }}
         >
-          Locations (≥ 4) {total_affected_locations ? `(${formatPercentage(high_severity_count, total_affected_locations)})` : ''}
+          Severity ≥ 3 {total_affected_locations ? `(${formatPercentage(areas_of_concern_count, total_affected_locations)})` : ''}
         </div>
       </div>
 
