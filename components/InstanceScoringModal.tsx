@@ -55,7 +55,7 @@ export default function InstanceScoringModal({
   
   const [categories, setCategories] = useState<Record<string, CategoryData>>({});
   const [weights, setWeights] = useState<Record<string, number>>({});
-  const [method, setMethod] = useState<'mean' | 'weighted_mean' | '20_percent' | 'custom'>(
+  const [method, setMethod] = useState<'mean' | 'weighted_mean' | 'compounding_hazards' | '20_percent' | 'custom'>(
     'weighted_mean'
   );
   const [loading, setLoading] = useState(false);
@@ -771,6 +771,7 @@ export default function InstanceScoringModal({
           >
             <option value="mean">Simple average</option>
             <option value="weighted_mean">Weighted mean</option>
+            <option value="compounding_hazards">Compounding Hazards (normalized sum + bonus)</option>
             <option value="20_percent">20% rule (≥20%)</option>
             <option value="custom">Custom % rule</option>
           </select>

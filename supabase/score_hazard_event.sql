@@ -150,13 +150,16 @@ BEGIN
           -- Combine LineStrings using ST_Collect (creates MultiLineString if multiple, LineString if single)
           IF array_length(v_line_geoms, 1) = 1 THEN
             v_hazard_geometry := v_line_geoms[1];
+            RAISE NOTICE 'Using single LineString geometry';
           ELSIF array_length(v_line_geoms, 1) > 1 THEN
-            -- Use ST_Collect with unnest to combine LineStrings into MultiLineString
-            -- This properly combines multiple LineStrings for distance calculation
-            SELECT ST_Collect(geom)::GEOGRAPHY INTO v_hazard_geometry
+            -- Use ST_Collect with a subquery to combine LineStrings into MultiLineString
+            -- Convert to GEOMETRY for ST_Collect, then cast back to GEOGRAPHY
+            SELECT ST_Collect(geom::GEOMETRY)::GEOGRAPHY INTO v_hazard_geometry
             FROM unnest(v_line_geoms) AS geom;
+            
+            RAISE NOTICE 'Combined % LineStrings into MultiLineString', array_length(v_line_geoms, 1);
           ELSE
-            RAISE EXCEPTION 'No valid LineString geometries found';
+            RAISE EXCEPTION 'No valid LineString geometries found after conversion';
           END IF;
           
           RAISE NOTICE 'Extracted % LineString features for track distance calculation, geometry type: %', 
@@ -300,14 +303,23 @@ BEGIN
         -- For LineString/MultiLineString, ST_Distance returns the minimum distance to any point on the line
         DECLARE
           v_geom_type TEXT;
+          v_is_valid BOOLEAN;
         BEGIN
-          v_geom_type := ST_GeometryType(v_hazard_geometry::GEOMETRY);
-          
-          -- Verify we're using a LineString type, not a Polygon
-          IF v_geom_type NOT LIKE '%Line%' THEN
-            RAISE WARNING 'Warning: Track geometry is not a LineString (type: %). Distance calculation may be incorrect.', v_geom_type;
+          -- Verify v_hazard_geometry is set and is a LineString type
+          IF v_hazard_geometry IS NULL THEN
+            RAISE EXCEPTION 'CRITICAL: v_hazard_geometry is NULL! Track extraction must have failed.';
           END IF;
           
+          v_geom_type := ST_GeometryType(v_hazard_geometry::GEOMETRY);
+          v_is_valid := (v_geom_type LIKE '%Line%');
+          
+          -- Verify we're using a LineString type, not a Polygon
+          IF NOT v_is_valid THEN
+            RAISE EXCEPTION 'CRITICAL ERROR: Track geometry is not a LineString type: %. Cannot calculate distances. Expected LineString/MultiLineString but got: %', 
+              v_geom_type, v_geom_type;
+          END IF;
+          
+          -- Calculate distance
           IF v_point IS NOT NULL THEN
             v_track_distance := ST_Distance(v_point, v_hazard_geometry);
           ELSE
@@ -321,10 +333,10 @@ BEGIN
               v_admin_pcode, v_track_distance, v_track_distance / 1000.0, v_geom_type;
           END IF;
           
-          -- Additional check: if distance is 0 or very small, warn
-          IF v_track_distance < 100 AND v_processed_count <= 5 THEN
-            RAISE NOTICE 'Warning: Admin % has very small distance (%m) - check if track extraction worked correctly', 
-              v_admin_pcode, v_track_distance;
+          -- Critical check: if distance is 0, this is likely wrong (point should not be exactly on track)
+          IF v_track_distance = 0 AND v_processed_count <= 10 THEN
+            RAISE WARNING 'CRITICAL: Admin % has distance 0 - this suggests the point is on the track or geometry extraction failed!', 
+              v_admin_pcode;
           END IF;
         END;
         

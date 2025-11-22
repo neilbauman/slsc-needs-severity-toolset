@@ -95,15 +95,31 @@ BEGIN
     WHERE instance_id = v_instance_id;
 
     -- Build config with weighted_mean method and loaded weights
-    v_config := jsonb_build_object(
-      'categories', jsonb_build_array(
-        jsonb_build_object('key', 'SSC Framework - P1', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-        jsonb_build_object('key', 'SSC Framework - P2', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-        jsonb_build_object('key', 'SSC Framework - P3', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-        jsonb_build_object('key', 'Hazard', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-        jsonb_build_object('key', 'Underlying Vulnerability', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb))
-      )
-    );
+    -- For Hazard category, automatically use compounding_hazards if multiple hazard events exist
+    DECLARE
+      v_hazard_event_count INTEGER;
+      v_hazard_method TEXT;
+    BEGIN
+      SELECT COUNT(*) INTO v_hazard_event_count
+      FROM hazard_events
+      WHERE instance_id = v_instance_id;
+      
+      -- Use compounding_hazards if multiple hazard events, otherwise weighted_mean
+      v_hazard_method := CASE 
+        WHEN v_hazard_event_count > 1 THEN 'compounding_hazards'
+        ELSE 'weighted_mean'
+      END;
+      
+      v_config := jsonb_build_object(
+        'categories', jsonb_build_array(
+          jsonb_build_object('key', 'SSC Framework - P1', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'SSC Framework - P2', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'SSC Framework - P3', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'Hazard', 'method', v_hazard_method, 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'Underlying Vulnerability', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb))
+        )
+      );
+    END;
   END IF;
 
   -- Process each category using bulk operations
@@ -128,6 +144,32 @@ BEGIN
             WHEN SUM(weight) > 0 THEN SUM(score * weight) / SUM(weight)
             ELSE NULL
           END
+        WHEN v_method = 'compounding_hazards' THEN
+          -- Special method for compounding hazards (e.g., earthquake + typhoon)
+          -- Normalizes scores to 0-1, applies weights, sums, adds compounding bonus, scales to 1-5
+          -- Formula: 
+          --   1. Normalize each score: (score - 1) / 4 (maps 1→0, 5→1)
+          --   2. Weighted average of normalized scores
+          --   3. Add compounding bonus: product of normalized scores * 0.5 (emphasizes areas hit by both)
+          --   4. Scale back: (normalized_total * 4) + 1, capped at 5
+          CASE
+            WHEN COUNT(*) > 1 THEN
+              -- Multiple hazards: use compounding formula
+              -- Calculate weighted average of normalized scores
+              -- Then add compounding bonus (product of normalized scores * 0.5)
+              LEAST(5.0, GREATEST(1.0,
+                (
+                  -- Weighted average of normalized scores
+                  (SUM((score - 1.0) / 4.0 * weight) / NULLIF(SUM(weight), 0))
+                  -- Compounding bonus: product of normalized scores * 0.5
+                  -- (This emphasizes areas hit by both hazards)
+                  + (EXP(SUM(LN(GREATEST((score - 1.0) / 4.0, 0.01))))) * 0.5
+                ) * 4.0 + 1.0
+              ))
+            ELSE
+              -- Single hazard: just normalize and scale back (no compounding)
+              LEAST(5.0, GREATEST(1.0, ((score - 1.0) / 4.0) * 4.0 + 1.0))
+          END
         WHEN v_method = 'worst_case' THEN
           MAX(score)
         WHEN v_method = 'best_case' THEN
@@ -141,7 +183,7 @@ BEGIN
         ids.admin_pcode,
         ids.score,
         CASE 
-          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean') AND v_weights ? ids.dataset_id::TEXT 
+          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean' OR v_method = 'compounding_hazards') AND v_weights ? ids.dataset_id::TEXT 
           THEN (v_weights->ids.dataset_id::TEXT)::NUMERIC
           ELSE 1.0
         END AS weight
@@ -159,7 +201,7 @@ BEGIN
         hes.admin_pcode,
         hes.score,
         CASE 
-          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean') AND v_weights ? ('hazard_event_' || hes.hazard_event_id::TEXT)
+          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean' OR v_method = 'compounding_hazards') AND v_weights ? ('hazard_event_' || hes.hazard_event_id::TEXT)
           THEN (v_weights->('hazard_event_' || hes.hazard_event_id::TEXT))::NUMERIC
           ELSE 1.0
         END AS weight
