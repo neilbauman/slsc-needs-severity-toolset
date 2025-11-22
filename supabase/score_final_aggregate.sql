@@ -72,6 +72,23 @@ BEGIN
   -- Debug: Log the weights being used
   RAISE NOTICE 'Category weights - Framework: %, Hazard: %, UV: %', v_framework_weight, v_hazard_weight, v_uv_weight;
   
+  -- Debug: Log how many scores exist for each category
+  SELECT COUNT(*) INTO v_location_count FROM instance_category_scores 
+    WHERE instance_id = in_instance_id AND category = 'SSC Framework';
+  RAISE NOTICE 'SSC Framework scores found: %', v_location_count;
+  
+  SELECT COUNT(*) INTO v_location_count FROM instance_category_scores 
+    WHERE instance_id = in_instance_id AND category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3');
+  RAISE NOTICE 'P1/P2/P3 scores found: %', v_location_count;
+  
+  SELECT COUNT(*) INTO v_location_count FROM instance_category_scores 
+    WHERE instance_id = in_instance_id AND category = 'Hazard';
+  RAISE NOTICE 'Hazard scores found: %', v_location_count;
+  
+  SELECT COUNT(*) INTO v_location_count FROM instance_category_scores 
+    WHERE instance_id = in_instance_id AND category = 'Underlying Vulnerability';
+  RAISE NOTICE 'UV scores found: %', v_location_count;
+  
   -- If all weights are 0, use equal weights as fallback (shouldn't happen if weights are saved)
   IF v_framework_weight = 0.0 AND v_hazard_weight = 0.0 AND v_uv_weight = 0.0 THEN
     RAISE NOTICE 'All category weights are 0, using equal weights as fallback';
@@ -103,32 +120,34 @@ BEGIN
             THEN v_hazard_weight ELSE 0 END +
        CASE WHEN v_uv_weight > 0 AND MAX(uv_score) IS NOT NULL 
             THEN v_uv_weight ELSE 0 END) AS total_weight,
-      -- Count components for fallback calculation
-      (CASE WHEN MAX(framework_score) IS NOT NULL THEN 1 ELSE 0 END +
-       CASE WHEN MAX(hazard_score) IS NOT NULL THEN 1 ELSE 0 END +
-       CASE WHEN MAX(uv_score) IS NOT NULL THEN 1 ELSE 0 END) AS component_count
+      -- Count components for fallback calculation (only count categories with non-zero weights)
+      (CASE WHEN v_framework_weight > 0 AND MAX(framework_score) IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN v_hazard_weight > 0 AND MAX(hazard_score) IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN v_uv_weight > 0 AND MAX(uv_score) IS NOT NULL THEN 1 ELSE 0 END) AS component_count
     FROM (
-      -- Get framework score (only if framework_weight > 0)
+      -- Get framework score (ONLY if framework_weight > 0 - completely exclude if weight is 0)
       SELECT 
         admin_pcode,
-        CASE WHEN v_framework_weight > 0 THEN score ELSE NULL END AS framework_score,
+        score AS framework_score,
         NULL::NUMERIC AS hazard_score,
         NULL::NUMERIC AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
         AND category = 'SSC Framework'
+        AND v_framework_weight > 0  -- Only include if weight > 0
       
       UNION ALL
       
-      -- If no 'SSC Framework', calculate from P1, P2, P3 (only if framework_weight > 0)
+      -- If no 'SSC Framework', calculate from P1, P2, P3 (ONLY if framework_weight > 0)
       SELECT 
         admin_pcode,
-        CASE WHEN v_framework_weight > 0 THEN AVG(score) ELSE NULL END AS framework_score,
+        AVG(score) AS framework_score,
         NULL::NUMERIC AS hazard_score,
         NULL::NUMERIC AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
         AND category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3')
+        AND v_framework_weight > 0  -- Only include if weight > 0
         AND NOT EXISTS (
           SELECT 1 FROM instance_category_scores 
           WHERE instance_id = in_instance_id 
@@ -139,27 +158,29 @@ BEGIN
       
       UNION ALL
       
-      -- Get hazard score (only if hazard_weight > 0)
+      -- Get hazard score (ONLY if hazard_weight > 0 - completely exclude if weight is 0)
       SELECT 
         admin_pcode,
         NULL::NUMERIC AS framework_score,
-        CASE WHEN v_hazard_weight > 0 THEN score ELSE NULL END AS hazard_score,
+        score AS hazard_score,
         NULL::NUMERIC AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
         AND category = 'Hazard'
+        AND v_hazard_weight > 0  -- Only include if weight > 0
       
       UNION ALL
       
-      -- Get underlying vulnerability score (only if uv_weight > 0)
+      -- Get underlying vulnerability score (ONLY if uv_weight > 0 - completely exclude if weight is 0)
       SELECT 
         admin_pcode,
         NULL::NUMERIC AS framework_score,
         NULL::NUMERIC AS hazard_score,
-        CASE WHEN v_uv_weight > 0 THEN score ELSE NULL END AS uv_score
+        score AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
         AND category = 'Underlying Vulnerability'
+        AND v_uv_weight > 0  -- Only include if weight > 0
     ) AS category_scores
     GROUP BY admin_pcode
     HAVING COUNT(*) > 0 -- Only include admin areas with at least one category score
