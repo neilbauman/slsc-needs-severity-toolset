@@ -69,6 +69,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [selectedHazardEvent, setSelectedHazardEvent] = useState<any>(null);
   const [hazardEvents, setHazardEvents] = useState<any[]>([]);
   const [hazardEventLayers, setHazardEventLayers] = useState<any[]>([]);
+  const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set()); // Track which hazard events are visible
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
 
   // Ensure instanceId exists
@@ -1297,30 +1298,32 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   onEachFeature={onEachFeature}
                 />
               )}
-              {/* Render hazard event layers as overlays */}
-              {hazardEventLayers.map((layer) => (
-                <GeoJSON
-                  key={`hazard-${layer.id}`}
-                  data={layer.geojson as GeoJSON.FeatureCollection}
-                  style={(feature: any) => {
-                    const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
-                    const color = feature?.properties?.color || '#ff0000';
-                    const weight = feature?.properties?.weight || 2;
-                    return {
-                      color: color,
-                      weight: weight,
-                      opacity: 0.7,
-                    };
-                  }}
-                  onEachFeature={(feature, leafletLayer) => {
-                    const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
-                    const units = feature?.properties?.units || '';
-                    leafletLayer.bindPopup(
-                      `<strong>${layer.name}</strong><br/>Magnitude: ${magnitude} ${units}`
-                    );
-                  }}
-                />
-              ))}
+              {/* Render hazard event layers as overlays - only if visible */}
+              {hazardEventLayers
+                .filter((layer) => visibleHazardEvents.has(layer.id))
+                .map((layer) => (
+                  <GeoJSON
+                    key={`hazard-${layer.id}`}
+                    data={layer.geojson as GeoJSON.FeatureCollection}
+                    style={(feature: any) => {
+                      const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
+                      const color = feature?.properties?.color || '#ff0000';
+                      const weight = feature?.properties?.weight || 2;
+                      return {
+                        color: color,
+                        weight: weight,
+                        opacity: 0.7,
+                      };
+                    }}
+                    onEachFeature={(feature, leafletLayer) => {
+                      const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
+                      const units = feature?.properties?.units || '';
+                      leafletLayer.bindPopup(
+                        `<strong>${layer.name}</strong><br/>Magnitude: ${magnitude} ${units}`
+                      );
+                    }}
+                  />
+                ))}
             </MapContainer>
           )}
         </div>
@@ -1383,6 +1386,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   setSelectedHazardEvent(event);
                   setShowHazardScoringModal(true);
                 }
+              }}
+              visibleHazardEvents={visibleHazardEvents}
+              onToggleHazardEventVisibility={(hazardEventId, visible) => {
+                setVisibleHazardEvents(prev => {
+                  const newSet = new Set(prev);
+                  if (visible) {
+                    newSet.add(hazardEventId);
+                  } else {
+                    newSet.delete(hazardEventId);
+                  }
+                  return newSet;
+                });
               }}
             />
             {/* Hazard Event Actions */}

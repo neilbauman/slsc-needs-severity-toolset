@@ -7,9 +7,11 @@ export interface ScoreLayerSelectorProps {
   instanceId: string;
   onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
   onScoreHazardEvent?: (hazardEventId: string) => void; // Callback to open scoring modal
+  visibleHazardEvents?: Set<string>; // Set of visible hazard event IDs
+  onToggleHazardEventVisibility?: (hazardEventId: string, visible: boolean) => void; // Callback to toggle visibility
 }
 
-export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazardEvent }: ScoreLayerSelectorProps) {
+export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazardEvent, visibleHazardEvents, onToggleHazardEventVisibility }: ScoreLayerSelectorProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [categoryScores, setCategoryScores] = useState<Record<string, number>>({}); // Average scores per category
   const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
@@ -423,7 +425,24 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
                     }}
                   >
                   <div className="flex items-center justify-between w-full">
-                    <span>{d.dataset_name}</span>
+                    <div className="flex items-center gap-1.5 flex-1">
+                      {isHazardEvent && onToggleHazardEventVisibility && (
+                        <input
+                          type="checkbox"
+                          checked={visibleHazardEvents?.has(hazardEventId || '') ?? true}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            if (hazardEventId && onToggleHazardEventVisibility) {
+                              onToggleHazardEventVisibility(hazardEventId, e.target.checked);
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="cursor-pointer"
+                          title="Toggle visibility on map"
+                        />
+                      )}
+                      <span className="flex-1">{d.dataset_name}</span>
+                    </div>
                     <div className="flex items-center gap-1">
                       {isHazardEvent && onScoreHazardEvent && (
                         <button
