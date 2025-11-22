@@ -28,6 +28,10 @@ DECLARE
   v_affected_pcodes TEXT[];
   v_geom_column TEXT;
   v_boundary_geom GEOGRAPHY;
+  v_total_admin_areas INTEGER := 0;
+  v_processed_count INTEGER := 0;
+  v_skipped_no_geom INTEGER := 0;
+  v_skipped_no_magnitude INTEGER := 0;
 BEGIN
   -- Load hazard event
   SELECT * INTO v_hazard_event
@@ -71,8 +75,27 @@ BEGIN
   IF v_geom_column IS NULL THEN
     RETURN jsonb_build_object(
       'status', 'error',
-      'message', 'No geometry column found in admin_boundaries table (expected ''geom'' or ''geometry'')'
+      'message', 'No geometry column found in admin_boundaries table (expected ''geom'' or ''geometry'')',
+      'scored_locations', 0,
+      'average_score', 0
     );
+  END IF;
+  
+  -- Debug: Log geometry column found
+  RAISE NOTICE 'Using geometry column: %', v_geom_column;
+
+  -- Count total admin areas to process
+  SELECT COUNT(*) INTO v_total_admin_areas
+  FROM public.admin_boundaries ab
+  WHERE ab.admin_level = 'ADM3'
+    AND (
+      NOT in_limit_to_affected
+      OR ab.admin_pcode = ANY(v_affected_pcodes)
+    );
+  
+  RAISE NOTICE 'Processing % admin areas (limit_to_affected: %)', v_total_admin_areas, in_limit_to_affected;
+  IF in_limit_to_affected THEN
+    RAISE NOTICE 'Affected area codes count: %', COALESCE(array_length(v_affected_pcodes, 1), 0);
   END IF;
 
   -- For each admin area, find the nearest contour and extract magnitude
@@ -85,6 +108,7 @@ BEGIN
         OR ab.admin_pcode = ANY(v_affected_pcodes)
       )
   LOOP
+    v_processed_count := v_processed_count + 1;
     -- Get geometry for this admin boundary using the detected column name
     IF v_geom_column = 'geom' THEN
       SELECT geom::GEOGRAPHY INTO v_boundary_geom
@@ -100,6 +124,10 @@ BEGIN
     
     -- If no geometry, skip this admin area
     IF v_boundary_geom IS NULL THEN
+      v_skipped_no_geom := v_skipped_no_geom + 1;
+      IF v_processed_count <= 5 THEN
+        RAISE NOTICE 'Skipping admin_pcode %: no geometry found', v_admin_pcode;
+      END IF;
       CONTINUE;
     END IF;
     
@@ -201,14 +229,32 @@ BEGIN
 
       v_scored_count := v_scored_count + 1;
       v_total_score := v_total_score + v_score;
+    ELSE
+      v_skipped_no_magnitude := v_skipped_no_magnitude + 1;
+      IF v_processed_count <= 5 THEN
+        RAISE NOTICE 'Skipping admin_pcode %: no magnitude value found', v_admin_pcode;
+      END IF;
     END IF;
   END LOOP;
 
-  -- Return statistics
+  -- Log summary
+  RAISE NOTICE 'Scoring complete: % scored, % skipped (no geom), % skipped (no magnitude)', 
+    v_scored_count, v_skipped_no_geom, v_skipped_no_magnitude;
+
+  -- Return statistics with detailed info
   RETURN jsonb_build_object(
-    'status', 'success',
+    'status', CASE WHEN v_scored_count > 0 THEN 'success' ELSE 'warning' END,
     'scored_locations', v_scored_count,
-    'average_score', CASE WHEN v_scored_count > 0 THEN v_total_score / v_scored_count ELSE 0 END
+    'average_score', CASE WHEN v_scored_count > 0 THEN v_total_score / v_scored_count ELSE 0 END,
+    'total_admin_areas', v_processed_count,
+    'skipped_no_geometry', v_skipped_no_geom,
+    'skipped_no_magnitude', v_skipped_no_magnitude,
+    'message', CASE 
+      WHEN v_scored_count = 0 AND v_skipped_no_geom > 0 THEN 'No geometry found for admin boundaries'
+      WHEN v_scored_count = 0 AND v_skipped_no_magnitude > 0 THEN 'No magnitude values matched admin areas'
+      WHEN v_scored_count = 0 THEN 'No locations scored - check admin boundaries and magnitude ranges'
+      ELSE 'Scoring completed successfully'
+    END
   );
 END;
 $$;

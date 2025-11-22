@@ -288,8 +288,29 @@ export default function HazardEventScoringModal({
     // Check if scores were actually created
     if (data && typeof data === 'object') {
       const scoredLocations = data.scored_locations || data.scored_count || 0;
+      const totalAdminAreas = data.total_admin_areas || 0;
+      const skippedNoGeom = data.skipped_no_geometry || 0;
+      const skippedNoMagnitude = data.skipped_no_magnitude || 0;
+      const message = data.message || '';
+      
       if (scoredLocations === 0) {
-        setMessage(`⚠️ Warning: Scoring completed but no locations were scored. This might mean:\n- No admin boundaries found\n- No magnitude values matched the ranges\n- Geometry column not found in admin_boundaries table`);
+        let errorMsg = `⚠️ Warning: Scoring completed but no locations were scored.\n\n`;
+        errorMsg += `Total admin areas processed: ${totalAdminAreas}\n`;
+        if (skippedNoGeom > 0) {
+          errorMsg += `- ${skippedNoGeom} skipped (no geometry found)\n`;
+        }
+        if (skippedNoMagnitude > 0) {
+          errorMsg += `- ${skippedNoMagnitude} skipped (no magnitude value found)\n`;
+        }
+        if (message) {
+          errorMsg += `\nDetails: ${message}`;
+        }
+        errorMsg += `\n\nPossible causes:\n`;
+        errorMsg += `- Geometry column not found in admin_boundaries table\n`;
+        errorMsg += `- No admin boundaries match the affected area scope\n`;
+        errorMsg += `- Magnitude values from GeoJSON don't match admin area centroids\n`;
+        errorMsg += `- Magnitude field name mismatch (check metadata)`;
+        setMessage(errorMsg);
         setLoading(false);
         return;
       }
