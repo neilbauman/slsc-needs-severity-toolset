@@ -176,23 +176,15 @@ export default function InstanceScoringModal({
         return;
       }
 
-      // Only normalize if total is significantly different from 100%
-      if (Math.abs(total - 100) < 0.5) {
-        setIsNormalizing(false);
-        return; // Close enough, don't normalize
-      }
-
+      // Always normalize to ensure they sum to exactly 100%
       const newCats: Record<string, CategoryData> = { ...categories };
-      const step = 5;
       let sum = 0;
 
       Object.keys(newCats).forEach((cat) => {
         const catData = newCats[cat] as CategoryData;
         const currentWeight = catData.categoryWeight || 0;
-        const newWeight = snapToStep(
-          (currentWeight / total) * 100,
-          step
-        );
+        // Normalize proportionally to 100%
+        const newWeight = (currentWeight / total) * 100;
         catData.categoryWeight = newWeight;
         sum += newWeight;
       });
@@ -304,18 +296,56 @@ export default function InstanceScoringModal({
         })
       );
 
+      // Load category weights from saved data
+      const categoryWeightMap: Record<string, number> = {};
       const numCats = Object.keys(sorted).length;
+      
+      // Load category weights from saved weights (any dataset in the category will have the same category_weight)
+      (savedWeights || []).forEach((w: any) => {
+        if (w.category && w.category_weight !== undefined && w.category_weight !== null) {
+          // Store as percentage (0-100)
+          categoryWeightMap[w.category] = (w.category_weight ?? 0) * 100;
+        }
+      });
+      
+      // Also check hazard events for category weights
+      if (!hazardError && hazardEventsData && hazardEventsData.length > 0) {
+        hazardEventsData.forEach((event: any) => {
+          if (event.metadata?.category_weight !== undefined) {
+            categoryWeightMap['Hazard'] = (event.metadata.category_weight ?? 0) * 100;
+          }
+        });
+      }
+
+      // Initialize category weights - use saved values or equal distribution
       Object.keys(sorted).forEach((cat) => {
-        sorted[cat].categoryWeight = 100 / numCats;
+        if (categoryWeightMap[cat] !== undefined) {
+          sorted[cat].categoryWeight = categoryWeightMap[cat];
+        } else {
+          // Default to equal distribution if not saved
+          sorted[cat].categoryWeight = 100 / numCats;
+        }
+        
         const numDs = sorted[cat].datasets.length;
         sorted[cat].datasets.forEach((d) => {
-          if (!weightMap[d.id]) weightMap[d.id] = 100 / numDs;
+          if (!weightMap[d.id]) weightMap[d.id] = numDs > 0 ? 100 / numDs : 0;
         });
       });
+      
+      // Normalize category weights to ensure they sum to 100%
+      const totalCategoryWeight = Object.values(sorted).reduce((sum, catData) => {
+        return sum + (catData.categoryWeight || 0);
+      }, 0);
+      
+      if (totalCategoryWeight > 0 && Math.abs(totalCategoryWeight - 100) > 0.1) {
+        // Normalize to 100%
+        Object.keys(sorted).forEach((cat) => {
+          sorted[cat].categoryWeight = (sorted[cat].categoryWeight / totalCategoryWeight) * 100;
+        });
+      }
 
       setCategories(sorted);
       setWeights(weightMap);
-      normalizeAllCategories();
       
       // Load current scores for impact preview
       loadImpactPreview();
@@ -860,3 +890,4 @@ export default function InstanceScoringModal({
     </div>
   );
 }
+
