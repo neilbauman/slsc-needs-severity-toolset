@@ -10,6 +10,8 @@ import Link from "next/link";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceMetricsPanel from "@/components/InstanceMetricsPanel";
 import VulnerableLocationsPanel from "@/components/VulnerableLocationsPanel";
+import UploadHazardEventModal from "@/components/UploadHazardEventModal";
+import HazardEventScoringModal from "@/components/HazardEventScoringModal";
 
 // Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
@@ -57,7 +59,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showScoringModal, setShowScoringModal] = useState(false);
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
   const [showAffectedAreaModal, setShowAffectedAreaModal] = useState(false);
-  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string }>({ type: 'overall' });
+  const [showUploadHazardModal, setShowUploadHazardModal] = useState(false);
+  const [showHazardScoringModal, setShowHazardScoringModal] = useState(false);
+  const [selectedHazardEvent, setSelectedHazardEvent] = useState<any>(null);
+  const [hazardEvents, setHazardEvents] = useState<any[]>([]);
+  const [hazardEventLayers, setHazardEventLayers] = useState<any[]>([]);
+  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
 
   // Ensure instanceId exists
   const instanceId = params?.id;
@@ -172,6 +179,29 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         console.warn("Error fetching datasets:", e);
       }
       setDatasets(dsData);
+
+      // Load hazard events for this instance
+      const { data: hazardEventsData, error: hazardError } = await supabase
+        .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
+      
+      if (!hazardError && hazardEventsData) {
+        setHazardEvents(hazardEventsData);
+        
+        // Convert hazard events to map layers
+        const layers: any[] = [];
+        hazardEventsData.forEach((event: any) => {
+          if (event.geojson && event.geojson.features) {
+            layers.push({
+              id: event.id,
+              name: event.name,
+              geojson: event.geojson,
+              event_type: event.event_type,
+              magnitude_field: event.magnitude_field,
+            });
+          }
+        });
+        setHazardEventLayers(layers);
+      }
 
       // Load overall instance scores for initial view
       let parsed: any[] = [];
@@ -626,6 +656,80 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           // For now, fall back to dataset view
           await loadFeaturesForSelection({ type: 'dataset', datasetId: selection.datasetId }, overallFeatures);
         }
+      } else if (selection.type === 'hazard_event' && selection.hazardEventId) {
+        // Load hazard event scores
+        console.log(`Loading features for hazard event: ${selection.hazardEventId}`);
+        
+        const { data: scores, error: scoresError } = await supabase
+          .from("hazard_event_scores")
+          .select("admin_pcode, score, magnitude_value")
+          .eq("instance_id", instanceId)
+          .eq("hazard_event_id", selection.hazardEventId);
+
+        if (scoresError) {
+          console.error("Error fetching hazard event scores:", scoresError);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        // Create score map
+        const scoreMap = new Map(scores?.map((s: any) => [s.admin_pcode, Number(s.score)]) || []);
+        const magnitudeMap = new Map(scores?.map((s: any) => [s.admin_pcode, Number(s.magnitude_value)]) || []);
+        console.log(`Loaded ${scores?.length || 0} scores for hazard event ${selection.hazardEventId}`);
+        
+        // Get geometry from view
+        const { data: geoRows, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode, geojson")
+          .eq("instance_id", instanceId);
+        
+        if (geoError) {
+          console.error("Error fetching GeoJSON:", geoError);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        if (!geoRows || geoRows.length === 0) {
+          console.log("No GeoJSON features found for instance");
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        // Map scores to features
+        const hazardFeatures = geoRows
+          .map((row: any) => {
+            try {
+              const feature = typeof row.geojson === 'string' 
+                ? JSON.parse(row.geojson) 
+                : row.geojson;
+              
+              const hazardScore = scoreMap.get(row.admin_pcode);
+              const magnitudeValue = magnitudeMap.get(row.admin_pcode);
+              
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: row.admin_pcode,
+                  admin_name: feature.properties?.admin_name || feature.properties?.name,
+                  score: hazardScore,
+                  magnitude_value: magnitudeValue,
+                  has_score: hazardScore !== undefined,
+                }
+              };
+            } catch (e) {
+              console.warn("Error parsing GeoJSON feature:", e, row);
+              return null;
+            }
+          })
+          .filter((f: any) => f !== null);
+        
+        console.log(`Mapped ${hazardFeatures.length} features with hazard event scores`);
+        setFeatures([...hazardFeatures]);
+        setLoadingFeatures(false);
       }
     } catch (err) {
       console.error("Error loading features for selection:", err);
@@ -646,9 +750,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     if (!loading && instance && instanceId) {
       console.log("Selection changed, loading features:", selectedLayer);
       loadFeaturesForSelection(selectedLayer, overallFeatures);
+      
+      // Update selected hazard event if needed
+      if (selectedLayer.type === 'hazard_event' && selectedLayer.hazardEventId) {
+        const event = hazardEvents.find((e: any) => e.id === selectedLayer.hazardEventId);
+        if (event) {
+          setSelectedHazardEvent(event);
+        }
+      } else {
+        setSelectedHazardEvent(null);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category, selectedLayer.categoryName]);
+  }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category, selectedLayer.categoryName, selectedLayer.hazardEventId]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -690,6 +804,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         } else {
           layerName = `${selectedLayer.datasetName || 'Dataset'} - ${selectedLayer.category}`;
         }
+      } else if (selectedLayer.type === 'hazard_event') {
+        const event = hazardEvents.find((e: any) => e.id === selectedLayer.hazardEventId);
+        layerName = event?.name || 'Hazard Event Score';
       }
     
     if (hasScore && score !== null) {
@@ -707,10 +824,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       
       // Build tooltip text with name, raw value (if available), and score
       let tooltipText = `<strong>${adminName}</strong>`;
+      const magnitudeValue = feature.properties?.magnitude_value !== undefined ? Number(feature.properties.magnitude_value) : null;
       if (rawValue !== null) {
         // Format raw value appropriately (check if it's a percentage or regular number)
         const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
         tooltipText += `<br/>Value: ${formattedValue}`;
+      } else if (magnitudeValue !== null && selectedLayer.type === 'hazard_event') {
+        // For hazard events, show magnitude value
+        const formattedMagnitude = magnitudeValue % 1 === 0 ? magnitudeValue.toFixed(0) : magnitudeValue.toFixed(2);
+        tooltipText += `<br/>Magnitude: ${formattedMagnitude}`;
       }
       tooltipText += `<br/>${layerName}: ${score.toFixed(2)}`;
       
@@ -730,6 +852,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       if (rawValue !== null) {
         const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
         popupText += `<br/>Value: ${formattedValue}`;
+      } else if (magnitudeValue !== null && selectedLayer.type === 'hazard_event') {
+        const formattedMagnitude = magnitudeValue % 1 === 0 ? magnitudeValue.toFixed(0) : magnitudeValue.toFixed(2);
+        popupText += `<br/>Magnitude: ${formattedMagnitude}`;
       }
       popupText += `<br/>${layerName}: ${score.toFixed(2)}`;
       layer.bindPopup(popupText);
@@ -767,9 +892,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       
       // Build tooltip text with name (and raw value if available)
       let tooltipText = `<strong>${adminName}</strong>`;
+      const magnitudeValueNoScore = feature.properties?.magnitude_value !== undefined ? Number(feature.properties.magnitude_value) : null;
       if (rawValue !== null) {
         const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
         tooltipText += `<br/>Value: ${formattedValue}`;
+        tooltipText += `<br/>No score available`;
+      } else if (magnitudeValueNoScore !== null && selectedLayer.type === 'hazard_event') {
+        const formattedMagnitude = magnitudeValueNoScore % 1 === 0 ? magnitudeValueNoScore.toFixed(0) : magnitudeValueNoScore.toFixed(2);
+        tooltipText += `<br/>Magnitude: ${formattedMagnitude}`;
         tooltipText += `<br/>No score available`;
       } else {
         tooltipText += `<br/>No data available`;
@@ -791,6 +921,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       if (rawValue !== null) {
         const formattedValue = rawValue % 1 === 0 ? rawValue.toFixed(0) : rawValue.toFixed(2);
         popupText += `<br/>Value: ${formattedValue}`;
+        popupText += `<br/>No score available`;
+      } else if (magnitudeValueNoScore !== null && selectedLayer.type === 'hazard_event') {
+        const formattedMagnitude = magnitudeValueNoScore % 1 === 0 ? magnitudeValueNoScore.toFixed(0) : magnitudeValueNoScore.toFixed(2);
+        popupText += `<br/>Magnitude: ${formattedMagnitude}`;
         popupText += `<br/>No score available`;
       } else {
         popupText += `<br/>No data available`;
@@ -901,6 +1035,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             >
               Edit Affected Area
             </button>
+            <button
+              onClick={() => setShowUploadHazardModal(true)}
+              className="btn btn-secondary text-xs py-1 px-2"
+              disabled={!instance}
+              title="Upload hazard event (GeoJSON)"
+            >
+              Upload Hazard Event
+            </button>
             <Link
               href="/instances"
               className="btn btn-secondary text-xs py-1 px-2"
@@ -955,6 +1097,30 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   onEachFeature={onEachFeature}
                 />
               )}
+              {/* Render hazard event layers as overlays */}
+              {hazardEventLayers.map((layer) => (
+                <GeoJSON
+                  key={`hazard-${layer.id}`}
+                  data={layer.geojson as GeoJSON.FeatureCollection}
+                  style={(feature: any) => {
+                    const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
+                    const color = feature?.properties?.color || '#ff0000';
+                    const weight = feature?.properties?.weight || 2;
+                    return {
+                      color: color,
+                      weight: weight,
+                      opacity: 0.7,
+                    };
+                  }}
+                  onEachFeature={(feature, leafletLayer) => {
+                    const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
+                    const units = feature?.properties?.units || '';
+                    leafletLayer.bindPopup(
+                      `<strong>${layer.name}</strong><br/>Magnitude: ${magnitude} ${units}`
+                    );
+                  }}
+                />
+              ))}
             </MapContainer>
           )}
         </div>
@@ -1002,8 +1168,27 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               instanceId={instanceId}
               onSelect={(selection) => {
                 setSelectedLayer(selection);
+                // If a hazard event is selected, load it for potential scoring
+                if (selection.type === 'hazard_event' && selection.hazardEventId) {
+                  const event = hazardEvents.find(e => e.id === selection.hazardEventId);
+                  if (event) {
+                    setSelectedHazardEvent(event);
+                  }
+                }
               }}
             />
+            {/* Hazard Event Actions */}
+            {selectedHazardEvent && (
+              <div className="mt-2 pt-2 border-t">
+                <button
+                  onClick={() => setShowHazardScoringModal(true)}
+                  className="btn btn-primary w-full text-xs py-1 px-2"
+                  title="Score this hazard event"
+                >
+                  Score Hazard Event
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Error Display */}
@@ -1057,6 +1242,35 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           instance={instance}
           onClose={() => setShowAffectedAreaModal(false)}
           onSaved={handleAffectedAreaSaved}
+        />
+      )}
+
+      {/* Upload Hazard Event Modal */}
+      {showUploadHazardModal && instance && (
+        <UploadHazardEventModal
+          instanceId={instanceId}
+          onClose={() => setShowUploadHazardModal(false)}
+          onUploaded={async () => {
+            await fetchData();
+            setShowUploadHazardModal(false);
+          }}
+        />
+      )}
+
+      {/* Hazard Event Scoring Modal */}
+      {showHazardScoringModal && instance && selectedHazardEvent && (
+        <HazardEventScoringModal
+          hazardEvent={selectedHazardEvent}
+          instance={instance}
+          onClose={() => {
+            setShowHazardScoringModal(false);
+            setSelectedHazardEvent(null);
+          }}
+          onSaved={async () => {
+            await fetchData();
+            setShowHazardScoringModal(false);
+            setSelectedHazardEvent(null);
+          }}
         />
       )}
     </div>

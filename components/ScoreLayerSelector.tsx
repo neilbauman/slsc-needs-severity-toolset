@@ -5,17 +5,19 @@ import { supabase } from "@/lib/supabaseClient";
 
 export interface ScoreLayerSelectorProps {
   instanceId: string;
-  onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string }) => void;
+  onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
 }
 
 export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerSelectorProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [categoryScores, setCategoryScores] = useState<Record<string, number>>({}); // Average scores per category
-  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string }>({ type: 'overall' });
+  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
   const [loading, setLoading] = useState(true);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [datasetCategories, setDatasetCategories] = useState<Record<string, string[]>>({});
   const [loadingCategories, setLoadingCategories] = useState<Record<string, boolean>>({});
+  const [hazardEvents, setHazardEvents] = useState<any[]>([]);
+  const [hazardEventScores, setHazardEventScores] = useState<Record<string, number>>({});
 
   // ✅ Load datasets linked to this instance
   useEffect(() => {
@@ -142,6 +144,41 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
         });
 
         setDatasets(transformed);
+
+        // Load hazard events
+        const { data: hazardEventsData, error: hazardError } = await supabase
+          .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
+
+        if (!hazardError && hazardEventsData) {
+          setHazardEvents(hazardEventsData || []);
+
+          // Get average scores for each hazard event
+          const hazardEventIds = (hazardEventsData || []).map((e: any) => e.id);
+          if (hazardEventIds.length > 0) {
+            const { data: scoresData } = await supabase
+              .from("hazard_event_scores")
+              .select("hazard_event_id, score")
+              .eq("instance_id", instanceId)
+              .in("hazard_event_id", hazardEventIds);
+
+            if (scoresData) {
+              const scoreMap: Record<string, { sum: number; count: number }> = {};
+              scoresData.forEach((s: any) => {
+                if (!scoreMap[s.hazard_event_id]) {
+                  scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
+                }
+                scoreMap[s.hazard_event_id].sum += Number(s.score);
+                scoreMap[s.hazard_event_id].count += 1;
+              });
+
+              const avgScores: Record<string, number> = {};
+              Object.keys(scoreMap).forEach((eventId) => {
+                avgScores[eventId] = scoreMap[eventId].sum / scoreMap[eventId].count;
+              });
+              setHazardEventScores(avgScores);
+            }
+          }
+        }
       } catch (err) {
         console.error("Error loading datasets:", err);
         setDatasets([]);
@@ -152,8 +189,8 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
   }, [instanceId]);
 
   // ✅ Handle selection
-  const handleSelect = (type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, datasetName?: string, categoryName?: string) => {
-    const selection = { type, datasetId, category };
+  const handleSelect = (type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string) => {
+    const selection = { type, datasetId, category, hazardEventId };
     setActiveSelection(selection);
     if (onSelect) {
       onSelect({ ...selection, datasetName, categoryName });
@@ -351,6 +388,46 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           )}
         </div>
       ))}
+
+      {/* Hazard Events Section */}
+      {hazardEvents.length > 0 && (
+        <div className="mb-1 mt-3 border-t pt-2">
+          <h4 className="font-semibold text-xs mb-1" style={{ color: 'var(--gsc-gray)' }}>Hazard Events</h4>
+          {hazardEvents.map((event) => (
+            <div key={event.id} className="mb-0.5">
+              <button
+                onClick={() => handleSelect('hazard_event', undefined, undefined, undefined, undefined, event.id)}
+                className="block w-full text-left px-1.5 py-1 rounded text-xs transition-colors"
+                style={{
+                  backgroundColor: activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id
+                    ? 'var(--gsc-blue)'
+                    : 'transparent',
+                  color: activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id
+                    ? '#fff'
+                    : 'var(--gsc-gray)'
+                }}
+                onMouseEnter={(e) => {
+                  if (!(activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id)) {
+                    e.currentTarget.style.backgroundColor = 'var(--gsc-light-gray)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!(activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id)) {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                {event.name}
+                {hazardEventScores[event.id] !== undefined && (
+                  <span className="float-right text-xs opacity-75">
+                    {Number(hazardEventScores[event.id]).toFixed(1)}
+                  </span>
+                )}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
