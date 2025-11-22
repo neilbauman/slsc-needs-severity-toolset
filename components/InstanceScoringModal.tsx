@@ -35,17 +35,30 @@ export default function InstanceScoringModal({
 
   // Normalize dataset weights within a category
   const normalizeCategory = (cat: string) => {
-    const ds = categories[cat].datasets;
+    const categoryData = categories[cat] as CategoryData;
+    if (!categoryData) return;
+    
+    const ds = categoryData.datasets;
     const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
-    if (total === 0) return;
+    if (total === 0) {
+      // If total is 0, distribute equally
+      const equalWeight = 100 / ds.length;
+      const newWeights = { ...weights };
+      ds.forEach((d) => {
+        newWeights[d.id] = snapToStep(equalWeight, 5);
+      });
+      setWeights(newWeights);
+      return;
+    }
 
     const newWeights = { ...weights };
     const step = 5;
 
     let sum = 0;
     ds.forEach((d) => {
-      newWeights[d.id] = snapToStep((weights[d.id] / total) * 100, step);
-      sum += newWeights[d.id];
+      const normalized = snapToStep((weights[d.id] / total) * 100, step);
+      newWeights[d.id] = normalized;
+      sum += normalized;
     });
 
     const diff = 100 - sum;
@@ -153,8 +166,20 @@ export default function InstanceScoringModal({
 
       const weightMap: Record<string, number> = {};
       (savedWeights || []).forEach((w: any) => {
+        // Map saved weights by dataset_id (UUID)
         weightMap[w.dataset_id] = (w.dataset_weight ?? 0) * 100;
       });
+      
+      // Also load hazard event weights from metadata if available
+      if (!hazardError && hazardEventsData && hazardEventsData.length > 0) {
+        hazardEventsData.forEach((event: any) => {
+          const hazardEventId = `hazard_event_${event.id}`;
+          // Check if weight is stored in metadata
+          if (event.metadata?.weight) {
+            weightMap[hazardEventId] = (event.metadata.weight ?? 0) * 100;
+          }
+        });
+      }
 
       const grouped: Record<string, CategoryData> = {};
       for (const d of flat) {
@@ -199,15 +224,52 @@ export default function InstanceScoringModal({
           const weightDecimal = (weights[d.id] || 0) / 100;
           const catDecimal = (categoryData.categoryWeight || 0) / 100;
 
-          const { error } = await supabase.from('instance_scoring_weights').upsert({
-            instance_id: instance.id,
-            dataset_id: d.id,
-            category: cat,
-            dataset_weight: weightDecimal,
-            category_weight: catDecimal,
-            updated_at: new Date().toISOString(),
-          });
-          if (error) console.error('Save weight error:', error);
+          // Handle hazard events differently - they don't have a dataset_id UUID
+          if (d.is_hazard_event && d.hazard_event_id) {
+            // Store weight in hazard_events metadata instead
+            // First get current metadata
+            const { data: currentEvent } = await supabase
+              .from('hazard_events')
+              .select('metadata')
+              .eq('id', d.hazard_event_id)
+              .single();
+            
+            const currentMetadata = currentEvent?.metadata || {};
+            const { error: hazardError } = await supabase
+              .from('hazard_events')
+              .update({
+                metadata: {
+                  ...currentMetadata,
+                  weight: weightDecimal,
+                  category_weight: catDecimal,
+                }
+              })
+              .eq('id', d.hazard_event_id);
+            
+            if (hazardError) {
+              console.error('Save hazard event weight error:', hazardError);
+            }
+          } else {
+            // Regular datasets - save to instance_scoring_weights
+            // Only save if d.id is a valid UUID (not a hazard event prefixed ID)
+            try {
+              // Try to parse as UUID to validate
+              const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+              if (uuidRegex.test(d.id)) {
+                const { error } = await supabase.from('instance_scoring_weights').upsert({
+                  instance_id: instance.id,
+                  dataset_id: d.id,
+                  category: cat,
+                  dataset_weight: weightDecimal,
+                  category_weight: catDecimal,
+                  updated_at: new Date().toISOString(),
+                });
+                if (error) console.error('Save weight error:', error);
+              }
+            } catch (err) {
+              console.error('Error saving weight for dataset:', d.id, err);
+            }
+          }
         }
       }
 
@@ -304,8 +366,10 @@ export default function InstanceScoringModal({
                     step="1"
                     value={Math.round(weights[d.id] ?? 0)}
                     onChange={(e) => {
-                      handleWeightChange(d.id, parseFloat(e.target.value));
-                      normalizeCategory(cat);
+                      const newValue = parseFloat(e.target.value);
+                      handleWeightChange(d.id, newValue);
+                      // Use setTimeout to normalize after state update
+                      setTimeout(() => normalizeCategory(cat), 0);
                     }}
                     className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                     style={{
