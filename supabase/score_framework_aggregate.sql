@@ -9,10 +9,20 @@
 -- 2. score_framework_aggregate(in_config JSONB, in_instance_id UUID)
 
 -- Drop existing functions first to avoid return type conflicts
-DROP FUNCTION IF EXISTS public.score_framework_aggregate(UUID);
-DROP FUNCTION IF EXISTS public.score_framework_aggregate(JSONB, UUID);
-DROP FUNCTION IF EXISTS public.score_framework_aggregate(JSONB);
-DROP FUNCTION IF EXISTS public.score_framework_aggregate();
+-- Drop all overloads to ensure clean recreation
+DO $$ 
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN (
+    SELECT oid::regprocedure AS func_signature
+    FROM pg_proc
+    WHERE proname = 'score_framework_aggregate'
+      AND pronamespace = 'public'::regnamespace
+  ) LOOP
+    EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_signature || ' CASCADE';
+  END LOOP;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.score_framework_aggregate(
   in_config JSONB DEFAULT NULL,
@@ -259,15 +269,6 @@ BEGIN
 END;
 $$;
 
--- Also create overloaded version for simple signature
-CREATE OR REPLACE FUNCTION public.score_framework_aggregate(
-  in_instance_id UUID
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RETURN public.score_framework_aggregate(NULL::JSONB, in_instance_id);
-END;
-$$;
+-- Note: We removed the overloaded version to avoid PostgreSQL function resolution ambiguity
+-- Call the main function with in_instance_id only, and it will handle NULL config internally
 

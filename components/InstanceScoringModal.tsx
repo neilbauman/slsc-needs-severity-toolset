@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 // Slider styles
@@ -64,6 +64,7 @@ export default function InstanceScoringModal({
   const [impactLocations, setImpactLocations] = useState<ImpactLocation[]>([]);
   const [loadingImpact, setLoadingImpact] = useState(false);
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({});
+  const [isNormalizing, setIsNormalizing] = useState(false); // Lock to prevent UI jumping
 
   const CATEGORY_ORDER = [
     'SSC Framework - P1',
@@ -76,40 +77,74 @@ export default function InstanceScoringModal({
   // Snap to nearest multiple of 5
   const snapToStep = (value: number, step = 5) => Math.round(value / step) * step;
 
-  // Normalize dataset weights within a category
-  const normalizeCategory = (cat: string) => {
-    const categoryData = categories[cat] as CategoryData;
-    if (!categoryData) return;
+  // Normalize dataset weights within a category (with debouncing to prevent UI jumping)
+  const normalizeCategory = useCallback((cat: string) => {
+    if (isNormalizing) return; // Prevent re-entry during normalization
     
-    const ds = categoryData.datasets;
-    const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
+    setIsNormalizing(true);
     
-    if (total === 0) {
-      // If total is 0, distribute equally
-      const equalWeight = 100 / ds.length;
-      const newWeights = { ...weights };
-      ds.forEach((d) => {
-        newWeights[d.id] = snapToStep(equalWeight, 5);
-      });
-      setWeights(newWeights);
-      return;
-    }
+    // Use setTimeout to debounce and allow UI to settle
+    setTimeout(() => {
+      const categoryData = categories[cat] as CategoryData;
+      if (!categoryData) {
+        setIsNormalizing(false);
+        return;
+      }
+      
+      const ds = categoryData.datasets;
+      const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
+      
+      if (total === 0) {
+        // If total is 0, distribute equally
+        const equalWeight = 100 / ds.length;
+        const newWeights = { ...weights };
+        ds.forEach((d) => {
+          newWeights[d.id] = snapToStep(equalWeight, 5);
+        });
+        setWeights(newWeights);
+        setIsNormalizing(false);
+        return;
+      }
 
-    // Only normalize if total is significantly off from 100%
-    // This allows users to adjust weights freely as long as they're close to 100%
-    if (Math.abs(total - 100) < 0.5) {
-      // Already close to 100%, just snap to exact 100%
-      const scale = 100 / total;
+      // Only normalize if total is significantly off from 100%
+      // This allows users to adjust weights freely as long as they're close to 100%
+      if (Math.abs(total - 100) < 0.5) {
+        // Already close to 100%, just snap to exact 100%
+        const scale = 100 / total;
+        const newWeights = { ...weights };
+        let sum = 0;
+        
+        ds.forEach((d) => {
+          const scaled = (weights[d.id] || 0) * scale;
+          newWeights[d.id] = scaled;
+          sum += scaled;
+        });
+        
+        // Adjust for any rounding differences
+        const diff = 100 - sum;
+        if (Math.abs(diff) > 0.01 && ds.length > 0) {
+          const largest = ds.reduce((a, b) =>
+            (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
+          );
+          newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
+        }
+        
+        setWeights(newWeights);
+        setIsNormalizing(false);
+        return;
+      }
+
+      // If total is far from 100%, normalize proportionally
       const newWeights = { ...weights };
+
       let sum = 0;
-      
       ds.forEach((d) => {
-        const scaled = (weights[d.id] || 0) * scale;
-        newWeights[d.id] = scaled;
-        sum += scaled;
+        const normalized = (weights[d.id] || 0) / total * 100;
+        newWeights[d.id] = normalized;
+        sum += normalized;
       });
-      
-      // Adjust for any rounding differences
+
+      // Adjust for rounding
       const diff = 100 - sum;
       if (Math.abs(diff) > 0.01 && ds.length > 0) {
         const largest = ds.reduce((a, b) =>
@@ -117,73 +152,69 @@ export default function InstanceScoringModal({
         );
         newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
       }
-      
+
       setWeights(newWeights);
-      return;
-    }
+      setIsNormalizing(false);
+    }, 150); // 150ms debounce to prevent UI jumping
+  }, [categories, weights, isNormalizing]);
 
-    // If total is far from 100%, normalize proportionally
-    const newWeights = { ...weights };
-    const step = 1; // Use smaller step for smoother adjustment
+  // Normalize all category weights (with debouncing)
+  const normalizeAllCategories = useCallback(() => {
+    if (isNormalizing) return; // Prevent re-entry during normalization
+    
+    setIsNormalizing(true);
+    
+    // Use setTimeout to debounce and allow UI to settle
+    setTimeout(() => {
+      const categoryValues = Object.values(categories) as CategoryData[];
+      const total = categoryValues.reduce((sum, catData) => {
+        return sum + (catData.categoryWeight || 0);
+      }, 0);
+      
+      if (total === 0) {
+        setIsNormalizing(false);
+        return;
+      }
 
-    let sum = 0;
-    ds.forEach((d) => {
-      const normalized = (weights[d.id] || 0) / total * 100;
-      newWeights[d.id] = normalized;
-      sum += normalized;
-    });
+      // Only normalize if total is significantly different from 100%
+      if (Math.abs(total - 100) < 0.5) {
+        setIsNormalizing(false);
+        return; // Close enough, don't normalize
+      }
 
-    // Adjust for rounding
-    const diff = 100 - sum;
-    if (Math.abs(diff) > 0.01 && ds.length > 0) {
-      const largest = ds.reduce((a, b) =>
-        (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
-      );
-      newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
-    }
+      const newCats: Record<string, CategoryData> = { ...categories };
+      const step = 5;
+      let sum = 0;
 
-    setWeights(newWeights);
-  };
-
-  // Normalize all category weights
-  const normalizeAllCategories = () => {
-    const categoryValues = Object.values(categories) as CategoryData[];
-    const total = categoryValues.reduce((sum, catData) => {
-      return sum + (catData.categoryWeight || 0);
-    }, 0);
-    if (total === 0) return;
-
-    const newCats: Record<string, CategoryData> = { ...categories };
-    const step = 5;
-    let sum = 0;
-
-    Object.keys(newCats).forEach((cat) => {
-      const catData = newCats[cat] as CategoryData;
-      const currentWeight = catData.categoryWeight || 0;
-      const newWeight = snapToStep(
-        (currentWeight / total) * 100,
-        step
-      );
-      catData.categoryWeight = newWeight;
-      sum += newWeight;
-    });
-
-    const diff = 100 - sum;
-    if (diff !== 0) {
-      const largestCat = Object.keys(newCats).reduce((a, b) => {
-        const aData = newCats[a] as CategoryData;
-        const bData = newCats[b] as CategoryData;
-        return aData.categoryWeight > bData.categoryWeight ? a : b;
+      Object.keys(newCats).forEach((cat) => {
+        const catData = newCats[cat] as CategoryData;
+        const currentWeight = catData.categoryWeight || 0;
+        const newWeight = snapToStep(
+          (currentWeight / total) * 100,
+          step
+        );
+        catData.categoryWeight = newWeight;
+        sum += newWeight;
       });
-      const largestCatData = newCats[largestCat] as CategoryData;
-      largestCatData.categoryWeight = Math.max(
-        0,
-        Math.min(100, largestCatData.categoryWeight + diff)
-      );
-    }
 
-    setCategories(newCats);
-  };
+      const diff = 100 - sum;
+      if (diff !== 0) {
+        const largestCat = Object.keys(newCats).reduce((a, b) => {
+          const aData = newCats[a] as CategoryData;
+          const bData = newCats[b] as CategoryData;
+          return aData.categoryWeight > bData.categoryWeight ? a : b;
+        });
+        const largestCatData = newCats[largestCat] as CategoryData;
+        largestCatData.categoryWeight = Math.max(
+          0,
+          Math.min(100, largestCatData.categoryWeight + diff)
+        );
+      }
+
+      setCategories(newCats);
+      setIsNormalizing(false);
+    }, 100); // 100ms debounce
+  }, [categories, isNormalizing]);
 
   const handleWeightChange = (datasetId: string, value: number) => {
     const newValue = Math.max(0, Math.min(100, value));
@@ -575,12 +606,13 @@ export default function InstanceScoringModal({
       }
 
       // Recompute framework and final scores with new weights
-      // First compute framework aggregation - call the UUID-only overload explicitly
+      // First compute framework aggregation - call with only in_instance_id (config will be NULL and loaded from DB)
       try {
-        // Use the simple signature (UUID only) to avoid overloading ambiguity
+        // Call with only in_instance_id - the function will load weights from database
         const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
           in_instance_id: instance.id,
-        } as any); // Type assertion to help TypeScript
+          in_config: null, // Explicitly set to null to avoid ambiguity
+        });
 
         if (frameworkError) {
           console.error('Error computing framework scores:', frameworkError);
@@ -732,6 +764,13 @@ export default function InstanceScoringModal({
                     value={Math.round(categoryData.categoryWeight)}
                     onChange={(e) => {
                       handleCategoryWeightChange(cat, parseFloat(e.target.value));
+                    }}
+                    onMouseUp={(e) => {
+                      e.preventDefault();
+                      normalizeAllCategories();
+                    }}
+                    onTouchEnd={(e) => {
+                      e.preventDefault();
                       normalizeAllCategories();
                     }}
                     className="w-20 h-1.5 rounded-lg appearance-none cursor-pointer"
@@ -764,11 +803,17 @@ export default function InstanceScoringModal({
                         max="100"
                         step="1"
                         value={Math.round(weight)}
-                        onChange={(e) => {
-                          handleWeightChange(d.id, parseFloat(e.target.value));
-                        }}
-                        onMouseUp={() => normalizeCategory(cat)}
-                        onTouchEnd={() => normalizeCategory(cat)}
+                            onChange={(e) => {
+                              handleWeightChange(d.id, parseFloat(e.target.value));
+                            }}
+                            onMouseUp={(e) => {
+                              e.preventDefault();
+                              normalizeCategory(cat);
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              normalizeCategory(cat);
+                            }}
                         className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer"
                         style={{
                           background: `linear-gradient(to right, var(--gsc-green) 0%, var(--gsc-green) ${weight}%, var(--gsc-light-gray) ${weight}%, var(--gsc-light-gray) 100%)`
