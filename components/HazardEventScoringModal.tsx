@@ -43,6 +43,8 @@ export default function HazardEventScoringModal({
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [matchingMethod, setMatchingMethod] = useState<'centroid' | 'intersection' | 'overlap' | 'within_distance' | 'point_on_surface'>('centroid');
+  const [distanceThreshold, setDistanceThreshold] = useState<number>(10000);
 
   // Load magnitude statistics from hazard event
   useEffect(() => {
@@ -274,6 +276,8 @@ export default function HazardEventScoringModal({
       in_instance_id: instance.id,
       in_magnitude_ranges: magnitudeRanges,
       in_limit_to_affected: limitToAffected,
+      in_matching_method: matchingMethod,
+      in_distance_meters: matchingMethod === 'within_distance' ? distanceThreshold : null,
     });
 
     if (error) {
@@ -354,6 +358,48 @@ export default function HazardEventScoringModal({
             </div>
           </div>
         )}
+
+        {/* Spatial Matching Method Selection */}
+        <div className="mb-4 p-3 border rounded bg-gray-50">
+          <h3 className="text-sm font-semibold mb-2">Spatial Matching Method</h3>
+          <p className="text-xs text-gray-600 mb-2">
+            Choose how to match shake map contours to administrative boundaries:
+          </p>
+          <div className="space-y-2">
+            <div>
+              <label className="text-xs font-medium">Method:</label>
+              <select
+                value={matchingMethod}
+                onChange={(e) => setMatchingMethod(e.target.value as any)}
+                className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-1"
+              >
+                <option value="centroid">Centroid (default) - Find nearest contour to boundary center</option>
+                <option value="point_on_surface">Point on Surface - Use representative point inside boundary</option>
+                <option value="intersection">Intersection - Use contour that intersects the boundary</option>
+                <option value="overlap">Maximum Overlap - Use contour with most area overlap</option>
+                <option value="within_distance">Within Distance - Find contours within distance threshold</option>
+              </select>
+            </div>
+            {matchingMethod === 'within_distance' && (
+              <div>
+                <label className="text-xs font-medium">Distance Threshold (meters):</label>
+                <input
+                  type="number"
+                  min="100"
+                  max="100000"
+                  step="1000"
+                  value={distanceThreshold}
+                  onChange={(e) => setDistanceThreshold(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-1"
+                  placeholder="10000"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Contours within this distance of the boundary will be considered
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Magnitude Range Mapping */}
         <div className="mb-4">

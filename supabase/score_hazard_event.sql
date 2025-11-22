@@ -2,13 +2,20 @@
 -- SCORE HAZARD EVENT RPC FUNCTION
 -- ==============================
 -- Calculates vulnerability scores for admin areas based on hazard event magnitude
--- Uses centroid of admin boundaries to find nearest shake map contour
+-- Supports multiple spatial matching methods:
+--   'centroid' (default): Find nearest contour to admin boundary centroid
+--   'intersection': Use contour that intersects with admin boundary
+--   'overlap': Use contour with maximum overlap with admin boundary
+--   'within_distance': Find contours within specified distance (meters) of boundary
+--   'point_on_surface': Use ST_PointOnSurface instead of centroid
 
 CREATE OR REPLACE FUNCTION public.score_hazard_event(
   in_hazard_event_id UUID,
   in_instance_id UUID,
   in_magnitude_ranges JSONB,
-  in_limit_to_affected BOOLEAN DEFAULT true
+  in_limit_to_affected BOOLEAN DEFAULT true,
+  in_matching_method TEXT DEFAULT 'centroid',
+  in_distance_meters NUMERIC DEFAULT 10000
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -32,7 +39,26 @@ DECLARE
   v_processed_count INTEGER := 0;
   v_skipped_no_geom INTEGER := 0;
   v_skipped_no_magnitude INTEGER := 0;
+  v_matching_method TEXT;
+  v_distance_threshold NUMERIC;
+  v_point GEOGRAPHY;
+  v_intersection_geom GEOGRAPHY;
+  v_max_overlap NUMERIC;
+  v_best_magnitude NUMERIC;
 BEGIN
+  -- Validate and set matching method
+  v_matching_method := LOWER(COALESCE(in_matching_method, 'centroid'));
+  IF v_matching_method NOT IN ('centroid', 'intersection', 'overlap', 'within_distance', 'point_on_surface') THEN
+    v_matching_method := 'centroid';
+    RAISE NOTICE 'Invalid matching method, defaulting to centroid';
+  END IF;
+  
+  v_distance_threshold := COALESCE(in_distance_meters, 10000);
+  
+  RAISE NOTICE 'Using matching method: %', v_matching_method;
+  IF v_matching_method = 'within_distance' THEN
+    RAISE NOTICE 'Distance threshold: % meters', v_distance_threshold;
+  END IF;
   -- Load hazard event
   SELECT * INTO v_hazard_event
   FROM public.hazard_events
@@ -52,10 +78,15 @@ BEGIN
     FROM public.instances
     WHERE id = in_instance_id;
     
-    -- If admin_scope is NULL or empty, set to empty array
-    IF v_affected_pcodes IS NULL THEN
-      v_affected_pcodes := ARRAY[]::TEXT[];
+    -- If admin_scope is NULL or empty, warn and score all areas instead
+    IF v_affected_pcodes IS NULL OR array_length(v_affected_pcodes, 1) = 0 THEN
+      RAISE NOTICE 'No affected area scope defined - scoring all ADM3 areas';
+      v_affected_pcodes := NULL; -- Will cause scoring of all areas
+      -- Override the limit flag since we have no scope
+      -- Actually, keep the flag but use NULL to mean "all"
     END IF;
+  ELSE
+    v_affected_pcodes := NULL; -- Score all areas
   END IF;
 
   -- Extract geometries from hazard event metadata
@@ -89,8 +120,9 @@ BEGIN
   FROM public.admin_boundaries ab
   WHERE ab.admin_level = 'ADM3'
     AND (
-      NOT in_limit_to_affected
-      OR ab.admin_pcode = ANY(v_affected_pcodes)
+      v_affected_pcodes IS NULL  -- Score all if no scope defined
+      OR ab.admin_pcode = ANY(v_affected_pcodes)  -- Or match scope
+      OR (in_limit_to_affected AND ab.parent_pcode = ANY(v_affected_pcodes))  -- Or parent matches (ADM2)
     );
   
   RAISE NOTICE 'Processing % admin areas (limit_to_affected: %)', v_total_admin_areas, in_limit_to_affected;
@@ -104,8 +136,9 @@ BEGIN
     FROM public.admin_boundaries ab
     WHERE ab.admin_level = 'ADM3'
       AND (
-        NOT in_limit_to_affected
-        OR ab.admin_pcode = ANY(v_affected_pcodes)
+        v_affected_pcodes IS NULL  -- Score all if no scope defined
+        OR ab.admin_pcode = ANY(v_affected_pcodes)  -- Or match scope
+        OR (in_limit_to_affected AND ab.parent_pcode = ANY(v_affected_pcodes))  -- Or parent matches (ADM2)
       )
   LOOP
     v_processed_count := v_processed_count + 1;
@@ -131,32 +164,36 @@ BEGIN
       CONTINUE;
     END IF;
     
-    -- Calculate centroid of admin boundary
+    -- Determine which point/geometry to use based on matching method
     BEGIN
-      v_admin_centroid := ST_Centroid(v_boundary_geom);
+      IF v_matching_method = 'centroid' THEN
+        v_point := ST_Centroid(v_boundary_geom);
+      ELSIF v_matching_method = 'point_on_surface' THEN
+        v_point := ST_PointOnSurface(v_boundary_geom::GEOMETRY)::GEOGRAPHY;
+      ELSE
+        -- For intersection/overlap methods, we'll use the boundary itself
+        v_point := NULL;
+      END IF;
     EXCEPTION WHEN OTHERS THEN
-      CONTINUE; -- Skip if centroid calculation fails
+      v_skipped_no_geom := v_skipped_no_geom + 1;
+      CONTINUE; -- Skip if point calculation fails
     END;
 
-    -- Find nearest contour line from hazard event geometry
-    -- The geometry is stored as a GeometryCollection, so we need to:
-    -- 1. Extract individual geometries
-    -- 2. Find the one closest to the centroid
-    -- 3. Extract magnitude from that contour's properties
-
-    -- For now, we'll use a distance-based approach
-    -- Since we stored the entire FeatureCollection, we need to extract from metadata
-    v_min_distance := NULL;
+    -- Find matching contour based on selected method
     v_nearest_magnitude := NULL;
+    v_min_distance := NULL;
+    v_max_overlap := NULL;
+    v_best_magnitude := NULL;
 
     -- Extract magnitude from metadata's original_geojson
-    -- Find the feature whose geometry is closest to the centroid
     IF v_hazard_event.metadata IS NOT NULL AND v_hazard_event.metadata->'original_geojson' IS NOT NULL THEN
       DECLARE
         v_feature JSONB;
         v_feature_geom GEOGRAPHY;
         v_distance NUMERIC;
         v_magnitude_field TEXT;
+        v_overlap_area NUMERIC;
+        v_intersects BOOLEAN;
       BEGIN
         v_magnitude_field := COALESCE(v_hazard_event.magnitude_field, 'value');
 
@@ -167,23 +204,76 @@ BEGIN
           -- Convert feature geometry to PostGIS
           BEGIN
             v_feature_geom := ST_GeomFromGeoJSON((v_feature->'geometry')::text)::GEOGRAPHY;
-
-            -- Calculate distance from centroid to this contour
-            v_distance := ST_Distance(v_admin_centroid, v_feature_geom);
-
-            -- Check if this is the closest so far
-            IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
-              v_min_distance := v_distance;
-              
-              -- Extract magnitude value from feature properties
-              IF v_feature->'properties'->v_magnitude_field IS NOT NULL THEN
-                v_nearest_magnitude := (v_feature->'properties'->v_magnitude_field)::NUMERIC;
-              END IF;
+            
+            -- Extract magnitude value from feature properties
+            IF v_feature->'properties'->v_magnitude_field IS NULL THEN
+              CONTINUE; -- Skip features without magnitude
             END IF;
+            
+            DECLARE
+              v_feature_magnitude NUMERIC;
+            BEGIN
+              v_feature_magnitude := (v_feature->'properties'->v_magnitude_field)::NUMERIC;
+              
+              -- Apply matching method
+              IF v_matching_method = 'centroid' OR v_matching_method = 'point_on_surface' THEN
+                -- Distance-based: find nearest contour
+                v_distance := ST_Distance(v_point, v_feature_geom);
+                IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
+                  v_min_distance := v_distance;
+                  v_nearest_magnitude := v_feature_magnitude;
+                END IF;
+                
+              ELSIF v_matching_method = 'within_distance' THEN
+                -- Find contours within distance threshold
+                IF ST_DWithin(v_boundary_geom, v_feature_geom, v_distance_threshold) THEN
+                  v_distance := ST_Distance(v_boundary_geom, v_feature_geom);
+                  IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
+                    v_min_distance := v_distance;
+                    v_nearest_magnitude := v_feature_magnitude;
+                  END IF;
+                END IF;
+                
+              ELSIF v_matching_method = 'intersection' THEN
+                -- Use first contour that intersects the boundary
+                IF ST_Intersects(v_boundary_geom, v_feature_geom) THEN
+                  IF v_nearest_magnitude IS NULL THEN
+                    v_nearest_magnitude := v_feature_magnitude;
+                  END IF;
+                END IF;
+                
+              ELSIF v_matching_method = 'overlap' THEN
+                -- Find contour with maximum overlap
+                BEGIN
+                  v_intersection_geom := ST_Intersection(v_boundary_geom::GEOMETRY, v_feature_geom::GEOMETRY)::GEOGRAPHY;
+                  IF v_intersection_geom IS NOT NULL THEN
+                    v_overlap_area := ST_Area(v_intersection_geom);
+                    IF v_max_overlap IS NULL OR v_overlap_area > v_max_overlap THEN
+                      v_max_overlap := v_overlap_area;
+                      v_best_magnitude := v_feature_magnitude;
+                    END IF;
+                  END IF;
+                EXCEPTION WHEN OTHERS THEN
+                  -- If intersection fails, try distance as fallback
+                  v_distance := ST_Distance(v_boundary_geom, v_feature_geom);
+                  IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
+                    v_min_distance := v_distance;
+                    IF v_nearest_magnitude IS NULL THEN
+                      v_nearest_magnitude := v_feature_magnitude;
+                    END IF;
+                  END IF;
+                END;
+              END IF;
+            END;
           EXCEPTION WHEN OTHERS THEN
             CONTINUE; -- Skip invalid geometries
           END;
         END LOOP;
+        
+        -- For overlap method, use the best magnitude found
+        IF v_matching_method = 'overlap' AND v_best_magnitude IS NOT NULL THEN
+          v_nearest_magnitude := v_best_magnitude;
+        END IF;
       END;
     END IF;
 
