@@ -70,7 +70,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [hazardEvents, setHazardEvents] = useState<any[]>([]);
   const [hazardEventLayers, setHazardEventLayers] = useState<any[]>([]);
   const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set()); // Track which hazard events are visible
-  const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string> }>>({}); // Feature-level filters per hazard event
+  const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string>, geometryTypes?: Set<string> }>>({}); // Feature-level filters per hazard event
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
 
   // Ensure instanceId exists
@@ -1306,6 +1306,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   const filter = hazardEventFilters[layer.id] || {};
                   // Filter features based on magnitude range or visible feature IDs
                   const filteredFeatures = (layer.geojson as GeoJSON.FeatureCollection).features.filter((feature: any, idx: number) => {
+                    // Check geometry type filter
+                    if (filter.geometryTypes && filter.geometryTypes.size > 0) {
+                      const geomType = feature?.geometry?.type || '';
+                      if (!filter.geometryTypes.has(geomType)) return false;
+                    }
                     // Check magnitude range filter
                     if (filter.minMagnitude !== undefined || filter.maxMagnitude !== undefined) {
                       const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
@@ -1457,9 +1462,108 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   const minMag = magnitudes.length > 0 ? Math.min(...magnitudes) : undefined;
                   const maxMag = magnitudes.length > 0 ? Math.max(...magnitudes) : undefined;
                   
+                  // Get unique geometry types
+                  const geometryTypes = new Set<string>();
+                  features.forEach((f: any) => {
+                    const geomType = f?.geometry?.type || '';
+                    if (geomType) geometryTypes.add(geomType);
+                  });
+                  
                   return (
                     <div className="border rounded p-2 bg-gray-50 text-xs">
                       <div className="font-semibold mb-2">Filter Features</div>
+                      
+                      {/* Geometry Type Filter */}
+                      {geometryTypes.size > 1 && (
+                        <div className="mb-2 pb-2 border-b">
+                          <label className="block text-xs font-medium mb-1">Show Geometry Types:</label>
+                          <div className="space-y-1">
+                            {Array.from(geometryTypes).map((geomType) => {
+                              const isChecked = !filter.geometryTypes || filter.geometryTypes.size === 0 || filter.geometryTypes.has(geomType);
+                              return (
+                                <label key={geomType} className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      setHazardEventFilters(prev => {
+                                        const current = prev[selectedHazardEvent.id] || {};
+                                        const types = new Set(current.geometryTypes || []);
+                                        
+                                        if (e.target.checked) {
+                                          types.add(geomType);
+                                          // If all types are selected, clear the filter (show all)
+                                          if (types.size === geometryTypes.size) {
+                                            return {
+                                              ...prev,
+                                              [selectedHazardEvent.id]: {
+                                                ...current,
+                                                geometryTypes: undefined,
+                                              }
+                                            };
+                                          }
+                                        } else {
+                                          types.delete(geomType);
+                                        }
+                                        
+                                        return {
+                                          ...prev,
+                                          [selectedHazardEvent.id]: {
+                                            ...current,
+                                            geometryTypes: types.size > 0 ? types : new Set(),
+                                          }
+                                        };
+                                      });
+                                    }}
+                                    className="cursor-pointer"
+                                  />
+                                  <span className="text-xs">
+                                    {geomType === 'LineString' || geomType === 'MultiLineString' ? 'Track (Line)' : 
+                                     geomType === 'Polygon' || geomType === 'MultiPolygon' ? 'Cone/Area (Polygon)' : 
+                                     geomType}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Quick Filter: Track Only (for typhoons) */}
+                      {selectedHazardEvent.event_type === 'typhoon' && geometryTypes.has('LineString') && (
+                        <div className="mb-2 pb-2 border-b">
+                          <button
+                            onClick={() => {
+                              setHazardEventFilters(prev => ({
+                                ...prev,
+                                [selectedHazardEvent.id]: {
+                                  ...prev[selectedHazardEvent.id],
+                                  geometryTypes: new Set(['LineString', 'MultiLineString']),
+                                }
+                              }));
+                            }}
+                            className="text-xs px-2 py-1 bg-blue-100 hover:bg-blue-200 rounded w-full"
+                            title="Show only the center track line"
+                          >
+                            Show Track Only (Hide Cone)
+                          </button>
+                          <button
+                            onClick={() => {
+                              setHazardEventFilters(prev => ({
+                                ...prev,
+                                [selectedHazardEvent.id]: {
+                                  ...prev[selectedHazardEvent.id],
+                                  geometryTypes: undefined,
+                                }
+                              }));
+                            }}
+                            className="text-xs px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded w-full mt-1"
+                            title="Show all features"
+                          >
+                            Show All Features
+                          </button>
+                        </div>
+                      )}
                       
                       {/* Magnitude Range Filter */}
                       {minMag !== undefined && maxMag !== undefined && (
