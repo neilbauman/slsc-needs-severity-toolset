@@ -322,6 +322,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       setFeatures([]);
       setLoadingFeatures(true);
       
+      console.log("loadFeaturesForSelection called with:", {
+        type: selection.type,
+        hazardEventId: selection.hazardEventId,
+        datasetId: selection.datasetId,
+        category: selection.category
+      });
+      
       if (selection.type === 'overall') {
         // Use overall instance scores
         if (overallFeatures) {
@@ -691,11 +698,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         }
 
         if (!scores || scores.length === 0) {
-          console.log("No scores found for hazard event");
+          console.log("No scores found for hazard event - user needs to apply scoring first");
+          // Show a message that scoring needs to be applied
           setFeatures([]);
           setLoadingFeatures(false);
           return;
         }
+
+        console.log(`Found ${scores.length} hazard event scores:`, scores.slice(0, 5));
 
         // Create score map
         const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.score)]));
@@ -786,7 +796,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           return;
         }
         
-        // Map scores to features
+        // Map scores to features - only include features that have scores
         const hazardFeatures = geoFeatures
           .map((feature: any) => {
             const adminPcode = feature.properties?.admin_pcode;
@@ -798,6 +808,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             const hazardScore = scoreMap.get(adminPcode);
             const magnitudeValue = magnitudeMap.get(adminPcode);
             
+            // Only include features that have scores
+            if (hazardScore === undefined) {
+              console.warn(`No score found for admin_pcode: ${adminPcode}`);
+              return null;
+            }
+            
             return {
               ...feature,
               properties: {
@@ -805,14 +821,19 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 admin_pcode: adminPcode,
                 admin_name: feature.properties?.admin_name || feature.properties?.name || adminPcode,
                 score: hazardScore,
-                magnitude_value: magnitudeValue,
-                has_score: hazardScore !== undefined,
+                magnitude_value: magnitudeValue !== undefined ? magnitudeValue : null,
+                has_score: true, // Always true since we filter out features without scores
               }
             };
           })
           .filter((f: any) => f !== null);
         
         console.log(`Mapped ${hazardFeatures.length} features with hazard event scores`);
+        console.log(`Sample feature scores:`, hazardFeatures.slice(0, 3).map((f: any) => ({
+          admin_pcode: f.properties.admin_pcode,
+          score: f.properties.score,
+          magnitude: f.properties.magnitude_value
+        })));
         setFeatures([...hazardFeatures]);
         setLoadingFeatures(false);
       }
@@ -833,8 +854,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   useEffect(() => {
     // Only reload if we have instance loaded
     if (!loading && instance && instanceId) {
-      console.log("Selection changed, loading features:", selectedLayer);
-      loadFeaturesForSelection(selectedLayer, overallFeatures);
+      console.log("Selection changed, loading features for:", {
+        type: selectedLayer.type,
+        hazardEventId: selectedLayer.hazardEventId,
+        datasetId: selectedLayer.datasetId,
+        category: selectedLayer.category
+      });
+      // Don't pass overallFeatures for hazard_event - we want fresh data
+      const featuresToUse = selectedLayer.type === 'hazard_event' ? undefined : overallFeatures;
+      loadFeaturesForSelection(selectedLayer, featuresToUse);
       
       // Update selected hazard event if needed
       if (selectedLayer.type === 'hazard_event' && selectedLayer.hazardEventId) {
