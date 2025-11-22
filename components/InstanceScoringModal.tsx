@@ -59,6 +59,7 @@ export default function InstanceScoringModal({
     'weighted_mean'
   );
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showImpact, setShowImpact] = useState(true);
   const [impactLocations, setImpactLocations] = useState<ImpactLocation[]>([]);
   const [loadingImpact, setLoadingImpact] = useState(false);
@@ -516,6 +517,7 @@ export default function InstanceScoringModal({
 
   const handleSave = async () => {
     setLoading(true);
+    setError(null);
     try {
       for (const [cat, obj] of Object.entries(categories)) {
         const categoryData = obj as CategoryData;
@@ -573,24 +575,50 @@ export default function InstanceScoringModal({
       }
 
       // Recompute framework and final scores with new weights
-      // First compute framework aggregation
-      const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
-        in_instance_id: instance.id,
-      });
+      // First compute framework aggregation - use simple signature to avoid overloading issues
+      try {
+        const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
+          in_instance_id: instance.id,
+        });
 
-      if (frameworkError) {
-        console.error('Error computing framework scores:', frameworkError);
-        // Continue anyway - weights are saved
+        if (frameworkError) {
+          console.error('Error computing framework scores:', frameworkError);
+          const errorMsg = `Weights saved, but error recomputing framework scores: ${frameworkError.message}`;
+          setError(errorMsg);
+          // Continue anyway - weights are saved
+        } else {
+          console.log('Framework scores recomputed successfully');
+        }
+      } catch (err: any) {
+        console.error('Exception computing framework scores:', err);
+        const errorMsg = `Weights saved, but error recomputing framework scores: ${err.message}`;
+        setError(errorMsg);
       }
 
       // Then compute final aggregation
-      const { error: finalError } = await supabase.rpc('score_final_aggregate', {
-        in_instance_id: instance.id,
-      });
+      try {
+        const { error: finalError } = await supabase.rpc('score_final_aggregate', {
+          in_instance_id: instance.id,
+        });
 
-      if (finalError) {
-        console.error('Error computing final scores:', finalError);
-        // Continue anyway - weights are saved
+        if (finalError) {
+          console.error('Error computing final scores:', finalError);
+          const prevError = error || '';
+          const errorMsg = prevError 
+            ? `${prevError}\nError recomputing final scores: ${finalError.message}` 
+            : `Weights saved, but error recomputing final scores: ${finalError.message}`;
+          setError(errorMsg);
+          // Continue anyway - weights are saved
+        } else {
+          console.log('Final scores recomputed successfully');
+        }
+      } catch (err: any) {
+        console.error('Exception computing final scores:', err);
+        const prevError = error || '';
+        const errorMsg = prevError 
+          ? `${prevError}\nError recomputing final scores: ${err.message}` 
+          : `Weights saved, but error recomputing final scores: ${err.message}`;
+        setError(errorMsg);
       }
 
       if (onSaved) await onSaved();
