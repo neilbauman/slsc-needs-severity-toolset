@@ -6,9 +6,9 @@
 CREATE OR REPLACE FUNCTION public.insert_hazard_event(
   p_instance_id UUID,
   p_name TEXT,
-  p_description TEXT,
-  p_event_type TEXT DEFAULT 'earthquake',
   p_geojson JSONB,
+  p_description TEXT DEFAULT NULL,
+  p_event_type TEXT DEFAULT 'earthquake',
   p_magnitude_field TEXT DEFAULT 'value',
   p_metadata JSONB DEFAULT '{}'::JSONB
 )

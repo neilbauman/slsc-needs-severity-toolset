@@ -312,9 +312,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
-  // ✅ Load features for selected layer (overall, dataset, category, or category_score)
+  // ✅ Load features for selected layer (overall, dataset, category, category_score, or hazard_event)
   const loadFeaturesForSelection = async (
-    selection: { type: 'overall' | 'dataset' | 'category' | 'category_score', datasetId?: string, category?: string, categoryName?: string },
+    selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
     overallFeatures?: any[]
   ) => {
     try {
