@@ -690,57 +690,125 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           return;
         }
 
+        if (!scores || scores.length === 0) {
+          console.log("No scores found for hazard event");
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
         // Create score map
-        const scoreMap = new Map(scores?.map((s: any) => [s.admin_pcode, Number(s.score)]) || []);
-        const magnitudeMap = new Map(scores?.map((s: any) => [s.admin_pcode, Number(s.magnitude_value)]) || []);
-        console.log(`Loaded ${scores?.length || 0} scores for hazard event ${selection.hazardEventId}`);
+        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.score)]));
+        const magnitudeMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.magnitude_value)]));
+        const adminPcodes = Array.from(scoreMap.keys());
+        console.log(`Loaded ${scores.length} scores for hazard event ${selection.hazardEventId} across ${adminPcodes.length} admin areas`);
         
-        // Get geometry from view
-        const { data: geoRows, error: geoError } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode, geojson")
-          .eq("instance_id", instanceId);
+        // Get geometry for all admin_pcodes that have scores using get_admin_boundaries_geojson
+        const { data: geoData, error: geoError } = await supabase
+          .rpc('get_admin_boundaries_geojson', {
+            in_admin_pcodes: adminPcodes,
+            in_level: 'ADM3'
+          });
         
         if (geoError) {
           console.error("Error fetching GeoJSON:", geoError);
+          // Fallback: try to get from view
+          const { data: geoRows } = await supabase
+            .from("v_instance_admin_scores_geojson")
+            .select("admin_pcode, geojson")
+            .eq("instance_id", instanceId)
+            .in("admin_pcode", adminPcodes);
+          
+          if (geoRows && geoRows.length > 0) {
+            const hazardFeatures = geoRows
+              .map((row: any) => {
+                try {
+                  const feature = typeof row.geojson === 'string' 
+                    ? JSON.parse(row.geojson) 
+                    : row.geojson;
+                  
+                  const hazardScore = scoreMap.get(row.admin_pcode);
+                  const magnitudeValue = magnitudeMap.get(row.admin_pcode);
+                  
+                  return {
+                    ...feature,
+                    properties: {
+                      ...feature.properties,
+                      admin_pcode: row.admin_pcode,
+                      admin_name: feature.properties?.admin_name || feature.properties?.name,
+                      score: hazardScore,
+                      magnitude_value: magnitudeValue,
+                      has_score: hazardScore !== undefined,
+                    }
+                  };
+                } catch (e) {
+                  console.warn("Error parsing GeoJSON feature:", e, row);
+                  return null;
+                }
+              })
+              .filter((f: any) => f !== null);
+            
+            console.log(`Mapped ${hazardFeatures.length} features with hazard event scores (fallback)`);
+            setFeatures([...hazardFeatures]);
+            setLoadingFeatures(false);
+            return;
+          }
+          
           setFeatures([]);
           setLoadingFeatures(false);
           return;
         }
         
-        if (!geoRows || geoRows.length === 0) {
-          console.log("No GeoJSON features found for instance");
+        // Parse GeoJSON response (should be a FeatureCollection)
+        let geoFeatures: any[] = [];
+        if (geoData) {
+          if (typeof geoData === 'string') {
+            try {
+              const parsed = JSON.parse(geoData);
+              geoFeatures = parsed.type === 'FeatureCollection' ? parsed.features : [parsed];
+            } catch (e) {
+              console.error("Error parsing GeoJSON string:", e);
+            }
+          } else if (Array.isArray(geoData)) {
+            // If it's an array of features
+            geoFeatures = geoData;
+          } else if (geoData.type === 'FeatureCollection') {
+            geoFeatures = geoData.features || [];
+          } else if (geoData.type === 'Feature') {
+            geoFeatures = [geoData];
+          }
+        }
+        
+        if (geoFeatures.length === 0) {
+          console.log("No GeoJSON features found for admin areas with scores");
           setFeatures([]);
           setLoadingFeatures(false);
           return;
         }
         
         // Map scores to features
-        const hazardFeatures = geoRows
-          .map((row: any) => {
-            try {
-              const feature = typeof row.geojson === 'string' 
-                ? JSON.parse(row.geojson) 
-                : row.geojson;
-              
-              const hazardScore = scoreMap.get(row.admin_pcode);
-              const magnitudeValue = magnitudeMap.get(row.admin_pcode);
-              
-              return {
-                ...feature,
-                properties: {
-                  ...feature.properties,
-                  admin_pcode: row.admin_pcode,
-                  admin_name: feature.properties?.admin_name || feature.properties?.name,
-                  score: hazardScore,
-                  magnitude_value: magnitudeValue,
-                  has_score: hazardScore !== undefined,
-                }
-              };
-            } catch (e) {
-              console.warn("Error parsing GeoJSON feature:", e, row);
+        const hazardFeatures = geoFeatures
+          .map((feature: any) => {
+            const adminPcode = feature.properties?.admin_pcode;
+            if (!adminPcode) {
+              console.warn("Feature missing admin_pcode:", feature);
               return null;
             }
+            
+            const hazardScore = scoreMap.get(adminPcode);
+            const magnitudeValue = magnitudeMap.get(adminPcode);
+            
+            return {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                admin_pcode: adminPcode,
+                admin_name: feature.properties?.admin_name || feature.properties?.name || adminPcode,
+                score: hazardScore,
+                magnitude_value: magnitudeValue,
+                has_score: hazardScore !== undefined,
+              }
+            };
           })
           .filter((f: any) => f !== null);
         
