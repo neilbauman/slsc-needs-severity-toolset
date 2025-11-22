@@ -1040,16 +1040,23 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   const handleScoringSaved = async () => {
     setShowScoringModal(false);
-    await fetchData(); // Refresh data after scoring changes
+    setRefreshing(true);
+    // Clear cached features to force fresh load
+    setOverallFeatures([]);
+    setFeatures([]);
+    await fetchData(); // Refresh data after scoring changes (this updates overallFeatures)
+    // Add a delay to ensure database updates are complete
+    await new Promise(resolve => setTimeout(resolve, 800));
     // Reload features for current selection to show updated scores
+    // Force reload by passing undefined for overallFeatures to fetch fresh data
     if (instance && instanceId) {
-      const featuresToUse = selectedLayer.type === 'hazard_event' ? undefined : overallFeatures;
-      await loadFeaturesForSelection(selectedLayer, featuresToUse);
+      await loadFeaturesForSelection(selectedLayer, undefined);
     }
-    // Add a small delay to ensure database updates are complete before refreshing metrics
+    // Refresh metrics panel
     setTimeout(() => {
       setMetricsRefreshKey(prev => prev + 1); // Force metrics panel to refresh
-    }, 500);
+    }, 200);
+    setRefreshing(false);
   };
 
   const handleAffectedAreaSaved = async () => {
