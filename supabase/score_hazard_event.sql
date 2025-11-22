@@ -26,7 +26,8 @@ DECLARE
   v_scored_count INTEGER := 0;
   v_total_score NUMERIC := 0;
   v_affected_pcodes TEXT[];
-  v_admin_boundary RECORD;
+  v_geom_column TEXT;
+  v_boundary_geom GEOGRAPHY;
 BEGIN
   -- Load hazard event
   SELECT * INTO v_hazard_event
@@ -57,9 +58,26 @@ BEGIN
   -- The geometry is stored as a GeometryCollection in PostGIS
   -- We need to extract individual features to find nearest contour
 
+  -- First, determine which geometry column exists in admin_boundaries
+  SELECT column_name INTO v_geom_column
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'admin_boundaries'
+    AND column_name IN ('geom', 'geometry')
+  ORDER BY CASE column_name WHEN 'geom' THEN 1 ELSE 2 END
+  LIMIT 1;
+  
+  -- If no geometry column found, we can't proceed
+  IF v_geom_column IS NULL THEN
+    RETURN jsonb_build_object(
+      'status', 'error',
+      'message', 'No geometry column found in admin_boundaries table (expected ''geom'' or ''geometry'')'
+    );
+  END IF;
+
   -- For each admin area, find the nearest contour and extract magnitude
-  FOR v_admin_boundary IN
-    SELECT DISTINCT ab.admin_pcode, ab.geometry
+  FOR v_admin_pcode IN
+    SELECT DISTINCT ab.admin_pcode
     FROM public.admin_boundaries ab
     WHERE ab.admin_level = 'ADM3'
       AND (
@@ -67,9 +85,27 @@ BEGIN
         OR ab.admin_pcode = ANY(v_affected_pcodes)
       )
   LOOP
+    -- Get geometry for this admin boundary using the detected column name
+    IF v_geom_column = 'geom' THEN
+      SELECT geom::GEOGRAPHY INTO v_boundary_geom
+      FROM public.admin_boundaries
+      WHERE admin_pcode = v_admin_pcode AND admin_level = 'ADM3'
+      LIMIT 1;
+    ELSE
+      SELECT geometry::GEOGRAPHY INTO v_boundary_geom
+      FROM public.admin_boundaries
+      WHERE admin_pcode = v_admin_pcode AND admin_level = 'ADM3'
+      LIMIT 1;
+    END IF;
+    
+    -- If no geometry, skip this admin area
+    IF v_boundary_geom IS NULL THEN
+      CONTINUE;
+    END IF;
+    
     -- Calculate centroid of admin boundary
     BEGIN
-      v_admin_centroid := ST_Centroid(v_admin_boundary.geometry::GEOGRAPHY);
+      v_admin_centroid := ST_Centroid(v_boundary_geom);
     EXCEPTION WHEN OTHERS THEN
       CONTINUE; -- Skip if centroid calculation fails
     END;
@@ -153,7 +189,7 @@ BEGIN
       ) VALUES (
         in_hazard_event_id,
         in_instance_id,
-        v_admin_boundary.admin_pcode,
+        v_admin_pcode,
         v_score,
         v_nearest_magnitude
       )
