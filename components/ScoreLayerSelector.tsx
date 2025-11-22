@@ -143,10 +143,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           };
         });
 
-        setDatasets(transformed);
-
-        // Load hazard events
-        // Try RPC function first, fallback to direct table query
+        // Load hazard events and add them to datasets as "Hazard" category items
         let hazardEventsData: any[] = [];
         const { data: rpcData, error: hazardError } = await supabase
           .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
@@ -163,7 +160,6 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           if (tableError) {
             console.error('Error loading hazard events:', tableError);
           } else if (tableData) {
-            // Convert to expected format with geojson from metadata
             hazardEventsData = tableData.map((event: any) => ({
               ...event,
               geojson: event.metadata?.original_geojson || null,
@@ -173,11 +169,12 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           hazardEventsData = rpcData;
         }
 
+        // Get average scores for hazard events
+        let hazardEventAvgScores: Record<string, number> = {};
         if (hazardEventsData && hazardEventsData.length > 0) {
           console.log(`Loaded ${hazardEventsData.length} hazard events`);
           setHazardEvents(hazardEventsData);
 
-          // Get average scores for each hazard event
           const hazardEventIds = hazardEventsData.map((e: any) => e.id);
           if (hazardEventIds.length > 0) {
             const { data: scoresData } = await supabase
@@ -196,13 +193,28 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                 scoreMap[s.hazard_event_id].count += 1;
               });
 
-              const avgScores: Record<string, number> = {};
               Object.keys(scoreMap).forEach((eventId) => {
-                avgScores[eventId] = scoreMap[eventId].sum / scoreMap[eventId].count;
+                hazardEventAvgScores[eventId] = scoreMap[eventId].sum / scoreMap[eventId].count;
               });
-              setHazardEventScores(avgScores);
+              setHazardEventScores(hazardEventAvgScores);
             }
           }
+
+          // Add hazard events to datasets array as "Hazard" category items
+          const hazardEventDatasets = hazardEventsData.map((event: any) => ({
+            dataset_id: `hazard_event_${event.id}`, // Prefix to distinguish from regular datasets
+            dataset_name: event.name,
+            type: 'numeric' as const, // Treat as numeric for display purposes
+            category: 'Hazard' as const,
+            avg_score: hazardEventAvgScores[event.id] || null,
+            is_hazard_event: true, // Flag to identify as hazard event
+            hazard_event_id: event.id, // Store actual hazard event ID
+          }));
+
+          // Merge hazard events into datasets array
+          setDatasets([...transformed, ...hazardEventDatasets]);
+        } else {
+          setDatasets(transformed);
         }
       } catch (err) {
         console.error("Error loading datasets:", err);
@@ -215,10 +227,20 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
 
   // ✅ Handle selection
   const handleSelect = (type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string) => {
-    const selection = { type, datasetId, category, hazardEventId };
-    setActiveSelection(selection);
-    if (onSelect) {
-      onSelect({ ...selection, datasetName, categoryName });
+    // If datasetId starts with 'hazard_event_', extract the actual hazard event ID
+    if (datasetId && datasetId.startsWith('hazard_event_')) {
+      const actualHazardEventId = datasetId.replace('hazard_event_', '');
+      const selection = { type: 'hazard_event' as const, hazardEventId: actualHazardEventId };
+      setActiveSelection(selection);
+      if (onSelect) {
+        onSelect({ ...selection, datasetName, categoryName });
+      }
+    } else {
+      const selection = { type, datasetId, category, hazardEventId };
+      setActiveSelection(selection);
+      if (onSelect) {
+        onSelect({ ...selection, datasetName, categoryName });
+      }
     }
   };
 
@@ -329,35 +351,50 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
           
           {expandedCategories.has(cat) && (
             <div className="space-y-0.5 ml-1.5 mt-0.5">
-              {list.map((d) => (
+              {list.map((d) => {
+                // Check if this is a hazard event
+                const isHazardEvent = (d as any).is_hazard_event || d.dataset_id?.startsWith('hazard_event_');
+                const hazardEventId = isHazardEvent ? ((d as any).hazard_event_id || d.dataset_id?.replace('hazard_event_', '')) : null;
+                
+                return (
                 <div key={d.dataset_id}>
                   <button
                     onClick={() => {
-                      handleSelect('dataset', d.dataset_id, undefined, d.dataset_name);
-                      if (d.type === 'categorical') {
-                        loadCategoriesForDataset(d.dataset_id);
+                      if (isHazardEvent && hazardEventId) {
+                        handleSelect('hazard_event', d.dataset_id, undefined, d.dataset_name, undefined, hazardEventId);
+                      } else {
+                        handleSelect('dataset', d.dataset_id, undefined, d.dataset_name);
+                        if (d.type === 'categorical') {
+                          loadCategoriesForDataset(d.dataset_id);
+                        }
                       }
                     }}
                     className="block w-full text-left px-1.5 py-1 rounded text-xs transition-colors"
                     style={{
-                      backgroundColor: (activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
-                                     (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)
+                      backgroundColor: (isHazardEvent && activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === hazardEventId) ||
+                                       (!isHazardEvent && ((activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
+                                        (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)))
                         ? 'var(--gsc-blue)'
                         : 'transparent',
-                      color: (activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
-                            (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)
+                      color: (isHazardEvent && activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === hazardEventId) ||
+                             (!isHazardEvent && ((activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
+                              (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)))
                         ? '#fff'
                         : 'var(--gsc-gray)'
                     }}
                     onMouseEnter={(e) => {
-                      if (!((activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
-                            (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id))) {
+                      const isSelected = (isHazardEvent && activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === hazardEventId) ||
+                                       (!isHazardEvent && ((activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
+                                        (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)));
+                      if (!isSelected) {
                         e.currentTarget.style.backgroundColor = 'var(--gsc-light-gray)';
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (!((activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
-                            (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id))) {
+                      const isSelected = (isHazardEvent && activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === hazardEventId) ||
+                                       (!isHazardEvent && ((activeSelection.type === 'dataset' && activeSelection.datasetId === d.dataset_id && !activeSelection.category) || 
+                                        (activeSelection.type === 'category' && activeSelection.datasetId === d.dataset_id)));
+                      if (!isSelected) {
                         e.currentTarget.style.backgroundColor = 'transparent';
                       }
                     }}
@@ -369,7 +406,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                     </span>
                   )}
                 </button>
-                {d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
+                {!isHazardEvent && d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
                   <div className="ml-1.5 mt-0.5 space-y-0.5">
                     <button
                       onClick={() => handleSelect('category', d.dataset_id, 'overall', d.dataset_name)}
@@ -408,51 +445,12 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                     </div>
                   )}
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>
       ))}
-
-      {/* Hazard Events Section */}
-      {hazardEvents.length > 0 && (
-        <div className="mb-1 mt-3 border-t pt-2">
-          <h4 className="font-semibold text-xs mb-1" style={{ color: 'var(--gsc-gray)' }}>Hazard Events</h4>
-          {hazardEvents.map((event) => (
-            <div key={event.id} className="mb-0.5">
-              <button
-                onClick={() => handleSelect('hazard_event', undefined, undefined, undefined, undefined, event.id)}
-                className="block w-full text-left px-1.5 py-1 rounded text-xs transition-colors"
-                style={{
-                  backgroundColor: activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id
-                    ? 'var(--gsc-blue)'
-                    : 'transparent',
-                  color: activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id
-                    ? '#fff'
-                    : 'var(--gsc-gray)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!(activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id)) {
-                    e.currentTarget.style.backgroundColor = 'var(--gsc-light-gray)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!(activeSelection.type === 'hazard_event' && activeSelection.hazardEventId === event.id)) {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }
-                }}
-              >
-                {event.name}
-                {hazardEventScores[event.id] !== undefined && (
-                  <span className="float-right text-xs opacity-75">
-                    {Number(hazardEventScores[event.id]).toFixed(1)}
-                  </span>
-                )}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

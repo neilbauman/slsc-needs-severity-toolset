@@ -536,6 +536,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         setLoadingFeatures(false);
       } else if (selection.type === 'category_score' && selection.category) {
         // Load category score - aggregate all dataset scores within this category
+        // Includes both regular datasets and hazard events for Hazard category
         console.log(`Loading category score for: ${selection.category}`);
         
         // Get all datasets in this category
@@ -548,35 +549,51 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .filter((cd: any) => cd.datasets?.category === selection.category)
           .map((cd: any) => cd.dataset_id);
         
-        if (categoryDatasetIds.length === 0) {
-          console.log("No datasets found for category:", selection.category);
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
-        }
-        
         // Load all scores for datasets in this category
-        const { data: categoryScores, error: categoryScoresError } = await supabase
-          .from("instance_dataset_scores")
-          .select("admin_pcode, score")
-          .eq("instance_id", instanceId)
-          .in("dataset_id", categoryDatasetIds);
-        
-        if (categoryScoresError) {
-          console.error("Error fetching category scores:", categoryScoresError);
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
+        let categoryScores: any[] = [];
+        if (categoryDatasetIds.length > 0) {
+          const { data: datasetScores, error: datasetScoresError } = await supabase
+            .from("instance_dataset_scores")
+            .select("admin_pcode, score")
+            .eq("instance_id", instanceId)
+            .in("dataset_id", categoryDatasetIds);
+          
+          if (datasetScoresError) {
+            console.error("Error fetching dataset scores:", datasetScoresError);
+          } else if (datasetScores) {
+            categoryScores = datasetScores;
+          }
         }
         
-        if (!categoryScores || categoryScores.length === 0) {
+        // For Hazard category, also include hazard event scores
+        if (selection.category === 'Hazard') {
+          const { data: hazardEventsData } = await supabase
+            .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
+          
+          if (hazardEventsData && hazardEventsData.length > 0) {
+            const hazardEventIds = hazardEventsData.map((e: any) => e.id);
+            const { data: hazardScores, error: hazardScoresError } = await supabase
+              .from("hazard_event_scores")
+              .select("admin_pcode, score")
+              .eq("instance_id", instanceId)
+              .in("hazard_event_id", hazardEventIds);
+            
+            if (hazardScoresError) {
+              console.error("Error fetching hazard event scores:", hazardScoresError);
+            } else if (hazardScores) {
+              categoryScores = [...categoryScores, ...hazardScores];
+            }
+          }
+        }
+        
+        if (categoryScores.length === 0) {
           console.log("No scores found for category:", selection.category);
           setFeatures([]);
           setLoadingFeatures(false);
           return;
         }
         
-        // Aggregate scores by admin_pcode (average of all datasets in category)
+        // Aggregate scores by admin_pcode (average of all datasets/hazard events in category)
         const locationScoreMap: Record<string, { sum: number; count: number }> = {};
         categoryScores.forEach((s: any) => {
           if (!locationScoreMap[s.admin_pcode]) {

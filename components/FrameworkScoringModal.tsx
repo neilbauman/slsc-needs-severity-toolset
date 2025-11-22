@@ -46,6 +46,19 @@ const ALL_CATEGORY_KEYS: GroupKey[] = [
   'Underlying Vulnerability',
 ];
 
+// Helper to check if a dataset_id is a hazard event
+const isHazardEventId = (datasetId: string): boolean => {
+  return datasetId.startsWith('hazard_event_');
+};
+
+// Helper to extract hazard event ID from dataset_id
+const getHazardEventId = (datasetId: string): string | null => {
+  if (isHazardEventId(datasetId)) {
+    return datasetId.replace('hazard_event_', '');
+  }
+  return null;
+};
+
 export default function FrameworkScoringModal({ instance, onClose, onSaved }: Props) {
   const [loading, setLoading] = useState(false);
   const [datasets, setDatasets] = useState<UiDataset[]>([]);
@@ -117,6 +130,50 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
         type: r.datasets.type,
         avg_score: avgScores[r.dataset_id] || null,
       }));
+
+      // Load hazard events and add them to the Hazard category
+      const { data: hazardEventsData, error: hazardError } = await supabase
+        .rpc('get_hazard_events_for_instance', { in_instance_id: instance.id });
+
+      if (!hazardError && hazardEventsData && hazardEventsData.length > 0) {
+        // Get average scores for hazard events
+        const hazardEventIds = hazardEventsData.map((e: any) => e.id);
+        let hazardEventAvgScores: Record<string, number> = {};
+        
+        if (hazardEventIds.length > 0) {
+          const { data: hazardScoresData } = await supabase
+            .from('hazard_event_scores')
+            .select('hazard_event_id, score')
+            .eq('instance_id', instance.id)
+            .in('hazard_event_id', hazardEventIds);
+
+          if (hazardScoresData) {
+            const scoreMap: Record<string, { sum: number; count: number }> = {};
+            hazardScoresData.forEach((s: any) => {
+              if (!scoreMap[s.hazard_event_id]) {
+                scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
+              }
+              scoreMap[s.hazard_event_id].sum += Number(s.score);
+              scoreMap[s.hazard_event_id].count += 1;
+            });
+
+            Object.keys(scoreMap).forEach((eventId) => {
+              hazardEventAvgScores[eventId] = scoreMap[eventId].sum / scoreMap[eventId].count;
+            });
+          }
+        }
+
+        // Add hazard events as Hazard category datasets
+        const hazardEventDatasets: UiDataset[] = hazardEventsData.map((event: any) => ({
+          dataset_id: `hazard_event_${event.id}`, // Prefix to distinguish from regular datasets
+          dataset_name: event.name,
+          category: 'Hazard' as GroupKey,
+          type: 'numeric' as const,
+          avg_score: hazardEventAvgScores[event.id] || null,
+        }));
+
+        mapped.push(...hazardEventDatasets);
+      }
 
       setDatasets(mapped);
 
