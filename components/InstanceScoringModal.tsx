@@ -761,20 +761,14 @@ export default function InstanceScoringModal({
           </div>
         )}
 
-        <div className="mb-3">
-          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--gsc-gray)' }}>Aggregation method</label>
-          <select
-            value={method}
-            onChange={(e) => setMethod(e.target.value as any)}
-            className="border rounded px-2 py-1 w-full text-xs"
-            style={{ borderColor: 'var(--gsc-light-gray)' }}
-          >
-            <option value="mean">Simple average</option>
-            <option value="weighted_mean">Weighted mean</option>
-            <option value="compounding_hazards">Compounding Hazards (normalized sum + bonus)</option>
-            <option value="20_percent">20% rule (≥20%)</option>
-            <option value="custom">Custom % rule</option>
-          </select>
+        {/* Info panel explaining aggregation methods */}
+        <div className="mb-3 p-2 rounded border" style={{ backgroundColor: 'rgba(99, 7, 16, 0.05)', borderColor: 'var(--gsc-blue)' }}>
+          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--gsc-gray)' }}>How Aggregation Works:</div>
+          <div className="text-xs space-y-1" style={{ color: 'var(--gsc-gray)' }}>
+            <div><strong>Weighted Mean:</strong> Each dataset's score is multiplied by its weight, then averaged. Best for combining different types of data.</div>
+            <div><strong>Compounding Hazards:</strong> Scores are normalized (1→0, 5→1), weighted, then summed with a bonus for areas hit by multiple hazards. Best when multiple hazards overlap.</div>
+            <div><strong>Simple Average:</strong> All datasets contribute equally, regardless of weights.</div>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -784,7 +778,44 @@ export default function InstanceScoringModal({
             return (
             <div key={cat} className="border rounded p-2" style={{ borderColor: 'var(--gsc-light-gray)', backgroundColor: 'var(--gsc-beige)' }}>
               <div className="flex justify-between items-center mb-1.5">
-                <span className="font-semibold text-xs" style={{ color: 'var(--gsc-gray)' }}>{cat}</span>
+                <div className="flex-1">
+                  <span className="font-semibold text-xs" style={{ color: 'var(--gsc-gray)' }}>{cat}</span>
+                  {categoryData.datasets.length > 1 && (
+                    <div className="mt-0.5">
+                      <select
+                        value={cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 ? 'compounding_hazards' : 'weighted_mean'}
+                        onChange={(e) => {
+                          // For now, only Hazard category can use compounding_hazards
+                          // Other categories use weighted_mean
+                          // This could be expanded in the future
+                        }}
+                        className="text-xs px-1 py-0.5 border rounded"
+                        style={{ 
+                          borderColor: 'var(--gsc-light-gray)',
+                          backgroundColor: cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 ? 'rgba(211, 84, 0, 0.1)' : 'transparent'
+                        }}
+                        disabled={cat !== 'Hazard' || categoryData.datasets.filter(d => d.is_hazard_event).length <= 1}
+                        title={
+                          cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1
+                            ? 'Compounding Hazards: Normalizes scores (1→0, 5→1), applies weights, sums them, then adds a bonus (product × 0.5) for areas hit by multiple hazards. This emphasizes locations affected by both earthquake AND typhoon.'
+                            : cat === 'Hazard'
+                            ? 'Compounding method requires 2+ hazard events'
+                            : 'Multiple datasets in this category use weighted mean'
+                        }
+                      >
+                        <option value="weighted_mean">Weighted Mean</option>
+                        {cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 && (
+                          <option value="compounding_hazards">Compounding Hazards</option>
+                        )}
+                      </select>
+                      {cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 && (
+                        <span className="ml-1 text-xs" style={{ color: 'var(--gsc-orange)' }} title="This method normalizes each hazard score to 0-1, applies your weights, sums them, then adds a compounding bonus (product of normalized scores × 0.5) to emphasize areas hit by multiple hazards. Final result is scaled back to 1-5.">
+                          ⓘ Normalized + Bonus
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Category:</span>
                   <input
@@ -815,6 +846,13 @@ export default function InstanceScoringModal({
 
               {/* Compact dataset list */}
               <div className="space-y-1.5 pl-2 border-l-2" style={{ borderColor: 'var(--gsc-blue)' }}>
+                {categoryData.datasets.length > 1 && (
+                  <div className="text-xs mb-1 pb-1 border-b" style={{ color: 'var(--gsc-gray)', borderColor: 'var(--gsc-light-gray)' }}>
+                    <strong>Multiple datasets:</strong> {cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 
+                      ? 'Using Compounding Hazards method - areas hit by multiple hazards get a bonus'
+                      : 'Using Weighted Mean - each dataset contributes proportionally to its weight'}
+                  </div>
+                )}
                 {categoryData.datasets.map((d) => {
                   const weight = weights[d.id] ?? 0;
                   return (
