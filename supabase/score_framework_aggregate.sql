@@ -37,6 +37,9 @@ DECLARE
   v_location_count INTEGER := 0;
   v_hazard_event_id UUID;
   v_is_hazard_event BOOLEAN;
+  v_weights_map JSONB;
+  v_weight_record RECORD;
+  v_hazard_event_record RECORD;
 BEGIN
   -- Handle function overloading: determine which parameters were provided
   IF in_instance_id IS NULL AND in_config IS NOT NULL AND jsonb_typeof(in_config) = 'object' AND in_config ? 'instance_id' THEN
@@ -66,14 +69,45 @@ BEGIN
   END IF;
 
   -- Use default config if none provided
+  -- Load weights from instance_scoring_weights and hazard_events.metadata
   IF v_config IS NULL THEN
+    -- Build weights map from database
+    v_weights_map := '{}'::jsonb;
+    
+    -- Load weights for regular datasets
+    FOR v_weight_record IN
+      SELECT dataset_id, dataset_weight, category
+      FROM instance_scoring_weights
+      WHERE instance_id = v_instance_id
+    LOOP
+      v_weights_map := v_weights_map || jsonb_build_object(
+        v_weight_record.dataset_id::TEXT,
+        COALESCE(v_weight_record.dataset_weight, 1.0)
+      );
+    END LOOP;
+
+    -- Load weights for hazard events
+    FOR v_hazard_event_record IN
+      SELECT id, metadata
+      FROM hazard_events
+      WHERE instance_id = v_instance_id
+        AND metadata IS NOT NULL
+        AND metadata ? 'weight'
+    LOOP
+      v_weights_map := v_weights_map || jsonb_build_object(
+        'hazard_event_' || v_hazard_event_record.id::TEXT,
+        COALESCE((v_hazard_event_record.metadata->>'weight')::NUMERIC, 1.0)
+      );
+    END LOOP;
+
+    -- Build config with weighted_mean method and loaded weights
     v_config := jsonb_build_object(
       'categories', jsonb_build_array(
-        jsonb_build_object('key', 'SSC Framework - P1', 'method', 'average', 'weights', '{}'::jsonb),
-        jsonb_build_object('key', 'SSC Framework - P2', 'method', 'average', 'weights', '{}'::jsonb),
-        jsonb_build_object('key', 'SSC Framework - P3', 'method', 'average', 'weights', '{}'::jsonb),
-        jsonb_build_object('key', 'Hazard', 'method', 'average', 'weights', '{}'::jsonb),
-        jsonb_build_object('key', 'Underlying Vulnerability', 'method', 'average', 'weights', '{}'::jsonb)
+        jsonb_build_object('key', 'SSC Framework - P1', 'method', 'weighted_mean', 'weights', v_weights_map),
+        jsonb_build_object('key', 'SSC Framework - P2', 'method', 'weighted_mean', 'weights', v_weights_map),
+        jsonb_build_object('key', 'SSC Framework - P3', 'method', 'weighted_mean', 'weights', v_weights_map),
+        jsonb_build_object('key', 'Hazard', 'method', 'weighted_mean', 'weights', v_weights_map),
+        jsonb_build_object('key', 'Underlying Vulnerability', 'method', 'weighted_mean', 'weights', v_weights_map)
       )
     );
   END IF;
@@ -136,7 +170,7 @@ BEGIN
           ids.dataset_id::TEXT AS dataset_id,
           ids.score,
           CASE 
-            WHEN v_method = 'custom_weighted' AND v_weights ? ids.dataset_id::TEXT 
+            WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean') AND v_weights ? ids.dataset_id::TEXT 
             THEN (v_weights->ids.dataset_id::TEXT)::NUMERIC
             ELSE 1.0
           END AS weight
@@ -153,7 +187,7 @@ BEGIN
           'hazard_event_' || hes.hazard_event_id::TEXT AS dataset_id,
           hes.score,
           CASE 
-            WHEN v_method = 'custom_weighted' AND v_weights ? ('hazard_event_' || hes.hazard_event_id::TEXT)
+            WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean') AND v_weights ? ('hazard_event_' || hes.hazard_event_id::TEXT)
             THEN (v_weights->('hazard_event_' || hes.hazard_event_id::TEXT))::NUMERIC
             ELSE 1.0
           END AS weight
@@ -192,22 +226,13 @@ BEGIN
         BEGIN
           -- Try to use an existing framework scores table or create one
           -- For now, we'll use a generic approach that can be adapted
-          PERFORM 1 FROM information_schema.tables 
-          WHERE table_schema = 'public' 
-            AND table_name = 'instance_category_scores';
+          -- Always try to insert/update - table should exist
+          INSERT INTO instance_category_scores (instance_id, category, admin_pcode, score)
+          VALUES (v_instance_id, v_category_key, v_admin_pcode, v_category_score)
+          ON CONFLICT (instance_id, category, admin_pcode)
+          DO UPDATE SET score = EXCLUDED.score, computed_at = NOW();
           
-          IF FOUND THEN
-            INSERT INTO instance_category_scores (instance_id, category, admin_pcode, score)
-            VALUES (v_instance_id, v_category_key, v_admin_pcode, v_category_score)
-            ON CONFLICT (instance_id, category, admin_pcode)
-            DO UPDATE SET score = EXCLUDED.score, computed_at = NOW();
-            
-            GET DIAGNOSTICS v_upserted_rows = ROW_COUNT;
-          ELSE
-            -- Table doesn't exist - category scores are computed on-demand
-            -- This is fine - the function still returns the aggregated results
-            v_upserted_rows := v_upserted_rows + 1;
-          END IF;
+          GET DIAGNOSTICS v_upserted_rows = ROW_COUNT;
         EXCEPTION WHEN OTHERS THEN
           -- If there's an error, continue - scores are computed on-demand anyway
           v_upserted_rows := v_upserted_rows + 1;

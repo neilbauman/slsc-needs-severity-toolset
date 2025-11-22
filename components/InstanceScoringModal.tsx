@@ -575,11 +575,12 @@ export default function InstanceScoringModal({
       }
 
       // Recompute framework and final scores with new weights
-      // First compute framework aggregation - use simple signature to avoid overloading issues
+      // First compute framework aggregation - call the UUID-only overload explicitly
       try {
+        // Use the simple signature (UUID only) to avoid overloading ambiguity
         const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
           in_instance_id: instance.id,
-        });
+        } as any); // Type assertion to help TypeScript
 
         if (frameworkError) {
           console.error('Error computing framework scores:', frameworkError);

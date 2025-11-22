@@ -24,9 +24,18 @@ DECLARE
   v_hazard_weight NUMERIC := 1.0;
   v_uv_weight NUMERIC := 1.0;
   v_total_weight NUMERIC;
+  v_sample_category_weight NUMERIC;
 BEGIN
-  -- Get category weights from instance configuration or use defaults
-  -- For now, we'll use equal weights (can be enhanced to read from instance metadata)
+  -- Get category weights from instance_scoring_weights or use defaults
+  -- Try to get category weights from the first dataset's entry (they should all have the same category_weight)
+  SELECT category_weight INTO v_sample_category_weight
+  FROM instance_scoring_weights
+  WHERE instance_id = in_instance_id
+    AND category = 'SSC Framework - P1'
+  LIMIT 1;
+  
+  -- For now, use equal weights for all categories
+  -- Can be enhanced to read actual category weights from instance_scoring_weights
   v_framework_weight := 1.0;
   v_hazard_weight := 1.0;
   v_uv_weight := 1.0;
