@@ -168,7 +168,8 @@ BEGIN
               ))
             ELSE
               -- Single hazard: just normalize and scale back (no compounding)
-              LEAST(5.0, GREATEST(1.0, ((score - 1.0) / 4.0) * 4.0 + 1.0))
+              -- Use MAX(score) since we're grouping by admin_pcode (there should only be one score anyway)
+              LEAST(5.0, GREATEST(1.0, ((MAX(score) - 1.0) / 4.0) * 4.0 + 1.0))
           END
         WHEN v_method = 'worst_case' THEN
           MAX(score)

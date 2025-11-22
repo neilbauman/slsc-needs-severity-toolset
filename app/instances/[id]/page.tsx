@@ -971,7 +971,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const handleScoringSaved = async () => {
     setShowScoringModal(false);
     await fetchData(); // Refresh data after scoring changes
-    setMetricsRefreshKey(prev => prev + 1); // Force metrics panel to refresh
+    // Add a small delay to ensure database updates are complete before refreshing metrics
+    setTimeout(() => {
+      setMetricsRefreshKey(prev => prev + 1); // Force metrics panel to refresh
+    }, 500);
   };
 
   const handleAffectedAreaSaved = async () => {
