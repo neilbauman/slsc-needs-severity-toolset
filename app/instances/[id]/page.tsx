@@ -699,6 +699,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
         if (!scores || scores.length === 0) {
           console.log("No scores found for hazard event - user needs to apply scoring first");
+          console.log("Query details:", {
+            instance_id: instanceId,
+            hazard_event_id: selection.hazardEventId
+          });
+          // Check if hazard event exists
+          const { data: eventCheck } = await supabase
+            .from("hazard_events")
+            .select("id, name")
+            .eq("id", selection.hazardEventId)
+            .single();
+          console.log("Hazard event exists:", eventCheck);
           // Show a message that scoring needs to be applied
           setFeatures([]);
           setLoadingFeatures(false);
@@ -706,6 +717,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         }
 
         console.log(`Found ${scores.length} hazard event scores:`, scores.slice(0, 5));
+        console.log("Sample scores:", scores.slice(0, 3).map((s: any) => ({
+          admin_pcode: s.admin_pcode,
+          score: s.score,
+          magnitude: s.magnitude_value
+        })));
 
         // Create score map
         const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.score)]));
@@ -1381,6 +1397,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           }}
           onSaved={async () => {
             await fetchData();
+            // Reload features if hazard event is still selected
+            if (selectedLayer.type === 'hazard_event' && selectedLayer.hazardEventId === selectedHazardEvent?.id) {
+              console.log("Reloading features after scoring applied");
+              await loadFeaturesForSelection(selectedLayer);
+            }
             setShowHazardScoringModal(false);
             setSelectedHazardEvent(null);
           }}

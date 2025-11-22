@@ -284,7 +284,19 @@ export default function HazardEventScoringModal({
     }
 
     console.log('Scoring applied successfully:', data);
-    setMessage("✅ Scoring complete! Scores calculated for all locations.");
+    
+    // Check if scores were actually created
+    if (data && typeof data === 'object') {
+      const scoredLocations = data.scored_locations || data.scored_count || 0;
+      if (scoredLocations === 0) {
+        setMessage(`⚠️ Warning: Scoring completed but no locations were scored. This might mean:\n- No admin boundaries found\n- No magnitude values matched the ranges\n- Geometry column not found in admin_boundaries table`);
+        setLoading(false);
+        return;
+      }
+      setMessage(`✅ Scoring complete! ${scoredLocations} locations scored with average score of ${(data.average_score || 0).toFixed(2)}.`);
+    } else {
+      setMessage("✅ Scoring complete! Scores calculated for all locations.");
+    }
 
     // Save config after successful scoring
     await handleSaveConfig();
