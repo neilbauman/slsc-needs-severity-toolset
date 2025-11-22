@@ -14,9 +14,8 @@ export default function InstanceScoringModal({
   onClose,
   onSaved,
 }: InstanceScoringModalProps) {
-  const [categories, setCategories] = useState<
-    Record<string, { name: string; datasets: any[]; categoryWeight: number }>
-  >({});
+  type CategoryData = { name: string; datasets: any[]; categoryWeight: number };
+  const [categories, setCategories] = useState<Record<string, CategoryData>>({});
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<'mean' | 'weighted_mean' | '20_percent' | 'custom'>(
     'weighted_mean'
@@ -62,29 +61,38 @@ export default function InstanceScoringModal({
 
   // Normalize all category weights
   const normalizeAllCategories = () => {
-    const total = Object.values(categories).reduce((sum, c) => sum + (c.categoryWeight || 0), 0);
+    const categoryValues = Object.values(categories) as CategoryData[];
+    const total = categoryValues.reduce((sum, catData) => {
+      return sum + (catData.categoryWeight || 0);
+    }, 0);
     if (total === 0) return;
 
-    const newCats = { ...categories };
+    const newCats: Record<string, CategoryData> = { ...categories };
     const step = 5;
     let sum = 0;
 
     Object.keys(newCats).forEach((cat) => {
-      newCats[cat].categoryWeight = snapToStep(
-        (newCats[cat].categoryWeight / total) * 100,
+      const catData = newCats[cat] as CategoryData;
+      const currentWeight = catData.categoryWeight || 0;
+      const newWeight = snapToStep(
+        (currentWeight / total) * 100,
         step
       );
-      sum += newCats[cat].categoryWeight;
+      catData.categoryWeight = newWeight;
+      sum += newWeight;
     });
 
     const diff = 100 - sum;
     if (diff !== 0) {
-      const largestCat = Object.keys(newCats).reduce((a, b) =>
-        newCats[a].categoryWeight > newCats[b].categoryWeight ? a : b
-      );
-      newCats[largestCat].categoryWeight = Math.max(
+      const largestCat = Object.keys(newCats).reduce((a, b) => {
+        const aData = newCats[a] as CategoryData;
+        const bData = newCats[b] as CategoryData;
+        return aData.categoryWeight > bData.categoryWeight ? a : b;
+      });
+      const largestCatData = newCats[largestCat] as CategoryData;
+      largestCatData.categoryWeight = Math.max(
         0,
-        Math.min(100, newCats[largestCat].categoryWeight + diff)
+        Math.min(100, largestCatData.categoryWeight + diff)
       );
     }
 
@@ -119,7 +127,24 @@ export default function InstanceScoringModal({
         id: d.datasets.id,
         name: d.datasets.name,
         category: d.datasets.category || 'Uncategorized',
+        is_hazard_event: false,
       }));
+
+      // Load hazard events and add them to the Hazard category
+      const { data: hazardEventsData, error: hazardError } = await supabase
+        .rpc('get_hazard_events_for_instance', { in_instance_id: instance.id });
+
+      if (!hazardError && hazardEventsData && hazardEventsData.length > 0) {
+        const hazardEventDatasets = hazardEventsData.map((event: any) => ({
+          id: `hazard_event_${event.id}`, // Prefix to distinguish from regular datasets
+          name: event.name,
+          category: 'Hazard',
+          is_hazard_event: true,
+          hazard_event_id: event.id,
+        }));
+        flat.push(...hazardEventDatasets);
+        console.log('Loaded hazard events:', hazardEventDatasets.map((d: any) => d.name));
+      }
 
       const { data: savedWeights } = await supabase
         .from('instance_scoring_weights')
@@ -131,7 +156,7 @@ export default function InstanceScoringModal({
         weightMap[w.dataset_id] = (w.dataset_weight ?? 0) * 100;
       });
 
-      const grouped: Record<string, { name: string; datasets: any[]; categoryWeight: number }> = {};
+      const grouped: Record<string, CategoryData> = {};
       for (const d of flat) {
         const cat = d.category;
         if (!grouped[cat]) grouped[cat] = { name: cat, datasets: [], categoryWeight: 1 };
@@ -169,9 +194,10 @@ export default function InstanceScoringModal({
     setLoading(true);
     try {
       for (const [cat, obj] of Object.entries(categories)) {
-        for (const d of obj.datasets) {
+        const categoryData = obj as CategoryData;
+        for (const d of categoryData.datasets) {
           const weightDecimal = (weights[d.id] || 0) / 100;
-          const catDecimal = (obj.categoryWeight || 0) / 100;
+          const catDecimal = (categoryData.categoryWeight || 0) / 100;
 
           const { error } = await supabase.from('instance_scoring_weights').upsert({
             instance_id: instance.id,
@@ -217,25 +243,32 @@ export default function InstanceScoringModal({
           </select>
         </div>
 
-        {Object.entries(categories).map(([cat, obj]) => (
+        {Object.entries(categories).map(([cat, obj]) => {
+          const categoryData = obj as CategoryData;
+          return (
           <div key={cat} className="mb-3 border rounded p-2 bg-gray-50">
             <div className="flex justify-between items-center mb-2">
               <span className="font-semibold text-gray-800">{cat}</span>
               <div className="flex items-center gap-1 text-xs">
                 <span className="text-gray-500">Category Weight:</span>
-                <input
-                  type="number"
-                  step="5"
-                  min="0"
-                  max="100"
-                  value={Math.round(obj.categoryWeight)}
-                  onChange={(e) =>
-                    handleCategoryWeightChange(cat, parseFloat(e.target.value))
-                  }
-                  onBlur={normalizeAllCategories}
-                  className="w-16 border rounded px-1 py-0.5 text-right"
-                />
-                <span>%</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round(categoryData.categoryWeight)}
+                    onChange={(e) => {
+                      handleCategoryWeightChange(cat, parseFloat(e.target.value));
+                      normalizeAllCategories();
+                    }}
+                    className="w-24 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${categoryData.categoryWeight}%, #e5e7eb ${categoryData.categoryWeight}%, #e5e7eb 100%)`
+                    }}
+                  />
+                  <span className="w-12 text-right font-semibold">{Math.round(categoryData.categoryWeight)}%</span>
+                </div>
               </div>
             </div>
 
@@ -243,35 +276,49 @@ export default function InstanceScoringModal({
             <div className="h-1 bg-gray-200 rounded mb-2 overflow-hidden">
               <div
                 className="h-full bg-blue-500 transition-all"
-                style={{ width: `${obj.categoryWeight}%` }}
+                style={{ width: `${categoryData.categoryWeight}%` }}
               />
             </div>
 
-            {obj.datasets.map((d) => (
+            {categoryData.datasets.map((d) => (
               <div
                 key={d.id}
-                className="flex items-center justify-between pl-4 py-1 border-t text-gray-700"
+                className="pl-4 py-2 border-t text-gray-700"
               >
-                <span className="truncate">{d.name}</span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="truncate font-medium text-sm flex items-center gap-2">
+                    {d.name}
+                    {d.is_hazard_event && (
+                      <span className="text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded">
+                        Hazard Event
+                      </span>
+                    )}
+                  </span>
+                  <span className="w-12 text-right font-semibold text-sm">{Math.round(weights[d.id] ?? 0)}%</span>
+                </div>
+                <div className="flex items-center gap-2">
                   <input
-                    type="number"
-                    step="5"
+                    type="range"
                     min="0"
                     max="100"
+                    step="1"
                     value={Math.round(weights[d.id] ?? 0)}
-                    onChange={(e) => handleWeightChange(d.id, parseFloat(e.target.value))}
-                    onBlur={() => normalizeCategory(cat)}
-                    className="w-16 text-sm border rounded px-1 py-0.5 text-right"
+                    onChange={(e) => {
+                      handleWeightChange(d.id, parseFloat(e.target.value));
+                      normalizeCategory(cat);
+                    }}
+                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, #10b981 0%, #10b981 ${weights[d.id] || 0}%, #e5e7eb ${weights[d.id] || 0}%, #e5e7eb 100%)`
+                    }}
                   />
-                  <span>%</span>
                 </div>
               </div>
             ))}
 
             {/* Visual weight bar for dataset group */}
             <div className="h-1 bg-gray-100 mt-2 rounded overflow-hidden flex gap-0.5">
-              {obj.datasets.map((d) => (
+              {categoryData.datasets.map((d) => (
                 <div
                   key={d.id}
                   className="bg-green-500 transition-all"
@@ -280,7 +327,8 @@ export default function InstanceScoringModal({
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         <div className="flex justify-end gap-2 mt-4">
           <button
