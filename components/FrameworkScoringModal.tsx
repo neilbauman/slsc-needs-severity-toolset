@@ -360,7 +360,10 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
     try {
       // Load current scores for all datasets and locations
       const datasetIds = datasets.map(d => d.dataset_id).filter(id => !isHazardEventId(id));
-      const hazardEventIds = datasets.filter(d => isHazardEventId(d)).map(d => getHazardEventId(d.dataset_id)).filter(Boolean) as string[];
+      const hazardEventIds = datasets
+        .filter(d => isHazardEventId(d.dataset_id))
+        .map(d => getHazardEventId(d.dataset_id))
+        .filter((id): id is string => id !== null);
 
       // Get sample locations (first 10 admin areas with scores)
       const { data: sampleLocations } = await supabase
