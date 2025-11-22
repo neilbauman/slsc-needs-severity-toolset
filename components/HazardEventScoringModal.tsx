@@ -9,6 +9,12 @@ interface MagnitudeRange {
   score: number | '';
 }
 
+interface DistanceRange {
+  min: number; // meters
+  max: number; // meters
+  score: number | '';
+}
+
 interface LocationPreview {
   admin_pcode: string;
   admin_name: string;
@@ -45,19 +51,48 @@ export default function HazardEventScoringModal({
   const [saving, setSaving] = useState(false);
   const [matchingMethod, setMatchingMethod] = useState<'centroid' | 'intersection' | 'overlap' | 'within_distance' | 'point_on_surface'>('centroid');
   const [distanceThreshold, setDistanceThreshold] = useState<number>(10000);
+  const [scoringMode, setScoringMode] = useState<'magnitude' | 'distance'>('magnitude'); // 'magnitude' or 'distance'
+  const [distanceRanges, setDistanceRanges] = useState<DistanceRange[]>([
+    { min: 0, max: 50000, score: 5 },      // 0-50km: highest risk
+    { min: 50000, max: 100000, score: 4 }, // 50-100km: high risk
+    { min: 100000, max: 200000, score: 3 }, // 100-200km: medium risk
+    { min: 200000, max: 300000, score: 2 }, // 200-300km: low risk
+    { min: 300000, max: 1000000, score: 1 }, // 300km+: minimal risk
+  ]);
 
-  // Load magnitude statistics from hazard event
+  // Detect scoring mode and load statistics
   useEffect(() => {
-    const loadMagnitudeStats = async () => {
+    const loadEventStats = async () => {
       if (!hazardEvent?.id) return;
 
       try {
-        // Get magnitude values from metadata
         const metadata = hazardEvent.metadata || {};
         const originalGeoJson = metadata.original_geojson;
         const magnitudeField = hazardEvent.magnitude_field || 'value';
+        const eventType = hazardEvent.event_type || 'earthquake';
 
+        // Detect if this is a track-type event (typhoon, storm track) that should use distance-based scoring
+        // Check if event_type is 'typhoon' or if there are no magnitude values in the features
+        let hasMagnitudeValues = false;
         if (originalGeoJson && originalGeoJson.features) {
+          for (const feature of originalGeoJson.features.slice(0, 10)) {
+            if (feature.properties && feature.properties[magnitudeField] !== undefined) {
+              const val = Number(feature.properties[magnitudeField]);
+              if (!isNaN(val)) {
+                hasMagnitudeValues = true;
+                break;
+              }
+            }
+          }
+        }
+
+        // If event_type is typhoon or no magnitude values found, use distance-based scoring
+        if (eventType === 'typhoon' || !hasMagnitudeValues) {
+          setScoringMode('distance');
+        } else {
+          setScoringMode('magnitude');
+          
+          // Load magnitude statistics
           const values: number[] = [];
           originalGeoJson.features.forEach((feature: any) => {
             if (feature.properties && feature.properties[magnitudeField] !== undefined) {
@@ -94,11 +129,11 @@ export default function HazardEventScoringModal({
           }
         }
       } catch (err) {
-        console.error('Error loading magnitude stats:', err);
+        console.error('Error loading event stats:', err);
       }
     };
 
-    loadMagnitudeStats();
+    loadEventStats();
   }, [hazardEvent]);
 
   // Load saved configuration
@@ -118,6 +153,12 @@ export default function HazardEventScoringModal({
         const cfg = data.metadata.score_config;
         if (cfg.ranges) {
           setRanges(cfg.ranges);
+        }
+        if (cfg.distance_ranges) {
+          setDistanceRanges(cfg.distance_ranges);
+        }
+        if (cfg.scoring_mode) {
+          setScoringMode(cfg.scoring_mode);
         }
         setMessage("✅ Loaded existing scoring configuration");
         setTimeout(() => setMessage(""), 3000);
@@ -139,17 +180,42 @@ export default function HazardEventScoringModal({
     setRanges(newRanges);
   };
 
+  const handleDistanceRangeChange = (index: number, field: 'min' | 'max' | 'score', value: string) => {
+    const newRanges = [...distanceRanges];
+    if (field === 'score') {
+      const parsed = value === '' ? '' : Math.max(1, Math.min(5, parseInt(value) || 1));
+      newRanges[index].score = parsed;
+    } else {
+      const parsed = parseFloat(value) || 0;
+      newRanges[index][field] = parsed;
+    }
+    setDistanceRanges(newRanges);
+  };
+
   const addRange = () => {
-    const lastRange = ranges[ranges.length - 1];
-    setRanges([
-      ...ranges,
-      { min: lastRange.max, max: lastRange.max + 1, score: '' },
-    ]);
+    if (scoringMode === 'magnitude') {
+      const lastRange = ranges[ranges.length - 1];
+      setRanges([
+        ...ranges,
+        { min: lastRange.max, max: lastRange.max + 1, score: '' },
+      ]);
+    } else {
+      const lastRange = distanceRanges[distanceRanges.length - 1];
+      setDistanceRanges([
+        ...distanceRanges,
+        { min: lastRange.max, max: lastRange.max + 50000, score: '' },
+      ]);
+    }
   };
 
   const removeRange = (index: number) => {
-    if (ranges.length <= 1) return;
-    setRanges(ranges.filter((_, i) => i !== index));
+    if (scoringMode === 'magnitude') {
+      if (ranges.length <= 1) return;
+      setRanges(ranges.filter((_, i) => i !== index));
+    } else {
+      if (distanceRanges.length <= 1) return;
+      setDistanceRanges(distanceRanges.filter((_, i) => i !== index));
+    }
   };
 
   const calculatePreview = async () => {
@@ -213,7 +279,9 @@ export default function HazardEventScoringModal({
 
     setSaving(true);
     const config = {
-      ranges: ranges.filter(r => r.score !== ''),
+      ranges: scoringMode === 'magnitude' ? ranges.filter(r => r.score !== '') : null,
+      distance_ranges: scoringMode === 'distance' ? distanceRanges.filter(r => r.score !== '') : null,
+      scoring_mode: scoringMode,
     };
 
     // Store in metadata
@@ -242,43 +310,76 @@ export default function HazardEventScoringModal({
       return;
     }
 
-    // Validate that all ranges have scores
-    const unscored = ranges.filter((r) => r.score === '');
-    if (unscored.length > 0) {
-      alert(`Please assign scores to all magnitude ranges. Missing scores for ${unscored.length} range(s).`);
-      return;
-    }
-
-    // Validate ranges don't overlap incorrectly
-    for (let i = 0; i < ranges.length - 1; i++) {
-      if (ranges[i].max > ranges[i + 1].min) {
-        alert(`Ranges overlap incorrectly. Range ${i + 1} max (${ranges[i].max}) should be <= Range ${i + 2} min (${ranges[i + 1].min}).`);
+    // Validate based on scoring mode
+    if (scoringMode === 'magnitude') {
+      const unscored = ranges.filter((r) => r.score === '');
+      if (unscored.length > 0) {
+        alert(`Please assign scores to all magnitude ranges. Missing scores for ${unscored.length} range(s).`);
         return;
+      }
+
+      // Validate ranges don't overlap incorrectly
+      for (let i = 0; i < ranges.length - 1; i++) {
+        if (ranges[i].max > ranges[i + 1].min) {
+          alert(`Ranges overlap incorrectly. Range ${i + 1} max (${ranges[i].max}) should be <= Range ${i + 2} min (${ranges[i + 1].min}).`);
+          return;
+        }
+      }
+    } else {
+      // Distance-based scoring
+      const unscored = distanceRanges.filter((r) => r.score === '');
+      if (unscored.length > 0) {
+        alert(`Please assign scores to all distance ranges. Missing scores for ${unscored.length} range(s).`);
+        return;
+      }
+
+      // Validate ranges don't overlap incorrectly
+      for (let i = 0; i < distanceRanges.length - 1; i++) {
+        if (distanceRanges[i].max > distanceRanges[i + 1].min) {
+          alert(`Ranges overlap incorrectly. Range ${i + 1} max (${distanceRanges[i].max}m) should be <= Range ${i + 2} min (${distanceRanges[i + 1].min}m).`);
+          return;
+        }
       }
     }
 
     setLoading(true);
     setMessage("Applying scoring...");
 
-    const magnitudeRanges = ranges
-      .filter((r) => r.score !== '')
-      .map((r) => ({
-        min: Number(r.min),
-        max: Number(r.max),
-        score: Number(r.score),
-      }));
-
     // Determine if we should limit to affected areas
     const limitToAffected = instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0;
 
-    const { data, error } = await supabase.rpc('score_hazard_event', {
+    let rpcParams: any = {
       in_hazard_event_id: hazardEvent.id,
       in_instance_id: instance.id,
-      in_magnitude_ranges: magnitudeRanges,
       in_limit_to_affected: limitToAffected,
       in_matching_method: matchingMethod,
       in_distance_meters: matchingMethod === 'within_distance' ? distanceThreshold : null,
-    });
+    };
+
+    if (scoringMode === 'magnitude') {
+      const magnitudeRanges = ranges
+        .filter((r) => r.score !== '')
+        .map((r) => ({
+          min: Number(r.min),
+          max: Number(r.max),
+          score: Number(r.score),
+        }));
+      rpcParams.in_magnitude_ranges = magnitudeRanges;
+      rpcParams.in_distance_ranges = null;
+    } else {
+      // Distance-based scoring
+      const distRanges = distanceRanges
+        .filter((r) => r.score !== '')
+        .map((r) => ({
+          min: Number(r.min),
+          max: Number(r.max),
+          score: Number(r.score),
+        }));
+      rpcParams.in_distance_ranges = distRanges;
+      rpcParams.in_magnitude_ranges = null;
+    }
+
+    const { data, error } = await supabase.rpc('score_hazard_event', rpcParams);
 
     if (error) {
       console.error('Error applying scoring:', error);
@@ -341,11 +442,25 @@ export default function HazardEventScoringModal({
           {hazardEvent?.name || 'Hazard Event'}
         </h2>
         <p className="text-gray-600 mb-4">
-          Map magnitude/intensity ranges to vulnerability scores (1–5). Higher magnitudes should generally receive higher scores.
+          {scoringMode === 'magnitude' 
+            ? 'Map magnitude/intensity ranges to vulnerability scores (1–5). Higher magnitudes should generally receive higher scores.'
+            : 'Map distance thresholds from the storm track to vulnerability scores (1–5). Closer distances should receive higher scores.'}
         </p>
 
-        {/* Magnitude Statistics */}
-        {magnitudeStats && (
+        {/* Scoring Mode Indicator */}
+        <div className="mb-4 p-2 border rounded bg-blue-50">
+          <p className="text-sm">
+            <strong>Scoring Mode:</strong> {scoringMode === 'magnitude' ? 'Magnitude-based' : 'Distance-based (from track)'}
+            {scoringMode === 'distance' && (
+              <span className="ml-2 text-xs text-gray-600">
+                (Detected track-type event - scoring by distance from storm path)
+              </span>
+            )}
+          </p>
+        </div>
+
+        {/* Magnitude Statistics (only for magnitude-based scoring) */}
+        {scoringMode === 'magnitude' && magnitudeStats && (
           <div className="mb-4 p-3 border rounded bg-blue-50">
             <h3 className="text-sm font-semibold text-blue-800 mb-2">Magnitude Statistics</h3>
             <div className="text-sm text-blue-700">
@@ -359,11 +474,26 @@ export default function HazardEventScoringModal({
           </div>
         )}
 
+        {/* Distance-based scoring info */}
+        {scoringMode === 'distance' && (
+          <div className="mb-4 p-3 border rounded bg-green-50">
+            <h3 className="text-sm font-semibold text-green-800 mb-2">Distance-Based Scoring</h3>
+            <div className="text-sm text-green-700">
+              <p>This event will be scored based on distance from administrative boundaries to the storm track.</p>
+              <p className="text-xs mt-1">
+                Distance is calculated from the boundary center (centroid) to the nearest point on the track.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Spatial Matching Method Selection */}
         <div className="mb-4 p-3 border rounded bg-gray-50">
           <h3 className="text-sm font-semibold mb-2">Spatial Matching Method</h3>
           <p className="text-xs text-gray-600 mb-2">
-            Choose how to match shake map contours to administrative boundaries:
+            {scoringMode === 'magnitude' 
+              ? 'Choose how to match shake map contours to administrative boundaries:'
+              : 'For distance-based scoring, the centroid method is used to calculate distance from boundary center to track.'}
           </p>
           <div className="space-y-2">
             <div>
@@ -401,10 +531,14 @@ export default function HazardEventScoringModal({
           </div>
         </div>
 
-        {/* Magnitude Range Mapping */}
+        {/* Range Mapping - Magnitude or Distance */}
         <div className="mb-4">
           <div className="flex justify-between items-center mb-2">
-            <h3 className="text-sm font-semibold">Magnitude Range to Score Mapping</h3>
+            <h3 className="text-sm font-semibold">
+              {scoringMode === 'magnitude' 
+                ? 'Magnitude Range to Score Mapping' 
+                : 'Distance Range to Score Mapping (from track)'}
+            </h3>
             <button
               onClick={addRange}
               className="text-xs px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded"
@@ -415,32 +549,50 @@ export default function HazardEventScoringModal({
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-gray-100 border-b">
-                <th className="text-left p-2 font-medium">Min</th>
-                <th className="text-left p-2 font-medium">Max</th>
+                <th className="text-left p-2 font-medium">
+                  {scoringMode === 'magnitude' ? 'Min' : 'Min (meters)'}
+                </th>
+                <th className="text-left p-2 font-medium">
+                  {scoringMode === 'magnitude' ? 'Max' : 'Max (meters)'}
+                </th>
                 <th className="text-left p-2 font-medium w-32">Score (1–5)</th>
                 <th className="text-left p-2 font-medium w-20">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {ranges.map((range, i) => (
+              {(scoringMode === 'magnitude' ? ranges : distanceRanges).map((range, i) => (
                 <tr key={i} className="border-b hover:bg-gray-50">
                   <td className="p-2">
                     <input
                       type="number"
-                      step="0.1"
+                      step={scoringMode === 'magnitude' ? "0.1" : "1000"}
                       value={range.min}
-                      onChange={(e) => handleRangeChange(i, 'min', e.target.value)}
+                      onChange={(e) => scoringMode === 'magnitude' 
+                        ? handleRangeChange(i, 'min', e.target.value)
+                        : handleDistanceRangeChange(i, 'min', e.target.value)}
                       className="border border-gray-300 rounded px-2 py-1 w-24"
                     />
+                    {scoringMode === 'distance' && (
+                      <span className="text-xs text-gray-500 ml-1">
+                        ({(range.min / 1000).toFixed(0)}km)
+                      </span>
+                    )}
                   </td>
                   <td className="p-2">
                     <input
                       type="number"
-                      step="0.1"
+                      step={scoringMode === 'magnitude' ? "0.1" : "1000"}
                       value={range.max}
-                      onChange={(e) => handleRangeChange(i, 'max', e.target.value)}
+                      onChange={(e) => scoringMode === 'magnitude'
+                        ? handleRangeChange(i, 'max', e.target.value)
+                        : handleDistanceRangeChange(i, 'max', e.target.value)}
                       className="border border-gray-300 rounded px-2 py-1 w-24"
                     />
+                    {scoringMode === 'distance' && (
+                      <span className="text-xs text-gray-500 ml-1">
+                        ({(range.max / 1000).toFixed(0)}km)
+                      </span>
+                    )}
                   </td>
                   <td className="p-2">
                     <input
@@ -448,13 +600,15 @@ export default function HazardEventScoringModal({
                       min={1}
                       max={5}
                       value={range.score}
-                      onChange={(e) => handleRangeChange(i, 'score', e.target.value)}
+                      onChange={(e) => scoringMode === 'magnitude'
+                        ? handleRangeChange(i, 'score', e.target.value)
+                        : handleDistanceRangeChange(i, 'score', e.target.value)}
                       className="border border-gray-300 rounded px-2 py-1 w-20"
                       placeholder="1-5"
                     />
                   </td>
                   <td className="p-2">
-                    {ranges.length > 1 && (
+                    {(scoringMode === 'magnitude' ? ranges : distanceRanges).length > 1 && (
                       <button
                         onClick={() => removeRange(i)}
                         className="text-red-600 hover:text-red-800 text-xs"
@@ -468,7 +622,9 @@ export default function HazardEventScoringModal({
             </tbody>
           </table>
           <p className="text-xs text-gray-600 mt-2">
-            Ranges should be non-overlapping and cover the full magnitude range. Higher magnitudes should map to higher scores (5 = most vulnerable).
+            {scoringMode === 'magnitude' 
+              ? 'Ranges should be non-overlapping and cover the full magnitude range. Higher magnitudes should map to higher scores (5 = most vulnerable).'
+              : 'Ranges should be non-overlapping and cover the full distance range. Closer distances should map to higher scores (5 = most vulnerable). Distance is measured from the admin area to the nearest point on the storm track.'}
           </p>
         </div>
 
@@ -531,17 +687,17 @@ export default function HazardEventScoringModal({
           </button>
           <button
             onClick={handleSaveConfig}
-            disabled={loading || saving || ranges.some((r) => r.score === '')}
+            disabled={loading || saving || (scoringMode === 'magnitude' ? ranges.some((r) => r.score === '') : distanceRanges.some((r) => r.score === ''))}
             className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-            title={ranges.some((r) => r.score === '') ? "Please assign scores to all ranges first" : ""}
+            title={(scoringMode === 'magnitude' ? ranges.some((r) => r.score === '') : distanceRanges.some((r) => r.score === '')) ? "Please assign scores to all ranges first" : ""}
           >
             {saving ? 'Saving…' : 'Save Config'}
           </button>
           <button
             onClick={handleApplyScoring}
-            disabled={loading || saving || ranges.some((r) => r.score === '')}
+            disabled={loading || saving || (scoringMode === 'magnitude' ? ranges.some((r) => r.score === '') : distanceRanges.some((r) => r.score === ''))}
             className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-            title={ranges.some((r) => r.score === '') ? "Please assign scores to all ranges first" : ""}
+            title={(scoringMode === 'magnitude' ? ranges.some((r) => r.score === '') : distanceRanges.some((r) => r.score === '')) ? "Please assign scores to all ranges first" : ""}
           >
             {loading ? 'Applying…' : 'Apply Scoring'}
           </button>

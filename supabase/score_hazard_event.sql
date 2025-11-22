@@ -12,10 +12,11 @@
 CREATE OR REPLACE FUNCTION public.score_hazard_event(
   in_hazard_event_id UUID,
   in_instance_id UUID,
-  in_magnitude_ranges JSONB,
+  in_magnitude_ranges JSONB DEFAULT NULL,
   in_limit_to_affected BOOLEAN DEFAULT true,
   in_matching_method TEXT DEFAULT 'centroid',
-  in_distance_meters NUMERIC DEFAULT 10000
+  in_distance_meters NUMERIC DEFAULT 10000,
+  in_distance_ranges JSONB DEFAULT NULL -- New parameter for distance-based scoring
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -45,6 +46,9 @@ DECLARE
   v_intersection_geom GEOGRAPHY;
   v_max_overlap NUMERIC;
   v_best_magnitude NUMERIC;
+  v_use_distance_scoring BOOLEAN := FALSE; -- Flag to use distance-based scoring
+  v_track_distance NUMERIC; -- Distance from admin area to track
+  v_hazard_geometry GEOGRAPHY; -- Combined geometry of all track features
 BEGIN
   -- Validate and set matching method
   v_matching_method := LOWER(COALESCE(in_matching_method, 'centroid'));
@@ -69,6 +73,20 @@ BEGIN
       'status', 'error',
       'message', 'Hazard event not found'
     );
+  END IF;
+
+  -- Determine scoring mode: use distance-based if distance_ranges provided, otherwise magnitude-based
+  IF in_distance_ranges IS NOT NULL AND jsonb_array_length(in_distance_ranges) > 0 THEN
+    v_use_distance_scoring := TRUE;
+    RAISE NOTICE 'Using distance-based scoring mode';
+  ELSE
+    v_use_distance_scoring := FALSE;
+    RAISE NOTICE 'Using magnitude-based scoring mode';
+  END IF;
+
+  -- For distance-based scoring, get the combined track geometry
+  IF v_use_distance_scoring THEN
+    v_hazard_geometry := v_hazard_event.geometry;
   END IF;
 
   -- Get affected admin areas if limiting
@@ -179,7 +197,66 @@ BEGIN
       CONTINUE; -- Skip if point calculation fails
     END;
 
-    -- Find matching contour based on selected method
+    -- For distance-based scoring, calculate distance to track directly
+    IF v_use_distance_scoring THEN
+      BEGIN
+        -- Calculate distance from admin area point to the track
+        IF v_point IS NOT NULL THEN
+          v_track_distance := ST_Distance(v_point, v_hazard_geometry);
+        ELSE
+          -- Use boundary geometry if point not available
+          v_track_distance := ST_Distance(v_boundary_geom, v_hazard_geometry);
+        END IF;
+        
+        -- Map distance to score using distance ranges
+        v_score := NULL;
+        FOR v_range IN SELECT * FROM jsonb_array_elements(in_distance_ranges)
+        LOOP
+          IF v_track_distance >= (v_range->>'min')::NUMERIC 
+             AND v_track_distance < (v_range->>'max')::NUMERIC THEN
+            v_score := (v_range->>'score')::NUMERIC;
+            EXIT;
+          END IF;
+        END LOOP;
+
+        -- If no range matched, use the last range (furthest = lowest score)
+        IF v_score IS NULL THEN
+          v_range := (SELECT jsonb_array_elements(in_distance_ranges) ORDER BY (value->>'max')::NUMERIC DESC LIMIT 1);
+          v_score := (v_range->>'score')::NUMERIC;
+        END IF;
+
+        -- Insert or update score
+        INSERT INTO public.hazard_event_scores (
+          hazard_event_id,
+          instance_id,
+          admin_pcode,
+          score,
+          magnitude_value -- Store distance as magnitude_value for consistency
+        ) VALUES (
+          in_hazard_event_id,
+          in_instance_id,
+          v_admin_pcode,
+          v_score,
+          v_track_distance
+        )
+        ON CONFLICT (hazard_event_id, instance_id, admin_pcode)
+        DO UPDATE SET
+          score = EXCLUDED.score,
+          magnitude_value = EXCLUDED.magnitude_value,
+          computed_at = NOW();
+
+        v_scored_count := v_scored_count + 1;
+        v_total_score := v_total_score + v_score;
+        
+        -- Skip the magnitude-based logic below
+        CONTINUE;
+      EXCEPTION WHEN OTHERS THEN
+        v_skipped_no_magnitude := v_skipped_no_magnitude + 1;
+        CONTINUE;
+      END;
+    END IF;
+
+    -- Find matching contour based on selected method (magnitude-based scoring)
     v_nearest_magnitude := NULL;
     v_min_distance := NULL;
     v_max_overlap := NULL;
@@ -376,8 +453,8 @@ BEGIN
       END;
     END IF;
 
-    -- If we found a magnitude value, map it to a score
-    IF v_nearest_magnitude IS NOT NULL THEN
+    -- If we found a magnitude value, map it to a score (magnitude-based scoring only)
+    IF NOT v_use_distance_scoring AND v_nearest_magnitude IS NOT NULL THEN
       v_score := NULL;
 
       -- Find which range this magnitude falls into

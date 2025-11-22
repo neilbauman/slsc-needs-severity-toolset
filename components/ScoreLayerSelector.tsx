@@ -6,9 +6,10 @@ import { supabase } from "@/lib/supabaseClient";
 export interface ScoreLayerSelectorProps {
   instanceId: string;
   onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
+  onScoreHazardEvent?: (hazardEventId: string) => void; // Callback to open scoring modal
 }
 
-export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerSelectorProps) {
+export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazardEvent }: ScoreLayerSelectorProps) {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [categoryScores, setCategoryScores] = useState<Record<string, number>>({}); // Average scores per category
   const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
@@ -421,12 +422,30 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
                       }
                     }}
                   >
-                  {d.dataset_name}
-                  {d.avg_score !== null && (
-                    <span className="float-right text-xs opacity-75">
-                      {Number(d.avg_score).toFixed(1)}
-                    </span>
-                  )}
+                  <div className="flex items-center justify-between w-full">
+                    <span>{d.dataset_name}</span>
+                    <div className="flex items-center gap-1">
+                      {isHazardEvent && onScoreHazardEvent && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (hazardEventId && onScoreHazardEvent) {
+                              onScoreHazardEvent(hazardEventId);
+                            }
+                          }}
+                          className="text-xs px-1.5 py-0.5 rounded bg-green-600 text-white hover:bg-green-700"
+                          title="Score this hazard event"
+                        >
+                          Score
+                        </button>
+                      )}
+                      {d.avg_score !== null && (
+                        <span className="text-xs opacity-75">
+                          {Number(d.avg_score).toFixed(1)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </button>
                 {!isHazardEvent && d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
                   <div className="ml-1.5 mt-0.5 space-y-0.5">

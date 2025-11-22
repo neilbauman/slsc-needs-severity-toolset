@@ -1376,6 +1376,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   }
                 }
               }}
+              onScoreHazardEvent={(hazardEventId) => {
+                // Find the hazard event and open scoring modal
+                const event = hazardEvents.find(e => e.id === hazardEventId);
+                if (event) {
+                  setSelectedHazardEvent(event);
+                  setShowHazardScoringModal(true);
+                }
+              }}
             />
             {/* Hazard Event Actions */}
             {selectedHazardEvent && (
