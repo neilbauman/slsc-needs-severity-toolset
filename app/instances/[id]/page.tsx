@@ -1156,7 +1156,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       layer.bindPopup(popupText);
       
       // Add hover effects - make hazard events more prominent
-      const isHazardEvent = selectedLayer.type === 'hazard_event';
+      // isHazardEvent already defined above, reuse it
       layer.on({
         mouseover: (e: any) => {
           const hoverLayer = e.target;
