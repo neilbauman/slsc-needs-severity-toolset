@@ -13,6 +13,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
   const [categoryScores, setCategoryScores] = useState<Record<string, number>>({}); // Average scores per category
   const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
   const [loading, setLoading] = useState(true);
+  // Initialize with all categories expanded by default
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [datasetCategories, setDatasetCategories] = useState<Record<string, string[]>>({});
   const [loadingCategories, setLoadingCategories] = useState<Record<string, boolean>>({});
@@ -263,6 +264,20 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
     return acc;
   }, {});
 
+  // ✅ Expand all categories by default when datasets are loaded
+  useEffect(() => {
+    if (datasets.length > 0) {
+      const categories = Object.keys(grouped);
+      if (categories.length > 0) {
+        setExpandedCategories(prev => {
+          const newSet = new Set(prev);
+          categories.forEach(cat => newSet.add(cat));
+          return newSet;
+        });
+      }
+    }
+  }, [datasets.length]); // Re-run when datasets change
+
   // ✅ Get categories for categorical datasets
   const loadCategoriesForDataset = async (datasetId: string) => {
     if (datasetCategories[datasetId]) return; // Already loaded
@@ -308,7 +323,14 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
         <p className="italic text-xs" style={{ color: 'var(--gsc-gray)' }}>No datasets configured.</p>
       )}
 
-      {Object.entries(grouped).map(([cat, list]) => (
+      {Object.entries(grouped)
+        // Sort categories: Hazard before Underlying Vulnerability, others maintain order
+        .sort(([catA], [catB]) => {
+          if (catA === 'Hazard' && catB === 'Underlying Vulnerability') return -1;
+          if (catA === 'Underlying Vulnerability' && catB === 'Hazard') return 1;
+          return 0; // Maintain original order for others
+        })
+        .map(([cat, list]) => (
         <div key={cat} className="mb-1">
           <div className="flex items-center justify-between mb-0.5">
             <h4 className="font-semibold text-xs" style={{ color: 'var(--gsc-gray)' }}>{cat}</h4>

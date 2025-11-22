@@ -1272,6 +1272,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             <MapContainer
               center={[12.8797, 121.774]} // Philippines center
               zoom={6}
+              minZoom={3}
+              maxZoom={18}
               style={{ height: "100%", width: "100%" }}
               scrollWheelZoom={true}
               key={`map-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}`}
