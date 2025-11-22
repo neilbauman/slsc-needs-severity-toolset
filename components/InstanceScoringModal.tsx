@@ -291,32 +291,62 @@ export default function InstanceScoringModal({
     load();
   }, [instance]);
 
-  // Calculate impact preview when weights change
+  // Calculate impact preview when weights change (debounced to avoid too many calls)
   useEffect(() => {
-    if (showImpact && Object.keys(categories).length > 0 && Object.keys(weights).length > 0) {
-      calculateImpactPreview();
+    if (showImpact && Object.keys(categories).length > 0 && Object.keys(weights).length > 0 && Object.keys(currentScores).length > 0) {
+      // Debounce the calculation to avoid excessive API calls while sliding
+      const timeoutId = setTimeout(() => {
+        calculateImpactPreview();
+      }, 500); // Wait 500ms after last change
+
+      return () => clearTimeout(timeoutId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categories, weights, showImpact]);
+  }, [categories, weights, showImpact, currentScores]);
 
-  // Load current scores for impact calculation
+  // Load current scores for impact calculation (only affected areas)
   const loadImpactPreview = async () => {
     if (!instance?.id) return;
     try {
-      const { data: scoresData } = await supabase
+      // Get affected ADM3 codes first
+      let affectedCodes: string[] = [];
+      const { data: instanceData } = await supabase
+        .from('instances')
+        .select('admin_scope')
+        .eq('id', instance.id)
+        .single();
+
+      if (instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
+        const { data: affectedData } = await supabase.rpc('get_affected_adm3', {
+          in_scope: instanceData.admin_scope
+        });
+        
+        if (affectedData && Array.isArray(affectedData)) {
+          affectedCodes = affectedData.map((item: any) => 
+            typeof item === 'string' ? item : (item.admin_pcode || item.pcode || item.code)
+          ).filter(Boolean);
+        }
+      }
+
+      // Only load scores for affected areas
+      let scoresQuery = supabase
         .from('v_instance_admin_scores')
         .select('admin_pcode, avg_score, name')
         .eq('instance_id', instance.id)
-        .not('avg_score', 'is', null)
+        .not('avg_score', 'is', null);
+
+      if (affectedCodes.length > 0) {
+        scoresQuery = scoresQuery.in('admin_pcode', affectedCodes);
+      }
+
+      const { data: scoresData } = await scoresQuery
         .order('avg_score', { ascending: false })
         .limit(20);
 
       if (scoresData) {
         const scoreMap: Record<string, number> = {};
-        const nameMap: Record<string, string> = {};
         scoresData.forEach((s: any) => {
           scoreMap[s.admin_pcode] = Number(s.avg_score);
-          nameMap[s.admin_pcode] = s.name || s.admin_pcode;
         });
         setCurrentScores(scoreMap);
       }
@@ -429,18 +459,36 @@ export default function InstanceScoringModal({
         // Calculate overall projected score (sum of category scores)
         const projectedScore = Object.values(categoryScores).reduce((sum, score) => sum + score, 0);
         
-        // Get admin name
-        const { data: adminData } = await supabase
-          .from('admin_boundaries')
+        // Get admin name - use the name from v_instance_admin_scores if available, otherwise fetch
+        let adminName = adminPcode;
+        const scoreData = await supabase
+          .from('v_instance_admin_scores')
           .select('name')
+          .eq('instance_id', instance.id)
           .eq('admin_pcode', adminPcode)
-          .eq('admin_level', 'ADM3')
           .limit(1)
           .single();
+        
+        if (scoreData.data?.name) {
+          adminName = scoreData.data.name;
+        } else {
+          // Fallback: try admin_boundaries with proper column names
+          const { data: adminData } = await supabase
+            .from('admin_boundaries')
+            .select('admin_name, name')
+            .eq('admin_pcode', adminPcode)
+            .eq('admin_level', 'ADM3')
+            .limit(1)
+            .maybeSingle();
+          
+          if (adminData) {
+            adminName = adminData.admin_name || adminData.name || adminPcode;
+          }
+        }
 
         impacts.push({
           admin_pcode: adminPcode,
-          admin_name: adminData?.name || adminPcode,
+          admin_name: adminName,
           currentScore,
           projectedScore,
           change: projectedScore - currentScore,
