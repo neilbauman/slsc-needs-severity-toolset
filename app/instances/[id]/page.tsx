@@ -37,10 +37,10 @@ function MapBoundsController({ features }: { features: any[] }) {
     if (features.length > 0) {
       try {
         const bounds = L.geoJSON(features).getBounds();
-        // Fit bounds with smaller padding to zoom closer, and set maxZoom to allow closer zoom
+        // Fit bounds with minimal padding to zoom closer to affected area
         map.fitBounds(bounds, { 
-          padding: [10, 10],
-          maxZoom: 10 // Limit how close it zooms automatically, but allow manual zoom closer
+          padding: [5, 5],
+          maxZoom: 11 // Allow closer automatic zoom
         });
       } catch (err) {
         console.error("Error fitting bounds:", err);
@@ -1257,7 +1257,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       {/* Main Content */}
       <div className="flex gap-2">
         {/* Map - Sized for letter page */}
-        <div className="flex-1 border rounded overflow-hidden bg-white" style={{ height: '550px', minHeight: '550px' }}>
+        <div className="flex-1 border rounded overflow-hidden bg-white" style={{ height: '700px', minHeight: '700px' }}>
           {features.length === 0 && !loading && !loadingFeatures ? (
             <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
               <div className="text-center">
@@ -1275,7 +1275,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           ) : (
             <MapContainer
               center={[12.8797, 121.774]} // Philippines center
-              zoom={7}
+              zoom={8}
               minZoom={3}
               maxZoom={18}
               style={{ height: "100%", width: "100%" }}
