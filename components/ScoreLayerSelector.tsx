@@ -146,14 +146,39 @@ export default function ScoreLayerSelector({ instanceId, onSelect }: ScoreLayerS
         setDatasets(transformed);
 
         // Load hazard events
-        const { data: hazardEventsData, error: hazardError } = await supabase
+        // Try RPC function first, fallback to direct table query
+        let hazardEventsData: any[] = [];
+        const { data: rpcData, error: hazardError } = await supabase
           .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
 
-        if (!hazardError && hazardEventsData) {
-          setHazardEvents(hazardEventsData || []);
+        if (hazardError) {
+          console.warn('RPC function failed, trying direct query:', hazardError);
+          // Fallback: query table directly
+          const { data: tableData, error: tableError } = await supabase
+            .from('hazard_events')
+            .select('id, name, description, event_type, magnitude_field, metadata, created_at')
+            .eq('instance_id', instanceId)
+            .order('created_at', { ascending: false });
+
+          if (tableError) {
+            console.error('Error loading hazard events:', tableError);
+          } else if (tableData) {
+            // Convert to expected format with geojson from metadata
+            hazardEventsData = tableData.map((event: any) => ({
+              ...event,
+              geojson: event.metadata?.original_geojson || null,
+            }));
+          }
+        } else if (rpcData) {
+          hazardEventsData = rpcData;
+        }
+
+        if (hazardEventsData && hazardEventsData.length > 0) {
+          console.log(`Loaded ${hazardEventsData.length} hazard events`);
+          setHazardEvents(hazardEventsData);
 
           // Get average scores for each hazard event
-          const hazardEventIds = (hazardEventsData || []).map((e: any) => e.id);
+          const hazardEventIds = hazardEventsData.map((e: any) => e.id);
           if (hazardEventIds.length > 0) {
             const { data: scoresData } = await supabase
               .from("hazard_event_scores")
