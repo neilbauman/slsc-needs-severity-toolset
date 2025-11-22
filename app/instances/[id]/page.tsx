@@ -56,6 +56,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [loadingFeatures, setLoadingFeatures] = useState(false); // Track feature loading separately
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [metricsRefreshKey, setMetricsRefreshKey] = useState(0); // Key to force metrics refresh
   const [showScoringModal, setShowScoringModal] = useState(false);
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
   const [showAffectedAreaModal, setShowAffectedAreaModal] = useState(false);
@@ -958,11 +959,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchData();
+    setMetricsRefreshKey(prev => prev + 1); // Force metrics panel to refresh
   };
 
   const handleScoringSaved = async () => {
     setShowScoringModal(false);
     await fetchData(); // Refresh data after scoring changes
+    setMetricsRefreshKey(prev => prev + 1); // Force metrics panel to refresh
   };
 
   const handleAffectedAreaSaved = async () => {
@@ -1245,7 +1248,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       </div>
 
       {/* Metrics Panel */}
-      <InstanceMetricsPanel instanceId={instanceId} />
+      <InstanceMetricsPanel refreshKey={metricsRefreshKey} instanceId={instanceId} />
 
       {/* Main Content */}
       <div className="flex gap-2">

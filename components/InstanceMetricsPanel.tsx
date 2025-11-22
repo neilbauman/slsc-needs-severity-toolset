@@ -14,9 +14,10 @@ interface MetricsData {
 
 interface Props {
   instanceId: string;
+  refreshKey?: number; // Optional key to force refresh
 }
 
-export default function InstanceMetricsPanel({ instanceId }: Props) {
+export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) {
   const [metrics, setMetrics] = useState<MetricsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +123,7 @@ export default function InstanceMetricsPanel({ instanceId }: Props) {
     };
 
     loadMetrics();
-  }, [instanceId]);
+  }, [instanceId, refreshKey]); // Reload when instanceId or refreshKey changes
 
   const formatNumber = (num: number | null | undefined): string => {
     if (num === null || num === undefined || isNaN(num)) return 'N/A';
