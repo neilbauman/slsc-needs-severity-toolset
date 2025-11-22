@@ -70,14 +70,14 @@ BEGIN
       -- Try direct parent_pcode relationship first
       SELECT ARRAY_AGG(DISTINCT admin_pcode) INTO v_affected_codes
       FROM public.admin_boundaries
-      WHERE admin_level = 'ADM3'
+      WHERE UPPER(TRIM(admin_level)) = 'ADM3'
         AND parent_pcode = ANY(v_admin_scope);
       
       -- If no codes found, try prefix matching
       IF v_affected_codes IS NULL OR array_length(v_affected_codes, 1) = 0 THEN
         SELECT ARRAY_AGG(DISTINCT admin_pcode) INTO v_affected_codes
         FROM public.admin_boundaries
-        WHERE admin_level = 'ADM3'
+        WHERE UPPER(TRIM(admin_level)) = 'ADM3'
           AND EXISTS (
             SELECT 1 FROM unnest(v_admin_scope) AS adm2_code
             WHERE admin_pcode LIKE adm2_code || '%'

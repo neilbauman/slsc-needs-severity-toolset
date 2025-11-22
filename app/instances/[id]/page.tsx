@@ -929,6 +929,76 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     }
   };
 
+  // Load persisted filters and visibility from localStorage on mount
+  useEffect(() => {
+    if (!instanceId) return;
+    
+    const storageKey = `hazard_filters_${instanceId}`;
+    const visibilityKey = `hazard_visibility_${instanceId}`;
+    
+    try {
+      // Load filters
+      const savedFilters = localStorage.getItem(storageKey);
+      if (savedFilters) {
+        const parsed = JSON.parse(savedFilters);
+        // Convert Sets back from arrays
+        const filters: Record<string, any> = {};
+        Object.keys(parsed).forEach((key) => {
+          const filter = parsed[key];
+          filters[key] = {
+            ...filter,
+            visibleFeatureIds: filter.visibleFeatureIds ? new Set(filter.visibleFeatureIds) : undefined,
+            geometryTypes: filter.geometryTypes ? new Set(filter.geometryTypes) : undefined,
+          };
+        });
+        setHazardEventFilters(filters);
+      }
+      
+      // Load visibility
+      const savedVisibility = localStorage.getItem(visibilityKey);
+      if (savedVisibility) {
+        const parsed = JSON.parse(savedVisibility);
+        setVisibleHazardEvents(new Set(parsed));
+      }
+    } catch (e) {
+      console.warn('Error loading persisted filters:', e);
+    }
+  }, [instanceId]);
+
+  // Save filters to localStorage whenever they change
+  useEffect(() => {
+    if (!instanceId) return;
+    
+    const storageKey = `hazard_filters_${instanceId}`;
+    try {
+      // Convert Sets to arrays for JSON serialization
+      const serializable: Record<string, any> = {};
+      Object.keys(hazardEventFilters).forEach((key) => {
+        const filter = hazardEventFilters[key];
+        serializable[key] = {
+          ...filter,
+          visibleFeatureIds: filter.visibleFeatureIds ? Array.from(filter.visibleFeatureIds) : undefined,
+          geometryTypes: filter.geometryTypes ? Array.from(filter.geometryTypes) : undefined,
+        };
+      });
+      localStorage.setItem(storageKey, JSON.stringify(serializable));
+    } catch (e) {
+      console.warn('Error saving filters to localStorage:', e);
+    }
+  }, [hazardEventFilters, instanceId]);
+
+  // Save visibility to localStorage whenever it changes
+  useEffect(() => {
+    if (!instanceId) return;
+    
+    const visibilityKey = `hazard_visibility_${instanceId}`;
+    try {
+      localStorage.setItem(visibilityKey, JSON.stringify(Array.from(visibleHazardEvents)));
+    } catch (e) {
+      console.warn('Error saving visibility to localStorage:', e);
+    }
+  }, [visibleHazardEvents, instanceId]);
+
   useEffect(() => {
     if (instanceId) {
       fetchData();
@@ -971,6 +1041,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const handleScoringSaved = async () => {
     setShowScoringModal(false);
     await fetchData(); // Refresh data after scoring changes
+    // Reload features for current selection to show updated scores
+    if (instance && instanceId) {
+      const featuresToUse = selectedLayer.type === 'hazard_event' ? undefined : overallFeatures;
+      await loadFeaturesForSelection(selectedLayer, featuresToUse);
+    }
     // Add a small delay to ensure database updates are complete before refreshing metrics
     setTimeout(() => {
       setMetricsRefreshKey(prev => prev + 1); // Force metrics panel to refresh
@@ -980,6 +1055,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const handleAffectedAreaSaved = async () => {
     setShowAffectedAreaModal(false);
     await fetchData(); // Refresh data after affected area changes
+    // Reload features for current selection
+    if (instance && instanceId) {
+      const featuresToUse = selectedLayer.type === 'hazard_event' ? undefined : overallFeatures;
+      await loadFeaturesForSelection(selectedLayer, featuresToUse);
+    }
+    setMetricsRefreshKey(prev => prev + 1);
   };
 
   const getColor = (score: number) => {
@@ -1752,6 +1833,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           onClose={() => setShowDatasetConfigModal(false)}
           onSaved={async () => {
             await fetchData(); // Refresh data after config changes
+            // Reload features for current selection
+            if (instance && instanceId) {
+              const featuresToUse = selectedLayer.type === 'hazard_event' ? undefined : overallFeatures;
+              await loadFeaturesForSelection(selectedLayer, featuresToUse);
+            }
+            setMetricsRefreshKey(prev => prev + 1);
           }}
         />
       )}
@@ -1793,6 +1880,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               console.log("Reloading features after scoring applied");
               await loadFeaturesForSelection(selectedLayer);
             }
+            // Refresh metrics panel
+            setTimeout(() => {
+              setMetricsRefreshKey(prev => prev + 1);
+            }, 500);
             setShowHazardScoringModal(false);
             setSelectedHazardEvent(null);
           }}
