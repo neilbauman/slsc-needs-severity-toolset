@@ -82,26 +82,36 @@ BEGIN
 
   -- Calculate and store final scores for ALL admin areas at once using bulk query
   -- This is much more efficient than row-by-row processing
+  -- Only include categories with non-zero weights in the calculation
   WITH final_scores AS (
     SELECT 
       admin_pcode,
       MAX(framework_score) AS framework_score,
       MAX(hazard_score) AS hazard_score,
       MAX(uv_score) AS uv_score,
-      (MAX(CASE WHEN framework_score IS NOT NULL THEN framework_score * v_framework_weight ELSE 0 END) +
-       MAX(CASE WHEN hazard_score IS NOT NULL THEN hazard_score * v_hazard_weight ELSE 0 END) +
-       MAX(CASE WHEN uv_score IS NOT NULL THEN uv_score * v_uv_weight ELSE 0 END)) AS weighted_sum,
-      (CASE WHEN MAX(framework_score) IS NOT NULL THEN v_framework_weight ELSE 0 END +
-       CASE WHEN MAX(hazard_score) IS NOT NULL THEN v_hazard_weight ELSE 0 END +
-       CASE WHEN MAX(uv_score) IS NOT NULL THEN v_uv_weight ELSE 0 END) AS total_weight,
+      -- Only include scores for categories with non-zero weights
+      (CASE WHEN v_framework_weight > 0 AND MAX(framework_score) IS NOT NULL 
+            THEN MAX(framework_score) * v_framework_weight ELSE 0 END +
+       CASE WHEN v_hazard_weight > 0 AND MAX(hazard_score) IS NOT NULL 
+            THEN MAX(hazard_score) * v_hazard_weight ELSE 0 END +
+       CASE WHEN v_uv_weight > 0 AND MAX(uv_score) IS NOT NULL 
+            THEN MAX(uv_score) * v_uv_weight ELSE 0 END) AS weighted_sum,
+      -- Only count weights for categories with non-zero weights and existing scores
+      (CASE WHEN v_framework_weight > 0 AND MAX(framework_score) IS NOT NULL 
+            THEN v_framework_weight ELSE 0 END +
+       CASE WHEN v_hazard_weight > 0 AND MAX(hazard_score) IS NOT NULL 
+            THEN v_hazard_weight ELSE 0 END +
+       CASE WHEN v_uv_weight > 0 AND MAX(uv_score) IS NOT NULL 
+            THEN v_uv_weight ELSE 0 END) AS total_weight,
+      -- Count components for fallback calculation
       (CASE WHEN MAX(framework_score) IS NOT NULL THEN 1 ELSE 0 END +
        CASE WHEN MAX(hazard_score) IS NOT NULL THEN 1 ELSE 0 END +
        CASE WHEN MAX(uv_score) IS NOT NULL THEN 1 ELSE 0 END) AS component_count
     FROM (
-      -- Get framework score (aggregate of P1, P2, P3 or 'SSC Framework')
+      -- Get framework score (only if framework_weight > 0)
       SELECT 
         admin_pcode,
-        score AS framework_score,
+        CASE WHEN v_framework_weight > 0 THEN score ELSE NULL END AS framework_score,
         NULL::NUMERIC AS hazard_score,
         NULL::NUMERIC AS uv_score
       FROM instance_category_scores
@@ -110,24 +120,30 @@ BEGIN
       
       UNION ALL
       
-      -- If no 'SSC Framework', calculate from P1, P2, P3
+      -- If no 'SSC Framework', calculate from P1, P2, P3 (only if framework_weight > 0)
       SELECT 
         admin_pcode,
-        AVG(score) AS framework_score,
+        CASE WHEN v_framework_weight > 0 THEN AVG(score) ELSE NULL END AS framework_score,
         NULL::NUMERIC AS hazard_score,
         NULL::NUMERIC AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
         AND category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3')
+        AND NOT EXISTS (
+          SELECT 1 FROM instance_category_scores 
+          WHERE instance_id = in_instance_id 
+            AND category = 'SSC Framework' 
+            AND admin_pcode = instance_category_scores.admin_pcode
+        )
       GROUP BY admin_pcode
       
       UNION ALL
       
-      -- Get hazard score
+      -- Get hazard score (only if hazard_weight > 0)
       SELECT 
         admin_pcode,
         NULL::NUMERIC AS framework_score,
-        score AS hazard_score,
+        CASE WHEN v_hazard_weight > 0 THEN score ELSE NULL END AS hazard_score,
         NULL::NUMERIC AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
@@ -135,12 +151,12 @@ BEGIN
       
       UNION ALL
       
-      -- Get underlying vulnerability score
+      -- Get underlying vulnerability score (only if uv_weight > 0)
       SELECT 
         admin_pcode,
         NULL::NUMERIC AS framework_score,
         NULL::NUMERIC AS hazard_score,
-        score AS uv_score
+        CASE WHEN v_uv_weight > 0 THEN score ELSE NULL END AS uv_score
       FROM instance_category_scores
       WHERE instance_id = in_instance_id
         AND category = 'Underlying Vulnerability'
@@ -154,15 +170,31 @@ BEGIN
     'Overall' AS category,
     admin_pcode,
     CASE
-      WHEN total_weight > 0 THEN weighted_sum / total_weight
-      WHEN component_count > 0 THEN (COALESCE(framework_score, 0) + COALESCE(hazard_score, 0) + COALESCE(uv_score, 0)) / component_count
+      -- If only one category has a non-zero weight and a score, use that score directly
+      WHEN v_framework_weight > 0 AND v_hazard_weight = 0 AND v_uv_weight = 0 AND framework_score IS NOT NULL 
+        THEN framework_score
+      WHEN v_framework_weight = 0 AND v_hazard_weight > 0 AND v_uv_weight = 0 AND hazard_score IS NOT NULL 
+        THEN hazard_score
+      WHEN v_framework_weight = 0 AND v_hazard_weight = 0 AND v_uv_weight > 0 AND uv_score IS NOT NULL 
+        THEN uv_score
+      -- Otherwise, use weighted average
+      WHEN total_weight > 0 THEN ROUND((weighted_sum / total_weight)::NUMERIC, 4)
+      WHEN component_count > 0 THEN ROUND(((COALESCE(framework_score, 0) + COALESCE(hazard_score, 0) + COALESCE(uv_score, 0)) / component_count)::NUMERIC, 4)
       ELSE NULL
     END AS final_score
   FROM final_scores
   WHERE (
     CASE
-      WHEN total_weight > 0 THEN weighted_sum / total_weight
-      WHEN component_count > 0 THEN (COALESCE(framework_score, 0) + COALESCE(hazard_score, 0) + COALESCE(uv_score, 0)) / component_count
+      -- If only one category has a non-zero weight and a score, use that score directly
+      WHEN v_framework_weight > 0 AND v_hazard_weight = 0 AND v_uv_weight = 0 AND framework_score IS NOT NULL 
+        THEN framework_score
+      WHEN v_framework_weight = 0 AND v_hazard_weight > 0 AND v_uv_weight = 0 AND hazard_score IS NOT NULL 
+        THEN hazard_score
+      WHEN v_framework_weight = 0 AND v_hazard_weight = 0 AND v_uv_weight > 0 AND uv_score IS NOT NULL 
+        THEN uv_score
+      -- Otherwise, use weighted average
+      WHEN total_weight > 0 THEN ROUND((weighted_sum / total_weight)::NUMERIC, 4)
+      WHEN component_count > 0 THEN ROUND(((COALESCE(framework_score, 0) + COALESCE(hazard_score, 0) + COALESCE(uv_score, 0)) / component_count)::NUMERIC, 4)
       ELSE NULL
     END
   ) IS NOT NULL
