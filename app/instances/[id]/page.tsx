@@ -730,42 +730,72 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         console.log(`Loaded ${scores.length} scores for hazard event ${selection.hazardEventId} across ${adminPcodes.length} admin areas`);
         
         // Get geometry for all admin_pcodes that have scores using get_admin_boundaries_geojson
-        // Try with admin_pcodes parameter first, fallback to querying by level if function doesn't support it
+        // Based on error message, function signature uses 'level' not 'in_level'
+        // Since function may not support filtering by admin_pcodes, we'll query all ADM3 and filter client-side
         let geoData: any = null;
         let geoError: any = null;
         
-        // Try calling with admin_pcodes parameter
+        // Query all ADM3 boundaries (function doesn't support filtering by admin_pcodes)
+        // Try both parameter names to handle different function signatures
+        let allGeoData: any = null;
+        let geoJsonRpcError: any = null;
+        
+        // First try with 'level' (as suggested by error message)
         const result1 = await supabase.rpc('get_admin_boundaries_geojson', {
-          in_admin_pcodes: adminPcodes,
-          in_level: 'ADM3'
+          level: 'ADM3'
         });
         
         if (result1.error) {
-          // Fallback: try without admin_pcodes, just by level, then filter client-side
+          // Fallback to 'in_level' (as used in AffectedAreaModal)
           const result2 = await supabase.rpc('get_admin_boundaries_geojson', {
             in_level: 'ADM3'
           });
           if (result2.error) {
-            geoError = result2.error;
+            geoJsonRpcError = result2.error;
           } else {
-            geoData = result2.data;
-            // Filter to only admin_pcodes we need
-            const adminPcodeSet = new Set(adminPcodes);
-            if (geoData && Array.isArray(geoData)) {
-              geoData = geoData.filter((feature: any) => 
+            allGeoData = result2.data;
+          }
+        } else {
+          allGeoData = result1.data;
+        }
+        
+        if (geoJsonRpcError) {
+          console.warn("Error fetching GeoJSON via RPC, trying direct view:", geoJsonRpcError);
+          // Fallback: try to get from view
+          const { data: geoRows, error: geoViewError } = await supabase
+            .from("v_instance_admin_scores_geojson")
+            .select("admin_pcode, geojson")
+            .eq("instance_id", instanceId)
+            .in("admin_pcode", adminPcodes);
+          
+          if (geoViewError) {
+            console.error("Error fetching GeoJSON from view:", geoViewError);
+            geoError = geoViewError;
+          } else if (geoRows && geoRows.length > 0) {
+            geoData = { 
+              type: 'FeatureCollection', 
+              features: geoRows.map((r: any) => (typeof r.geojson === 'string' ? JSON.parse(r.geojson) : r.geojson))
+            };
+          }
+        } else {
+          // Filter to only admin_pcodes we need
+          const adminPcodeSet = new Set(adminPcodes);
+          if (allGeoData) {
+            if (Array.isArray(allGeoData)) {
+              geoData = allGeoData.filter((feature: any) => 
                 adminPcodeSet.has(feature.properties?.admin_pcode)
               );
-            } else if (geoData && geoData.type === 'FeatureCollection') {
+            } else if (allGeoData.type === 'FeatureCollection' && allGeoData.features) {
               geoData = {
-                ...geoData,
-                features: geoData.features.filter((feature: any) =>
+                ...allGeoData,
+                features: allGeoData.features.filter((feature: any) =>
                   adminPcodeSet.has(feature.properties?.admin_pcode)
                 )
               };
+            } else {
+              geoData = allGeoData;
             }
           }
-        } else {
-          geoData = result1.data;
         }
         
         if (geoError) {
