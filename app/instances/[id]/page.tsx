@@ -1104,12 +1104,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       // Has score - use color based on score
       const color = getColor(score);
       
+      // Make hazard events more visually prominent with higher opacity and thicker borders
+      const isHazardEvent = selectedLayer.type === 'hazard_event';
+      const fillOpacity = isHazardEvent ? 0.75 : 0.6; // More opaque for hazard events
+      const borderWeight = isHazardEvent ? 2 : 1; // Thicker border for hazard events
+      
       // Set initial style with thin black borders
       layer.setStyle({ 
         color: '#000000', // Black border
         fillColor: color, 
-        fillOpacity: 0.6,
-        weight: 1, // Thin border
+        fillOpacity: fillOpacity,
+        weight: borderWeight, // Thicker border for hazard events
         opacity: 1
       });
       
@@ -1150,13 +1155,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       popupText += `<br/>${layerName}: ${score.toFixed(2)}`;
       layer.bindPopup(popupText);
       
-      // Add hover effects
+      // Add hover effects - make hazard events more prominent
+      const isHazardEvent = selectedLayer.type === 'hazard_event';
       layer.on({
         mouseover: (e: any) => {
           const hoverLayer = e.target;
           hoverLayer.setStyle({
-            weight: 2, // Thicker border on hover
-            fillOpacity: 0.8,
+            weight: isHazardEvent ? 3 : 2, // Even thicker border on hover for hazard events
+            fillOpacity: isHazardEvent ? 0.9 : 0.8,
             color: '#000000',
             fillColor: color
           });
@@ -1164,8 +1170,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         mouseout: (e: any) => {
           const hoverLayer = e.target;
           hoverLayer.setStyle({
-            weight: 1, // Back to thin border
-            fillOpacity: 0.6,
+            weight: isHazardEvent ? 2 : 1, // Back to thicker border for hazard events
+            fillOpacity: isHazardEvent ? 0.75 : 0.6,
             color: '#000000',
             fillColor: color
           });
