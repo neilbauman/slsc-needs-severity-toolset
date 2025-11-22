@@ -41,10 +41,16 @@ BEGIN
   END IF;
 
   -- Get affected admin areas if limiting
+  -- Affected areas are stored in instances.admin_scope as an array
   IF in_limit_to_affected THEN
-    SELECT ARRAY_AGG(admin_pcode) INTO v_affected_pcodes
-    FROM public.affected_areas
-    WHERE instance_id = in_instance_id;
+    SELECT admin_scope INTO v_affected_pcodes
+    FROM public.instances
+    WHERE id = in_instance_id;
+    
+    -- If admin_scope is NULL or empty, set to empty array
+    IF v_affected_pcodes IS NULL THEN
+      v_affected_pcodes := ARRAY[]::TEXT[];
+    END IF;
   END IF;
 
   -- Extract geometries from hazard event metadata
