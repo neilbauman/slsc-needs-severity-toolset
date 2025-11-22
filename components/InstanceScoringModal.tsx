@@ -40,6 +40,7 @@ export default function InstanceScoringModal({
     
     const ds = categoryData.datasets;
     const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
+    
     if (total === 0) {
       // If total is 0, distribute equally
       const equalWeight = 100 / ds.length;
@@ -51,18 +52,47 @@ export default function InstanceScoringModal({
       return;
     }
 
+    // Only normalize if total is significantly off from 100%
+    // This allows users to adjust weights freely as long as they're close to 100%
+    if (Math.abs(total - 100) < 0.5) {
+      // Already close to 100%, just snap to exact 100%
+      const scale = 100 / total;
+      const newWeights = { ...weights };
+      let sum = 0;
+      
+      ds.forEach((d) => {
+        const scaled = (weights[d.id] || 0) * scale;
+        newWeights[d.id] = scaled;
+        sum += scaled;
+      });
+      
+      // Adjust for any rounding differences
+      const diff = 100 - sum;
+      if (Math.abs(diff) > 0.01 && ds.length > 0) {
+        const largest = ds.reduce((a, b) =>
+          (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
+        );
+        newWeights[largest.id] = Math.max(0, Math.min(100, newWeights[largest.id] + diff));
+      }
+      
+      setWeights(newWeights);
+      return;
+    }
+
+    // If total is far from 100%, normalize proportionally
     const newWeights = { ...weights };
-    const step = 5;
+    const step = 1; // Use smaller step for smoother adjustment
 
     let sum = 0;
     ds.forEach((d) => {
-      const normalized = snapToStep((weights[d.id] / total) * 100, step);
+      const normalized = (weights[d.id] || 0) / total * 100;
       newWeights[d.id] = normalized;
       sum += normalized;
     });
 
+    // Adjust for rounding
     const diff = 100 - sum;
-    if (diff !== 0 && ds.length > 0) {
+    if (Math.abs(diff) > 0.01 && ds.length > 0) {
       const largest = ds.reduce((a, b) =>
         (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
       );
@@ -113,7 +143,29 @@ export default function InstanceScoringModal({
   };
 
   const handleWeightChange = (datasetId: string, value: number) => {
-    setWeights((prev) => ({ ...prev, [datasetId]: Math.max(0, value) }));
+    const newValue = Math.max(0, Math.min(100, value));
+    setWeights((prev) => {
+      const updated = { ...prev, [datasetId]: newValue };
+      
+      // Check if we need to normalize (only if total exceeds 100%)
+      const categoryData = Object.values(categories).find((cat: CategoryData) => 
+        cat.datasets.some((d: any) => d.id === datasetId)
+      ) as CategoryData | undefined;
+      
+      if (categoryData) {
+        const total = categoryData.datasets.reduce((sum, d) => sum + (updated[d.id] || 0), 0);
+        // Only normalize if total exceeds 100%, otherwise let user adjust freely
+        if (total > 100.1) {
+          // Normalize proportionally, but preserve the user's intent
+          const scale = 100 / total;
+          categoryData.datasets.forEach((d) => {
+            updated[d.id] = (updated[d.id] || 0) * scale;
+          });
+        }
+      }
+      
+      return updated;
+    });
   };
 
   const handleCategoryWeightChange = (cat: string, value: number) => {
@@ -368,8 +420,16 @@ export default function InstanceScoringModal({
                     onChange={(e) => {
                       const newValue = parseFloat(e.target.value);
                       handleWeightChange(d.id, newValue);
-                      // Use setTimeout to normalize after state update
-                      setTimeout(() => normalizeCategory(cat), 0);
+                      // Don't auto-normalize on every change - let user adjust freely
+                      // Only normalize if total exceeds 100% (handled in handleWeightChange)
+                    }}
+                    onMouseUp={() => {
+                      // Normalize when user releases the slider to ensure clean 100% total
+                      normalizeCategory(cat);
+                    }}
+                    onTouchEnd={() => {
+                      // Also normalize on touch devices
+                      normalizeCategory(cat);
                     }}
                     className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                     style={{
