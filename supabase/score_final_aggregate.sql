@@ -1,8 +1,9 @@
 -- ==============================
--- SCORE FINAL AGGREGATE RPC FUNCTION
+-- SCORE FINAL AGGREGATE RPC FUNCTION (OPTIMIZED)
 -- ==============================
 -- Aggregates framework category scores (SSC Framework, Hazard, Underlying Vulnerability)
 -- into final overall scores for each admin area.
+-- Uses bulk operations and stores results in instance_category_scores with category = 'Overall'
 
 CREATE OR REPLACE FUNCTION public.score_final_aggregate(
   in_instance_id UUID
@@ -11,128 +12,177 @@ RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  v_admin_pcode TEXT;
-  v_framework_score NUMERIC;
-  v_hazard_score NUMERIC;
-  v_uv_score NUMERIC;
-  v_final_score NUMERIC;
-  v_upserted_rows INTEGER := 0;
-  v_total_score NUMERIC := 0;
-  v_location_count INTEGER := 0;
-  v_category_weights JSONB;
   v_framework_weight NUMERIC := 1.0;
   v_hazard_weight NUMERIC := 1.0;
   v_uv_weight NUMERIC := 1.0;
-  v_total_weight NUMERIC;
+  v_upserted_rows INTEGER := 0;
+  v_total_score NUMERIC := 0;
+  v_location_count INTEGER := 0;
   v_sample_category_weight NUMERIC;
 BEGIN
-  -- Get category weights from instance_scoring_weights or use defaults
-  -- Try to get category weights from the first dataset's entry (they should all have the same category_weight)
+  -- Get category weights from instance_scoring_weights
+  -- Category weights are stored with each dataset entry, and all datasets in a category have the same category_weight
+  -- These represent the weight of the category in the overall score calculation
+  
+  -- Get framework weight (P1, P2, P3 all have the same category_weight - it's the weight of the SSC Framework category)
   SELECT category_weight INTO v_sample_category_weight
   FROM instance_scoring_weights
   WHERE instance_id = in_instance_id
     AND category = 'SSC Framework - P1'
   LIMIT 1;
   
-  -- For now, use equal weights for all categories
-  -- Can be enhanced to read actual category weights from instance_scoring_weights
-  v_framework_weight := 1.0;
-  v_hazard_weight := 1.0;
-  v_uv_weight := 1.0;
-  v_total_weight := v_framework_weight + v_hazard_weight + v_uv_weight;
-
-  -- Get all admin areas that have at least one category score
-  FOR v_admin_pcode IN
-    SELECT DISTINCT admin_pcode
-    FROM (
-      SELECT admin_pcode FROM instance_category_scores WHERE instance_id = in_instance_id
-      UNION
-      SELECT admin_pcode FROM instance_dataset_scores WHERE instance_id = in_instance_id
-      UNION
-      SELECT admin_pcode FROM hazard_event_scores WHERE instance_id = in_instance_id
-    ) AS all_scores
-  LOOP
-    -- Get framework score (aggregate of P1, P2, P3)
-    -- This should be stored in instance_category_scores with category = 'SSC Framework'
-    -- If not available, calculate from P1, P2, P3 scores
-    SELECT score INTO v_framework_score
-    FROM instance_category_scores
+  -- Use the weight directly (it's already the category weight, not per-pillar)
+  -- If NULL or not found, default to 0 (not 1.0) so it doesn't contribute if not set
+  v_framework_weight := COALESCE(v_sample_category_weight, 0.0);
+  
+  -- Get Hazard category weight
+  -- First check hazard_events.metadata (this is where hazard event category weights are stored)
+  SELECT (metadata->>'category_weight')::NUMERIC INTO v_sample_category_weight
+  FROM hazard_events
+  WHERE instance_id = in_instance_id
+    AND metadata IS NOT NULL
+    AND metadata ? 'category_weight'
+  LIMIT 1;
+  
+  -- If found in hazard_events, use that
+  IF v_sample_category_weight IS NOT NULL THEN
+    v_hazard_weight := v_sample_category_weight;
+  ELSE
+    -- Fallback to instance_scoring_weights (for regular datasets in Hazard category)
+    SELECT category_weight INTO v_sample_category_weight
+    FROM instance_scoring_weights
     WHERE instance_id = in_instance_id
-      AND admin_pcode = v_admin_pcode
-      AND category = 'SSC Framework'
-    LIMIT 1;
-
-    -- If framework score not found, try to calculate from P1, P2, P3
-    IF v_framework_score IS NULL THEN
-      SELECT AVG(score) INTO v_framework_score
-      FROM instance_category_scores
-      WHERE instance_id = in_instance_id
-        AND admin_pcode = v_admin_pcode
-        AND category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3');
-    END IF;
-
-    -- Get hazard score
-    SELECT score INTO v_hazard_score
-    FROM instance_category_scores
-    WHERE instance_id = in_instance_id
-      AND admin_pcode = v_admin_pcode
       AND category = 'Hazard'
     LIMIT 1;
+    
+    -- Use the weight directly, default to 0 if not found
+    v_hazard_weight := COALESCE(v_sample_category_weight, 0.0);
+  END IF;
+  
+  -- Get Underlying Vulnerability category weight
+  SELECT category_weight INTO v_sample_category_weight
+  FROM instance_scoring_weights
+  WHERE instance_id = in_instance_id
+    AND category = 'Underlying Vulnerability'
+  LIMIT 1;
+  
+  -- Use the weight directly, default to 0 if not found
+  v_uv_weight := COALESCE(v_sample_category_weight, 0.0);
+  
+  -- Debug: Log the weights being used
+  RAISE NOTICE 'Category weights - Framework: %, Hazard: %, UV: %', v_framework_weight, v_hazard_weight, v_uv_weight;
+  
+  -- If all weights are 0, use equal weights as fallback (shouldn't happen if weights are saved)
+  IF v_framework_weight = 0.0 AND v_hazard_weight = 0.0 AND v_uv_weight = 0.0 THEN
+    RAISE NOTICE 'All category weights are 0, using equal weights as fallback';
+    v_framework_weight := 1.0;
+    v_hazard_weight := 1.0;
+    v_uv_weight := 1.0;
+  END IF;
 
-    -- Get underlying vulnerability score
-    SELECT score INTO v_uv_score
-    FROM instance_category_scores
-    WHERE instance_id = in_instance_id
-      AND admin_pcode = v_admin_pcode
-      AND category = 'Underlying Vulnerability'
-    LIMIT 1;
+  -- Calculate and store final scores for ALL admin areas at once using bulk query
+  -- This is much more efficient than row-by-row processing
+  WITH final_scores AS (
+    SELECT 
+      admin_pcode,
+      MAX(framework_score) AS framework_score,
+      MAX(hazard_score) AS hazard_score,
+      MAX(uv_score) AS uv_score,
+      (MAX(CASE WHEN framework_score IS NOT NULL THEN framework_score * v_framework_weight ELSE 0 END) +
+       MAX(CASE WHEN hazard_score IS NOT NULL THEN hazard_score * v_hazard_weight ELSE 0 END) +
+       MAX(CASE WHEN uv_score IS NOT NULL THEN uv_score * v_uv_weight ELSE 0 END)) AS weighted_sum,
+      (CASE WHEN MAX(framework_score) IS NOT NULL THEN v_framework_weight ELSE 0 END +
+       CASE WHEN MAX(hazard_score) IS NOT NULL THEN v_hazard_weight ELSE 0 END +
+       CASE WHEN MAX(uv_score) IS NOT NULL THEN v_uv_weight ELSE 0 END) AS total_weight,
+      (CASE WHEN MAX(framework_score) IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN MAX(hazard_score) IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN MAX(uv_score) IS NOT NULL THEN 1 ELSE 0 END) AS component_count
+    FROM (
+      -- Get framework score (aggregate of P1, P2, P3 or 'SSC Framework')
+      SELECT 
+        admin_pcode,
+        score AS framework_score,
+        NULL::NUMERIC AS hazard_score,
+        NULL::NUMERIC AS uv_score
+      FROM instance_category_scores
+      WHERE instance_id = in_instance_id
+        AND category = 'SSC Framework'
+      
+      UNION ALL
+      
+      -- If no 'SSC Framework', calculate from P1, P2, P3
+      SELECT 
+        admin_pcode,
+        AVG(score) AS framework_score,
+        NULL::NUMERIC AS hazard_score,
+        NULL::NUMERIC AS uv_score
+      FROM instance_category_scores
+      WHERE instance_id = in_instance_id
+        AND category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3')
+      GROUP BY admin_pcode
+      
+      UNION ALL
+      
+      -- Get hazard score
+      SELECT 
+        admin_pcode,
+        NULL::NUMERIC AS framework_score,
+        score AS hazard_score,
+        NULL::NUMERIC AS uv_score
+      FROM instance_category_scores
+      WHERE instance_id = in_instance_id
+        AND category = 'Hazard'
+      
+      UNION ALL
+      
+      -- Get underlying vulnerability score
+      SELECT 
+        admin_pcode,
+        NULL::NUMERIC AS framework_score,
+        NULL::NUMERIC AS hazard_score,
+        score AS uv_score
+      FROM instance_category_scores
+      WHERE instance_id = in_instance_id
+        AND category = 'Underlying Vulnerability'
+    ) AS category_scores
+    GROUP BY admin_pcode
+    HAVING COUNT(*) > 0 -- Only include admin areas with at least one category score
+  )
+  INSERT INTO instance_category_scores (instance_id, category, admin_pcode, score)
+  SELECT 
+    in_instance_id,
+    'Overall' AS category,
+    admin_pcode,
+    CASE
+      WHEN total_weight > 0 THEN weighted_sum / total_weight
+      WHEN component_count > 0 THEN (COALESCE(framework_score, 0) + COALESCE(hazard_score, 0) + COALESCE(uv_score, 0)) / component_count
+      ELSE NULL
+    END AS final_score
+  FROM final_scores
+  WHERE (
+    CASE
+      WHEN total_weight > 0 THEN weighted_sum / total_weight
+      WHEN component_count > 0 THEN (COALESCE(framework_score, 0) + COALESCE(hazard_score, 0) + COALESCE(uv_score, 0)) / component_count
+      ELSE NULL
+    END
+  ) IS NOT NULL
+  ON CONFLICT (instance_id, category, admin_pcode)
+  DO UPDATE SET 
+    score = EXCLUDED.score,
+    computed_at = NOW();
+  
+  GET DIAGNOSTICS v_upserted_rows = ROW_COUNT;
+  
+  -- Calculate statistics
+  SELECT 
+    COUNT(*),
+    COALESCE(SUM(score), 0)
+  INTO v_location_count, v_total_score
+  FROM instance_category_scores
+  WHERE instance_id = in_instance_id
+    AND category = 'Overall';
 
-    -- Calculate final score as weighted average
-    v_final_score := NULL;
-    DECLARE
-      v_component_count INTEGER := 0;
-      v_weighted_sum NUMERIC := 0;
-      v_actual_weight_sum NUMERIC := 0;
-    BEGIN
-      IF v_framework_score IS NOT NULL THEN
-        v_weighted_sum := v_weighted_sum + (v_framework_score * v_framework_weight);
-        v_actual_weight_sum := v_actual_weight_sum + v_framework_weight;
-        v_component_count := v_component_count + 1;
-      END IF;
-
-      IF v_hazard_score IS NOT NULL THEN
-        v_weighted_sum := v_weighted_sum + (v_hazard_score * v_hazard_weight);
-        v_actual_weight_sum := v_actual_weight_sum + v_hazard_weight;
-        v_component_count := v_component_count + 1;
-      END IF;
-
-      IF v_uv_score IS NOT NULL THEN
-        v_weighted_sum := v_weighted_sum + (v_uv_score * v_uv_weight);
-        v_actual_weight_sum := v_actual_weight_sum + v_uv_weight;
-        v_component_count := v_component_count + 1;
-      END IF;
-
-      IF v_actual_weight_sum > 0 THEN
-        v_final_score := v_weighted_sum / v_actual_weight_sum;
-      ELSIF v_component_count > 0 THEN
-        -- Fallback to simple average if weights are zero
-        v_final_score := (COALESCE(v_framework_score, 0) + COALESCE(v_hazard_score, 0) + COALESCE(v_uv_score, 0)) / v_component_count;
-      END IF;
-    END;
-
-    -- Store final score (assuming a table exists for this, or update instance_dataset_scores)
-    -- For now, we'll store in a view or calculate on-demand
-    -- If you have a specific table for final scores, insert/update there
-    -- Otherwise, this is calculated on-demand from category scores
-
-    IF v_final_score IS NOT NULL THEN
-      v_upserted_rows := v_upserted_rows + 1;
-      v_total_score := v_total_score + v_final_score;
-      v_location_count := v_location_count + 1;
-    END IF;
-  END LOOP;
-
-  -- Return statistics
+  -- Return results
   RETURN jsonb_build_object(
     'status', 'done',
     'upserted_rows', v_upserted_rows,
@@ -140,4 +190,3 @@ BEGIN
   );
 END;
 $$;
-
