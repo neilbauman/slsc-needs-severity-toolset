@@ -365,7 +365,8 @@ export default function HazardEventScoringModal({
           score: Number(r.score),
         }));
       rpcParams.in_magnitude_ranges = magnitudeRanges;
-      rpcParams.in_distance_ranges = null;
+      // Don't include in_distance_ranges for magnitude-based scoring
+      delete rpcParams.in_distance_ranges;
     } else {
       // Distance-based scoring
       const distRanges = distanceRanges
@@ -376,7 +377,8 @@ export default function HazardEventScoringModal({
           score: Number(r.score),
         }));
       rpcParams.in_distance_ranges = distRanges;
-      rpcParams.in_magnitude_ranges = null;
+      // Don't include in_magnitude_ranges for distance-based scoring
+      delete rpcParams.in_magnitude_ranges;
     }
 
     const { data, error } = await supabase.rpc('score_hazard_event', rpcParams);

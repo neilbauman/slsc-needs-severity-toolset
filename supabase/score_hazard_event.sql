@@ -8,6 +8,16 @@
 --   'overlap': Use contour with maximum overlap with admin boundary
 --   'within_distance': Find contours within specified distance (meters) of boundary
 --   'point_on_surface': Use ST_PointOnSurface instead of centroid
+-- 
+-- Also supports distance-based scoring for track-type events (typhoons, storms)
+
+-- Drop existing function to clear PostgREST cache
+DROP FUNCTION IF EXISTS public.score_hazard_event(UUID, UUID, JSONB, BOOLEAN, TEXT, NUMERIC, JSONB);
+DROP FUNCTION IF EXISTS public.score_hazard_event(UUID, UUID, JSONB, BOOLEAN, TEXT, NUMERIC);
+DROP FUNCTION IF EXISTS public.score_hazard_event(UUID, UUID, JSONB, BOOLEAN, TEXT);
+DROP FUNCTION IF EXISTS public.score_hazard_event(UUID, UUID, JSONB, BOOLEAN);
+DROP FUNCTION IF EXISTS public.score_hazard_event(UUID, UUID, JSONB);
+DROP FUNCTION IF EXISTS public.score_hazard_event(UUID, UUID);
 
 CREATE OR REPLACE FUNCTION public.score_hazard_event(
   in_hazard_event_id UUID,
