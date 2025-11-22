@@ -44,12 +44,25 @@ export default function InstanceScoringModal({
   onSaved,
 }: InstanceScoringModalProps) {
   type CategoryData = { name: string; datasets: any[]; categoryWeight: number };
+  type ImpactLocation = {
+    admin_pcode: string;
+    admin_name: string;
+    currentScore: number;
+    projectedScore: number;
+    change: number;
+    rank: number;
+  };
+  
   const [categories, setCategories] = useState<Record<string, CategoryData>>({});
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [method, setMethod] = useState<'mean' | 'weighted_mean' | '20_percent' | 'custom'>(
     'weighted_mean'
   );
   const [loading, setLoading] = useState(false);
+  const [showImpact, setShowImpact] = useState(true);
+  const [impactLocations, setImpactLocations] = useState<ImpactLocation[]>([]);
+  const [loadingImpact, setLoadingImpact] = useState(false);
+  const [currentScores, setCurrentScores] = useState<Record<string, number>>({});
 
   const CATEGORY_ORDER = [
     'SSC Framework - P1',
@@ -271,9 +284,187 @@ export default function InstanceScoringModal({
       setCategories(sorted);
       setWeights(weightMap);
       normalizeAllCategories();
+      
+      // Load current scores for impact preview
+      loadImpactPreview();
     };
     load();
   }, [instance]);
+
+  // Calculate impact preview when weights change
+  useEffect(() => {
+    if (showImpact && Object.keys(categories).length > 0 && Object.keys(weights).length > 0) {
+      calculateImpactPreview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, weights, showImpact]);
+
+  // Load current scores for impact calculation
+  const loadImpactPreview = async () => {
+    if (!instance?.id) return;
+    try {
+      const { data: scoresData } = await supabase
+        .from('v_instance_admin_scores')
+        .select('admin_pcode, avg_score, name')
+        .eq('instance_id', instance.id)
+        .not('avg_score', 'is', null)
+        .order('avg_score', { ascending: false })
+        .limit(20);
+
+      if (scoresData) {
+        const scoreMap: Record<string, number> = {};
+        const nameMap: Record<string, string> = {};
+        scoresData.forEach((s: any) => {
+          scoreMap[s.admin_pcode] = Number(s.avg_score);
+          nameMap[s.admin_pcode] = s.name || s.admin_pcode;
+        });
+        setCurrentScores(scoreMap);
+      }
+    } catch (err) {
+      console.error('Error loading current scores:', err);
+    }
+  };
+
+  // Calculate projected scores based on current weights
+  const calculateImpactPreview = async () => {
+    if (!instance?.id || Object.keys(categories).length === 0) return;
+    
+    setLoadingImpact(true);
+    try {
+      // Get sample locations (top 10 by current score)
+      const topLocations = Object.entries(currentScores)
+        .sort(([, a], [, b]) => {
+          const aVal = Number(a) || 0;
+          const bVal = Number(b) || 0;
+          return bVal - aVal;
+        })
+        .slice(0, 10)
+        .map(([pcode]) => pcode);
+
+      if (topLocations.length === 0) {
+        setImpactLocations([]);
+        setLoadingImpact(false);
+        return;
+      }
+
+      // Load dataset scores for these locations
+      const datasetIds = Object.values(categories)
+        .flatMap((cat: CategoryData) => cat.datasets.map((d: any) => d.id))
+        .filter((id: string) => !id.startsWith('hazard_event_'));
+
+      const hazardEventIds = Object.values(categories)
+        .flatMap((cat: CategoryData) => 
+          cat.datasets
+            .filter((d: any) => d.is_hazard_event && d.hazard_event_id)
+            .map((d: any) => d.hazard_event_id)
+        );
+
+      // Load dataset scores
+      const datasetScores: Record<string, Record<string, number>> = {};
+      if (datasetIds.length > 0) {
+        const { data: scoresData } = await supabase
+          .from('instance_dataset_scores')
+          .select('dataset_id, admin_pcode, score')
+          .eq('instance_id', instance.id)
+          .in('dataset_id', datasetIds)
+          .in('admin_pcode', topLocations);
+
+        (scoresData || []).forEach((s: any) => {
+          if (!datasetScores[s.admin_pcode]) {
+            datasetScores[s.admin_pcode] = {};
+          }
+          datasetScores[s.admin_pcode][s.dataset_id] = Number(s.score);
+        });
+      }
+
+      // Load hazard event scores
+      if (hazardEventIds.length > 0) {
+        const { data: hazardScores } = await supabase
+          .from('hazard_event_scores')
+          .select('hazard_event_id, admin_pcode, score')
+          .eq('instance_id', instance.id)
+          .in('hazard_event_id', hazardEventIds)
+          .in('admin_pcode', topLocations);
+
+        (hazardScores || []).forEach((s: any) => {
+          if (!datasetScores[s.admin_pcode]) {
+            datasetScores[s.admin_pcode] = {};
+          }
+          datasetScores[s.admin_pcode][`hazard_event_${s.hazard_event_id}`] = Number(s.score);
+        });
+      }
+
+      // Calculate projected scores
+      const impacts: ImpactLocation[] = [];
+      
+      for (const adminPcode of topLocations) {
+        const currentScore = currentScores[adminPcode] || 0;
+        
+        // Calculate category scores with current weights
+        const categoryScores: Record<string, number> = {};
+        
+        for (const [cat, catData] of Object.entries(categories)) {
+          const categoryData = catData as CategoryData;
+          const categoryDatasets = categoryData.datasets;
+          const categoryWeight = categoryData.categoryWeight / 100;
+          
+          // Calculate weighted average for this category
+          let categoryTotal = 0;
+          let categoryWeightSum = 0;
+          
+          categoryDatasets.forEach((d: any) => {
+            const datasetScore = datasetScores[adminPcode]?.[d.id];
+            if (datasetScore !== undefined) {
+              const datasetWeight = (weights[d.id] || 0) / 100;
+              categoryTotal += datasetScore * datasetWeight;
+              categoryWeightSum += datasetWeight;
+            }
+          });
+          
+          if (categoryWeightSum > 0) {
+            categoryScores[cat] = (categoryTotal / categoryWeightSum) * categoryWeight;
+          }
+        }
+
+        // Calculate overall projected score (sum of category scores)
+        const projectedScore = Object.values(categoryScores).reduce((sum, score) => sum + score, 0);
+        
+        // Get admin name
+        const { data: adminData } = await supabase
+          .from('admin_boundaries')
+          .select('name')
+          .eq('admin_pcode', adminPcode)
+          .eq('admin_level', 'ADM3')
+          .limit(1)
+          .single();
+
+        impacts.push({
+          admin_pcode: adminPcode,
+          admin_name: adminData?.name || adminPcode,
+          currentScore,
+          projectedScore,
+          change: projectedScore - currentScore,
+          rank: 0, // Will set after sorting
+        });
+      }
+
+      // Sort by projected score and assign ranks
+      impacts.sort((a, b) => {
+        const aScore = Number(a.projectedScore) || 0;
+        const bScore = Number(b.projectedScore) || 0;
+        return bScore - aScore;
+      });
+      impacts.forEach((impact, idx) => {
+        impact.rank = idx + 1;
+      });
+
+      setImpactLocations(impacts);
+    } catch (err) {
+      console.error('Error calculating impact preview:', err);
+    } finally {
+      setLoadingImpact(false);
+    }
+  };
 
   const handleSave = async () => {
     setLoading(true);
@@ -333,7 +524,27 @@ export default function InstanceScoringModal({
         }
       }
 
-      await supabase.rpc('score_instance_overall', { in_instance_id: instance.id });
+      // Recompute framework and final scores with new weights
+      // First compute framework aggregation
+      const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
+        in_instance_id: instance.id,
+      });
+
+      if (frameworkError) {
+        console.error('Error computing framework scores:', frameworkError);
+        // Continue anyway - weights are saved
+      }
+
+      // Then compute final aggregation
+      const { error: finalError } = await supabase.rpc('score_final_aggregate', {
+        in_instance_id: instance.id,
+      });
+
+      if (finalError) {
+        console.error('Error computing final scores:', finalError);
+        // Continue anyway - weights are saved
+      }
+
       if (onSaved) await onSaved();
       onClose();
     } catch (err) {
@@ -359,6 +570,57 @@ export default function InstanceScoringModal({
         <p className="text-xs mb-3" style={{ color: 'var(--gsc-gray)' }}>
           Adjust weights per dataset and category. All levels auto-balance to 100%.
         </p>
+
+        {/* Impact Preview Panel */}
+        {showImpact && (
+          <div className="mb-3 p-2 rounded border" style={{ borderColor: 'var(--gsc-blue)', backgroundColor: 'rgba(0, 75, 135, 0.05)' }}>
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-xs font-semibold" style={{ color: 'var(--gsc-blue)' }}>📊 Impact on Most Affected Places</h3>
+              <button
+                onClick={() => setShowImpact(!showImpact)}
+                className="text-xs hover:opacity-80"
+                style={{ color: 'var(--gsc-gray)' }}
+              >
+                {showImpact ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {loadingImpact ? (
+              <div className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Calculating impact...</div>
+            ) : impactLocations.length > 0 ? (
+              <div className="space-y-1 max-h-32 overflow-y-auto">
+                {impactLocations.slice(0, 5).map((loc, idx) => {
+                  const isPositive = loc.change > 0.01;
+                  const isNegative = loc.change < -0.01;
+                  const rankChange = idx + 1 - loc.rank;
+                  return (
+                    <div key={loc.admin_pcode} className="text-xs flex justify-between items-center py-0.5">
+                      <div className="flex-1 truncate">
+                        <span className="font-medium">#{loc.rank}</span> {loc.admin_name}
+                        {rankChange !== 0 && (
+                          <span className={`ml-1 text-xs ${rankChange > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            ({rankChange > 0 ? '↑' : '↓'} {Math.abs(rankChange)})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500">{loc.currentScore.toFixed(2)}</span>
+                        <span className="text-gray-400">→</span>
+                        <span className="font-semibold">{loc.projectedScore.toFixed(2)}</span>
+                        {(isPositive || isNegative) && (
+                          <span className={`text-xs font-semibold ${isPositive ? 'text-red-600' : 'text-green-600'}`}>
+                            {isPositive ? '↑' : '↓'} {Math.abs(loc.change).toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs" style={{ color: 'var(--gsc-gray)' }}>No impact data available. Apply scoring first.</div>
+            )}
+          </div>
+        )}
 
         <div className="mb-3">
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--gsc-gray)' }}>Aggregation method</label>
