@@ -150,10 +150,13 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
                 geometryTypes: parsed[key].geometryTypes ? new Set(parsed[key].geometryTypes) : undefined,
               };
             });
+            console.log('Loaded filters from localStorage:', filtersWithSets);
             setHazardEventFilters(filtersWithSets);
           } catch (e) {
             console.warn('Error loading saved filters in fetchData:', e);
           }
+        } else {
+          console.log('No saved filters found in localStorage for instance:', instanceId);
         }
         
         // Check if we already have saved visibility from the earlier useEffect
@@ -599,6 +602,54 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
     loadFeaturesForSelection(selectedLayer, overallFeatures);
   }, [selectedLayer.type, selectedLayer.datasetId, selectedLayer.category, selectedLayer.hazardEventId]);
 
+  // Ensure filters are loaded when hazard layers are available
+  // This fixes timing issues in iframe context where filters might not be applied
+  useEffect(() => {
+    if (hazardEventLayers.length > 0 && instanceId && typeof window !== 'undefined') {
+      // Re-load filters from localStorage to ensure they're applied
+      // This is important for iframe context where timing can be different
+      const savedFilters = localStorage.getItem(`hazard_filters_${instanceId}`);
+      if (savedFilters) {
+        try {
+          const parsed = JSON.parse(savedFilters);
+          const filtersWithSets: Record<string, any> = {};
+          Object.keys(parsed).forEach(key => {
+            filtersWithSets[key] = {
+              ...parsed[key],
+              visibleFeatureIds: parsed[key].visibleFeatureIds ? new Set(parsed[key].visibleFeatureIds) : undefined,
+              geometryTypes: parsed[key].geometryTypes ? new Set(parsed[key].geometryTypes) : undefined,
+            };
+          });
+          // Always set filters when layers are loaded to ensure they're applied
+          console.log('Re-applying filters after layers loaded (iframe fix):', filtersWithSets);
+          setHazardEventFilters(prev => {
+            // Only update if there's a meaningful difference to avoid unnecessary re-renders
+            const prevKeys = Object.keys(prev).sort();
+            const newKeys = Object.keys(filtersWithSets).sort();
+            if (prevKeys.length !== newKeys.length) {
+              return filtersWithSets;
+            }
+            // Check if geometryTypes filters differ
+            for (const key of newKeys) {
+              const prevFilter = prev[key];
+              const newFilter = filtersWithSets[key];
+              if (!prevFilter && newFilter) return filtersWithSets;
+              if (prevFilter && !newFilter) return filtersWithSets;
+              if (prevFilter && newFilter) {
+                const prevTypes = prevFilter.geometryTypes ? Array.from(prevFilter.geometryTypes).sort().join(',') : '';
+                const newTypes = newFilter.geometryTypes ? Array.from(newFilter.geometryTypes).sort().join(',') : '';
+                if (prevTypes !== newTypes) return filtersWithSets;
+              }
+            }
+            return prev; // No change needed
+          });
+        } catch (e) {
+          console.warn('Error re-loading filters:', e);
+        }
+      }
+    }
+  }, [hazardEventLayers.length, instanceId]); // Re-run when layers are loaded
+
   const getColor = (score: number) => {
     if (score <= 1) return "#00FF00";
     if (score <= 2) return "#CCFF00";
@@ -789,12 +840,42 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
               {hazardEventLayers
                 .filter((layer) => visibleHazardEvents.has(layer.id))
                 .map((layer) => {
-                  const filter = hazardEventFilters[layer.id] || {};
+                  // Get filter from state, but also check localStorage directly as fallback
+                  // This ensures filters work even if state hasn't updated yet (iframe timing issue)
+                  let filter = hazardEventFilters[layer.id] || {};
+                  
+                  // Fallback: Read directly from localStorage if filter is empty (iframe fix)
+                  if (!filter.geometryTypes && !filter.visibleFeatureIds && typeof window !== 'undefined') {
+                    try {
+                      const savedFilters = localStorage.getItem(`hazard_filters_${instanceId}`);
+                      if (savedFilters) {
+                        const parsed = JSON.parse(savedFilters);
+                        const layerFilter = parsed[layer.id];
+                        if (layerFilter) {
+                          filter = {
+                            ...layerFilter,
+                            geometryTypes: layerFilter.geometryTypes ? new Set(layerFilter.geometryTypes) : undefined,
+                            visibleFeatureIds: layerFilter.visibleFeatureIds ? new Set(layerFilter.visibleFeatureIds) : undefined,
+                          };
+                          console.log('Applied filter from localStorage fallback for layer:', layer.id, filter);
+                        }
+                      }
+                    } catch (e) {
+                      console.warn('Error reading filter from localStorage fallback:', e);
+                    }
+                  }
+                  
+                  const totalFeatures = (layer.geojson as GeoJSON.FeatureCollection).features.length;
+                  
                   const filteredFeatures = (layer.geojson as GeoJSON.FeatureCollection).features.filter((feature: any, idx: number) => {
+                    // Apply geometry type filter
                     if (filter.geometryTypes && filter.geometryTypes.size > 0) {
                       const geomType = feature?.geometry?.type || '';
-                      if (!filter.geometryTypes.has(geomType)) return false;
+                      if (!filter.geometryTypes.has(geomType)) {
+                        return false;
+                      }
                     }
+                    // Apply magnitude range filter
                     if (filter.minMagnitude !== undefined || filter.maxMagnitude !== undefined) {
                       const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
                       const magValue = Number(magnitude);
@@ -803,21 +884,31 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
                         if (filter.maxMagnitude !== undefined && magValue > filter.maxMagnitude) return false;
                       }
                     }
+                    // Apply feature ID filter
                     if (filter.visibleFeatureIds && filter.visibleFeatureIds.size > 0) {
                       const featureId = feature?.id || feature?.properties?.id || `feature-${idx}`;
                       if (!filter.visibleFeatureIds.has(featureId)) return false;
                     }
                     return true;
                   });
+                  
+                  // Debug logging
+                  if (filter.geometryTypes && filter.geometryTypes.size > 0) {
+                    console.log(`Layer ${layer.id}: Filtering by geometry types:`, Array.from(filter.geometryTypes), `- Showing ${filteredFeatures.length} of ${totalFeatures} features`);
+                  }
 
                   const filteredGeoJSON: GeoJSON.FeatureCollection = {
                     type: 'FeatureCollection',
                     features: filteredFeatures,
                   };
 
+                  // Create a key that includes filter state to force re-render when filters change
+                  const filterKey = filter.geometryTypes ? Array.from(filter.geometryTypes).sort().join(',') : 'all';
+                  const filterKeyFull = `${layer.id}-${filterKey}-${filter.minMagnitude || ''}-${filter.maxMagnitude || ''}`;
+                  
                   return (
                     <GeoJSON
-                      key={`hazard-${layer.id}`}
+                      key={`hazard-${filterKeyFull}`}
                       data={filteredGeoJSON}
                       style={(feature: any) => {
                         const magnitude = feature?.properties?.[layer.magnitude_field] || feature?.properties?.value;
