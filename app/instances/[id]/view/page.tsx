@@ -61,6 +61,7 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
   }
 
   // Load localStorage filters on mount (using same keys as edit page)
+  // This runs early to ensure filters are loaded before hazard events are processed
   useEffect(() => {
     if (instanceId) {
       // Load filters (same key as edit page: hazard_filters_${instanceId})
@@ -80,16 +81,6 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
           setHazardEventFilters(filtersWithSets);
         } catch (e) {
           console.warn('Error loading saved filters:', e);
-        }
-      }
-      
-      // Load visibility (same key as edit page: hazard_visibility_${instanceId})
-      const savedVisible = localStorage.getItem(`hazard_visibility_${instanceId}`);
-      if (savedVisible) {
-        try {
-          setVisibleHazardEvents(new Set(JSON.parse(savedVisible)));
-        } catch (e) {
-          console.warn('Error loading saved visible events:', e);
         }
       }
     }
@@ -144,8 +135,29 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
           }
         });
         setHazardEventLayers(layers);
-        // Make all hazard events visible by default
-        setVisibleHazardEvents(new Set(layers.map(l => l.id)));
+        
+        // Check if we already have saved visibility from the earlier useEffect
+        // If not, load it now or default to all visible
+        const savedVisible = localStorage.getItem(`hazard_visibility_${instanceId}`);
+        if (savedVisible) {
+          try {
+            const savedSet = new Set(JSON.parse(savedVisible));
+            // Only include IDs that exist in the loaded layers
+            const validIds = layers.filter(l => savedSet.has(l.id)).map(l => l.id);
+            if (validIds.length > 0) {
+              setVisibleHazardEvents(new Set(validIds));
+            } else {
+              // If saved set doesn't match any current layers, default to all visible
+              setVisibleHazardEvents(new Set(layers.map(l => l.id)));
+            }
+          } catch (e) {
+            console.warn('Error loading saved visibility, defaulting to all visible:', e);
+            setVisibleHazardEvents(new Set(layers.map(l => l.id)));
+          }
+        } else {
+          // Make all hazard events visible by default if no saved preference
+          setVisibleHazardEvents(new Set(layers.map(l => l.id)));
+        }
       }
 
       // Load overall instance scores
