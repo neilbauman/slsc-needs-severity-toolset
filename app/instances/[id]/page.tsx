@@ -975,13 +975,32 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       const serializable: Record<string, any> = {};
       Object.keys(hazardEventFilters).forEach((key) => {
         const filter = hazardEventFilters[key];
-        serializable[key] = {
-          ...filter,
-          visibleFeatureIds: filter.visibleFeatureIds ? Array.from(filter.visibleFeatureIds) : undefined,
-          geometryTypes: filter.geometryTypes ? Array.from(filter.geometryTypes) : undefined,
-        };
+        // Only include filters that have actual filter criteria
+        if (filter && (
+          (filter.geometryTypes && filter.geometryTypes.size > 0) ||
+          (filter.visibleFeatureIds && filter.visibleFeatureIds.size > 0) ||
+          filter.minMagnitude !== undefined ||
+          filter.maxMagnitude !== undefined
+        )) {
+          serializable[key] = {
+            ...filter,
+            visibleFeatureIds: filter.visibleFeatureIds ? Array.from(filter.visibleFeatureIds) : undefined,
+            geometryTypes: filter.geometryTypes ? Array.from(filter.geometryTypes) : undefined,
+          };
+        }
       });
-      localStorage.setItem(storageKey, JSON.stringify(serializable));
+      
+      // Only save if there are actual filters (don't overwrite with empty object)
+      if (Object.keys(serializable).length > 0) {
+        console.log('💾 Saving filters to localStorage:', serializable);
+        localStorage.setItem(storageKey, JSON.stringify(serializable));
+      } else {
+        // If filters are empty, check if we should clear existing filters
+        const existing = localStorage.getItem(storageKey);
+        if (existing) {
+          console.log('⚠️ Filters are empty, but keeping existing filters in localStorage');
+        }
+      }
     } catch (e) {
       console.warn('Error saving filters to localStorage:', e);
     }
@@ -1595,29 +1614,65 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                                         const current = prev[selectedHazardEvent.id] || {};
                                         const types = new Set(current.geometryTypes || []);
                                         
+                                        let newFilters;
                                         if (e.target.checked) {
                                           types.add(geomType);
                                           // If all types are selected, clear the filter (show all)
                                           if (types.size === geometryTypes.size) {
-                                            return {
+                                            newFilters = {
                                               ...prev,
                                               [selectedHazardEvent.id]: {
                                                 ...current,
                                                 geometryTypes: undefined,
                                               }
                                             };
+                                          } else {
+                                            newFilters = {
+                                              ...prev,
+                                              [selectedHazardEvent.id]: {
+                                                ...current,
+                                                geometryTypes: types,
+                                              }
+                                            };
                                           }
                                         } else {
                                           types.delete(geomType);
+                                          newFilters = {
+                                            ...prev,
+                                            [selectedHazardEvent.id]: {
+                                              ...current,
+                                              geometryTypes: types.size > 0 ? types : new Set(),
+                                            }
+                                          };
                                         }
                                         
-                                        return {
-                                          ...prev,
-                                          [selectedHazardEvent.id]: {
-                                            ...current,
-                                            geometryTypes: types.size > 0 ? types : new Set(),
+                                        // Immediately save to localStorage
+                                        if (instanceId) {
+                                          try {
+                                            const storageKey = `hazard_filters_${instanceId}`;
+                                            const serializable: Record<string, any> = {};
+                                            Object.keys(newFilters).forEach((key) => {
+                                              const filter = newFilters[key];
+                                              if (filter && (
+                                                (filter.geometryTypes && filter.geometryTypes.size > 0) ||
+                                                (filter.visibleFeatureIds && filter.visibleFeatureIds.size > 0) ||
+                                                filter.minMagnitude !== undefined ||
+                                                filter.maxMagnitude !== undefined
+                                              )) {
+                                                serializable[key] = {
+                                                  ...filter,
+                                                  visibleFeatureIds: filter.visibleFeatureIds ? Array.from(filter.visibleFeatureIds) : undefined,
+                                                  geometryTypes: filter.geometryTypes ? Array.from(filter.geometryTypes) : undefined,
+                                                };
+                                              }
+                                            });
+                                            localStorage.setItem(storageKey, JSON.stringify(serializable));
+                                          } catch (e) {
+                                            console.warn('Error immediately saving filter:', e);
                                           }
-                                        };
+                                        }
+                                        
+                                        return newFilters;
                                       });
                                     }}
                                     className="cursor-pointer"
@@ -1639,13 +1694,41 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                         <div className="mb-2 pb-2 border-b">
                           <button
                             onClick={() => {
-                              setHazardEventFilters(prev => ({
-                                ...prev,
+                              const newFilters = {
+                                ...hazardEventFilters,
                                 [selectedHazardEvent.id]: {
-                                  ...prev[selectedHazardEvent.id],
+                                  ...hazardEventFilters[selectedHazardEvent.id],
                                   geometryTypes: new Set(['LineString', 'MultiLineString']),
                                 }
-                              }));
+                              };
+                              setHazardEventFilters(newFilters);
+                              
+                              // Immediately save to localStorage
+                              if (instanceId) {
+                                try {
+                                  const storageKey = `hazard_filters_${instanceId}`;
+                                  const serializable: Record<string, any> = {};
+                                  Object.keys(newFilters).forEach((key) => {
+                                    const filter = newFilters[key];
+                                    if (filter && (
+                                      (filter.geometryTypes && filter.geometryTypes.size > 0) ||
+                                      (filter.visibleFeatureIds && filter.visibleFeatureIds.size > 0) ||
+                                      filter.minMagnitude !== undefined ||
+                                      filter.maxMagnitude !== undefined
+                                    )) {
+                                      serializable[key] = {
+                                        ...filter,
+                                        visibleFeatureIds: filter.visibleFeatureIds ? Array.from(filter.visibleFeatureIds) : undefined,
+                                        geometryTypes: filter.geometryTypes ? Array.from(filter.geometryTypes) : undefined,
+                                      };
+                                    }
+                                  });
+                                  localStorage.setItem(storageKey, JSON.stringify(serializable));
+                                  console.log('💾 Immediately saved filter (Track Only) to localStorage:', serializable);
+                                } catch (e) {
+                                  console.warn('Error immediately saving filter:', e);
+                                }
+                              }
                             }}
                             className="text-xs px-2 py-1 bg-blue-100 hover:bg-blue-200 rounded w-full"
                             title="Show only the center track line"
@@ -1654,13 +1737,41 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                           </button>
                           <button
                             onClick={() => {
-                              setHazardEventFilters(prev => ({
-                                ...prev,
+                              const newFilters = {
+                                ...hazardEventFilters,
                                 [selectedHazardEvent.id]: {
-                                  ...prev[selectedHazardEvent.id],
+                                  ...hazardEventFilters[selectedHazardEvent.id],
                                   geometryTypes: undefined,
                                 }
-                              }));
+                              };
+                              setHazardEventFilters(newFilters);
+                              
+                              // Immediately save to localStorage
+                              if (instanceId) {
+                                try {
+                                  const storageKey = `hazard_filters_${instanceId}`;
+                                  const serializable: Record<string, any> = {};
+                                  Object.keys(newFilters).forEach((key) => {
+                                    const filter = newFilters[key];
+                                    if (filter && (
+                                      (filter.geometryTypes && filter.geometryTypes.size > 0) ||
+                                      (filter.visibleFeatureIds && filter.visibleFeatureIds.size > 0) ||
+                                      filter.minMagnitude !== undefined ||
+                                      filter.maxMagnitude !== undefined
+                                    )) {
+                                      serializable[key] = {
+                                        ...filter,
+                                        visibleFeatureIds: filter.visibleFeatureIds ? Array.from(filter.visibleFeatureIds) : undefined,
+                                        geometryTypes: filter.geometryTypes ? Array.from(filter.geometryTypes) : undefined,
+                                      };
+                                    }
+                                  });
+                                  localStorage.setItem(storageKey, JSON.stringify(serializable));
+                                  console.log('💾 Immediately saved filter (Show All) to localStorage:', serializable);
+                                } catch (e) {
+                                  console.warn('Error immediately saving filter:', e);
+                                }
+                              }
                             }}
                             className="text-xs px-2 py-1 bg-gray-200 hover:bg-gray-300 rounded w-full mt-1"
                             title="Show all features"
