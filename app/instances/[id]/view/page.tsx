@@ -404,14 +404,9 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
     <div className="flex flex-col h-full" style={{ maxWidth: '8.5in', margin: '0 auto' }}>
       {/* View Only Banner */}
       <div className="mb-2 p-2 rounded border" style={{ backgroundColor: 'rgba(0, 75, 135, 0.1)', borderColor: 'var(--gsc-blue)' }}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold" style={{ color: 'var(--gsc-blue)' }}>👁️ VIEW ONLY MODE</span>
-            <span className="text-xs" style={{ color: 'var(--gsc-gray)' }}>This is a read-only view. No changes can be made.</span>
-          </div>
-          <Link href={`/instances/${instanceId}`} className="text-xs px-2 py-1 rounded hover:opacity-80" style={{ backgroundColor: 'var(--gsc-blue)', color: 'white' }}>
-            Edit Mode →
-          </Link>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold" style={{ color: 'var(--gsc-blue)' }}>👁️ VIEW ONLY MODE</span>
+          <span className="text-xs" style={{ color: 'var(--gsc-gray)' }}>This is a read-only view. No changes can be made.</span>
         </div>
       </div>
 

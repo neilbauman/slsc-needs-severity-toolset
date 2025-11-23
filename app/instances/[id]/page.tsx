@@ -1324,6 +1324,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href={`/instances/${instanceId}/view`}
+              className="btn text-xs py-1 px-2"
+              style={{ backgroundColor: 'var(--gsc-blue)', color: 'white' }}
+              title="Open view-only page (shareable link)"
+            >
+              👁️ View Only
+            </Link>
             <button
               onClick={() => setShowAffectedAreaModal(true)}
               className="btn btn-secondary text-xs py-1 px-2"
