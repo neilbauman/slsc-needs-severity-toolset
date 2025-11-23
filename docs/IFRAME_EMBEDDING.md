@@ -89,36 +89,27 @@ For responsive embedding that adapts to screen size:
 
 ## Security Configuration
 
-The Next.js configuration has been updated to allow iframe embedding with `X-Frame-Options: SAMEORIGIN`. This means:
+The Next.js configuration has been updated to allow cross-origin iframe embedding for `/view` and `/embed` routes. This means:
 
 - ✅ **Same origin**: Can be embedded on the same domain
-- ⚠️ **Cross-origin**: For embedding on different domains, you may need to adjust the header
+- ✅ **Cross-origin**: Can be embedded on any external domain (e.g., sheltercluster.org)
 
-### For Cross-Origin Embedding
+The configuration uses:
+- `X-Frame-Options: ALLOWALL` for view/embed routes
+- `Content-Security-Policy: frame-ancestors *` for explicit cross-origin support
 
-If you need to embed on a different domain, update `next.config.js`:
+### For Specific Domain Allowlist (More Secure)
+
+If you want to restrict embedding to specific trusted domains only, update `next.config.js`:
 
 ```javascript
-module.exports = { 
-  reactStrictMode: true,
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          {
-            key: 'X-Frame-Options',
-            value: 'ALLOWALL', // Less secure - allows any origin
-            // OR use Content-Security-Policy for more control:
-            // key: 'Content-Security-Policy',
-            // value: "frame-ancestors 'self' https://trusted-domain.com;"
-          },
-        ],
-      },
-    ];
-  },
-};
+{
+  key: 'Content-Security-Policy',
+  value: "frame-ancestors 'self' https://sheltercluster.org https://trusted-domain.com;"
+}
 ```
+
+This allows embedding only from your own domain, sheltercluster.org, and other specified trusted domains.
 
 ## Finding Your Instance ID
 

@@ -3,12 +3,13 @@ module.exports = {
   async headers() {
     return [
       {
-        // Apply to all routes
+        // For all routes, set SAMEORIGIN by default
+        // Middleware will remove it for embed/view routes
         source: '/:path*',
         headers: [
           {
             key: 'X-Frame-Options',
-            value: 'SAMEORIGIN', // Allow iframe embedding from same origin, or use 'ALLOWALL' for any origin (less secure)
+            value: 'SAMEORIGIN',
           },
         ],
       },
