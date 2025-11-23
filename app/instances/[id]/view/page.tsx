@@ -138,7 +138,15 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         
         // Load filters from localStorage right after loading hazard events
         // This ensures filters are available when layers are rendered
-        const savedFilters = localStorage.getItem(`hazard_filters_${instanceId}`);
+        const filterKey = `hazard_filters_${instanceId}`;
+        const savedFilters = localStorage.getItem(filterKey);
+        console.log('Checking localStorage for filters:', {
+          key: filterKey,
+          found: !!savedFilters,
+          instanceId: instanceId,
+          allKeys: typeof window !== 'undefined' ? Object.keys(localStorage).filter(k => k.includes('hazard')) : []
+        });
+        
         if (savedFilters) {
           try {
             const parsed = JSON.parse(savedFilters);
@@ -150,13 +158,18 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
                 geometryTypes: parsed[key].geometryTypes ? new Set(parsed[key].geometryTypes) : undefined,
               };
             });
-            console.log('Loaded filters from localStorage:', filtersWithSets);
+            console.log('Loaded filters from localStorage in fetchData:', filtersWithSets);
             setHazardEventFilters(filtersWithSets);
           } catch (e) {
             console.warn('Error loading saved filters in fetchData:', e);
           }
         } else {
-          console.log('No saved filters found in localStorage for instance:', instanceId);
+          console.log('No saved filters found in localStorage for instance:', instanceId, 'Key:', filterKey);
+          // Check if there are any hazard-related keys at all
+          if (typeof window !== 'undefined') {
+            const allHazardKeys = Object.keys(localStorage).filter(k => k.includes('hazard'));
+            console.log('All hazard-related localStorage keys:', allHazardKeys);
+          }
         }
         
         // Check if we already have saved visibility from the earlier useEffect
@@ -840,28 +853,49 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
               {hazardEventLayers
                 .filter((layer) => visibleHazardEvents.has(layer.id))
                 .map((layer) => {
-                  // Get filter from state, but also check localStorage directly as fallback
-                  // This ensures filters work even if state hasn't updated yet (iframe timing issue)
+                  // CRITICAL: Always check localStorage directly during rendering (iframe fix)
+                  // In iframe context, React state might not update in time, so we always check localStorage
                   let filter = hazardEventFilters[layer.id] || {};
                   
-                  // Fallback: Read directly from localStorage if filter is empty (iframe fix)
-                  if (!filter.geometryTypes && !filter.visibleFeatureIds && typeof window !== 'undefined') {
+                  // Always prefer localStorage over state for iframe reliability
+                  if (typeof window !== 'undefined') {
                     try {
-                      const savedFilters = localStorage.getItem(`hazard_filters_${instanceId}`);
+                      const filterKey = `hazard_filters_${instanceId}`;
+                      const savedFilters = localStorage.getItem(filterKey);
                       if (savedFilters) {
                         const parsed = JSON.parse(savedFilters);
                         const layerFilter = parsed[layer.id];
-                        if (layerFilter) {
-                          filter = {
+                        if (layerFilter && (layerFilter.geometryTypes || layerFilter.visibleFeatureIds)) {
+                          // Always use localStorage filter if it has geometryTypes or visibleFeatureIds
+                          // This ensures filters work in iframe even if state is stale
+                          const localStorageFilter = {
                             ...layerFilter,
                             geometryTypes: layerFilter.geometryTypes ? new Set(layerFilter.geometryTypes) : undefined,
                             visibleFeatureIds: layerFilter.visibleFeatureIds ? new Set(layerFilter.visibleFeatureIds) : undefined,
                           };
-                          console.log('Applied filter from localStorage fallback for layer:', layer.id, filter);
+                          
+                          // Prefer localStorage if it has geometryTypes (the main filter we care about)
+                          if (localStorageFilter.geometryTypes && localStorageFilter.geometryTypes.size > 0) {
+                            filter = localStorageFilter;
+                            // Silently update state in background (don't log every render)
+                            if (!hazardEventFilters[layer.id] || 
+                                !hazardEventFilters[layer.id].geometryTypes || 
+                                hazardEventFilters[layer.id].geometryTypes.size === 0) {
+                              setHazardEventFilters(prev => ({
+                                ...prev,
+                                [layer.id]: filter
+                              }));
+                            }
+                          } else if (filter.geometryTypes && filter.geometryTypes.size > 0) {
+                            // State has filter, keep it
+                          } else {
+                            // Use localStorage filter even if it doesn't have geometryTypes (might have other filters)
+                            filter = localStorageFilter;
+                          }
                         }
                       }
                     } catch (e) {
-                      console.warn('Error reading filter from localStorage fallback:', e);
+                      // Silently fail - don't spam console
                     }
                   }
                   
