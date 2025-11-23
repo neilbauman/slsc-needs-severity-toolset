@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { AGGREGATION_METHODS, AggregationMethod, recommendMethod, getMethodById } from '@/lib/aggregationMethods';
 
 // Slider styles
 const sliderStyles = `
@@ -65,6 +66,11 @@ export default function InstanceScoringModal({
   const [loadingImpact, setLoadingImpact] = useState(false);
   const [currentScores, setCurrentScores] = useState<Record<string, number>>({});
   const [isNormalizing, setIsNormalizing] = useState(false); // Lock to prevent UI jumping
+  const [overallMethod, setOverallMethod] = useState<string>('weighted_mean'); // Overall aggregation method
+  const [showMethodComparison, setShowMethodComparison] = useState(false);
+  const [loadingComparison, setLoadingComparison] = useState(false);
+  const [comparisonData, setComparisonData] = useState<any[]>([]);
+  const [showMethodGuidance, setShowMethodGuidance] = useState(false);
 
   const CATEGORY_ORDER = [
     'SSC Framework - P1',
@@ -386,6 +392,20 @@ export default function InstanceScoringModal({
       setCategories(sorted);
       setWeights(weightMap);
       
+      // Load saved overall aggregation method from instance metadata
+      if (instance.metadata?.aggregation_method) {
+        setOverallMethod(instance.metadata.aggregation_method);
+      } else {
+        // Auto-recommend method based on data characteristics
+        const hasMultipleHazards = hazardEventsData && hazardEventsData.length > 1;
+        const recommended = recommendMethod({
+          hasMultipleHazards,
+          hasExtremeScores: false, // Could analyze scores if needed
+          isBalanced: true, // Default assumption
+        });
+        setOverallMethod(recommended);
+      }
+      
       // Load current scores for impact preview
       loadImpactPreview();
     };
@@ -615,6 +635,47 @@ export default function InstanceScoringModal({
     }
   };
 
+  // Handle method comparison
+  const handleCompareMethods = async () => {
+    if (!instance?.id) return;
+    
+    setLoadingComparison(true);
+    setShowMethodComparison(true);
+    
+    try {
+      // First, calculate all methods
+      const { error: calcError } = await supabase.rpc('score_final_aggregate_all_methods', {
+        in_instance_id: instance.id
+      });
+      
+      if (calcError) {
+        console.error('Error calculating methods:', calcError);
+        setError(`Error calculating comparison: ${calcError.message}`);
+        setLoadingComparison(false);
+        return;
+      }
+      
+      // Then fetch comparison data
+      const { data, error: fetchError } = await supabase.rpc('get_method_comparison', {
+        in_instance_id: instance.id,
+        in_category: 'Overall',
+        in_limit: 20
+      });
+      
+      if (fetchError) {
+        console.error('Error fetching comparison:', fetchError);
+        setError(`Error fetching comparison: ${fetchError.message}`);
+      } else {
+        setComparisonData(data || []);
+      }
+    } catch (err: any) {
+      console.error('Error in method comparison:', err);
+      setError(`Error: ${err.message}`);
+    } finally {
+      setLoadingComparison(false);
+    }
+  };
+
   const handleSave = async () => {
     setLoading(true);
     setError(null);
@@ -671,6 +732,22 @@ export default function InstanceScoringModal({
               console.error('Error saving weight for dataset:', d.id, err);
             }
           }
+        }
+      }
+
+      // Save overall aggregation method to instance metadata
+      if (instance.metadata) {
+        const updatedMetadata = {
+          ...instance.metadata,
+          aggregation_method: overallMethod
+        };
+        const { error: metadataError } = await supabase
+          .from('instances')
+          .update({ metadata: updatedMetadata })
+          .eq('id', instance.id);
+        
+        if (metadataError) {
+          console.error('Error saving aggregation method:', metadataError);
         }
       }
 
@@ -800,13 +877,113 @@ export default function InstanceScoringModal({
           </div>
         )}
 
+        {/* Overall Aggregation Method Selector */}
+        <div className="mb-3 p-2 rounded border" style={{ backgroundColor: 'rgba(0, 75, 135, 0.05)', borderColor: 'var(--gsc-blue)' }}>
+          <div className="flex justify-between items-center mb-2">
+            <div className="flex-1">
+              <label className="text-xs font-semibold" style={{ color: 'var(--gsc-gray)' }}>
+                Overall Aggregation Method:
+              </label>
+              <select
+                value={overallMethod}
+                onChange={(e) => setOverallMethod(e.target.value)}
+                className="mt-1 text-xs px-2 py-1 border rounded w-full"
+                style={{ borderColor: 'var(--gsc-light-gray)' }}
+              >
+                {AGGREGATION_METHODS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.icon} {m.name} {m.recommended ? '(Recommended)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => setShowMethodGuidance(!showMethodGuidance)}
+              className="ml-2 text-xs px-2 py-1 rounded hover:opacity-80"
+              style={{ backgroundColor: 'var(--gsc-blue)', color: 'white' }}
+            >
+              {showMethodGuidance ? 'Hide' : 'Show'} Info
+            </button>
+          </div>
+          
+          {showMethodGuidance && (() => {
+            const selectedMethod = getMethodById(overallMethod);
+            return selectedMethod ? (
+              <div className="mt-2 p-2 rounded text-xs" style={{ backgroundColor: 'rgba(255, 255, 255, 0.8)' }}>
+                <div className="font-semibold mb-1">{selectedMethod.icon} {selectedMethod.name}</div>
+                <div className="mb-1">{selectedMethod.description}</div>
+                <div className="mb-1"><strong>When to use:</strong> {selectedMethod.whenToUse}</div>
+                <div className="mb-1"><strong>Example:</strong> {selectedMethod.example.explanation}</div>
+                <div><strong>Best for:</strong> {selectedMethod.bestFor}</div>
+              </div>
+            ) : null;
+          })()}
+          
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={handleCompareMethods}
+              disabled={loadingComparison}
+              className="text-xs px-3 py-1 rounded hover:opacity-80 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--gsc-green)', color: 'white' }}
+            >
+              {loadingComparison ? 'Calculating...' : 'Compare All Methods'}
+            </button>
+            {showMethodComparison && (
+              <button
+                onClick={() => setShowMethodComparison(false)}
+                className="text-xs px-3 py-1 rounded hover:opacity-80"
+                style={{ borderColor: 'var(--gsc-light-gray)', color: 'var(--gsc-gray)' }}
+              >
+                Hide Comparison
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Method Comparison View */}
+        {showMethodComparison && comparisonData.length > 0 && (
+          <div className="mb-3 p-2 rounded border max-h-64 overflow-y-auto" style={{ borderColor: 'var(--gsc-blue)', backgroundColor: 'rgba(0, 75, 135, 0.02)' }}>
+            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--gsc-gray)' }}>
+              Method Comparison (Top 20 Locations)
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" style={{ color: 'var(--gsc-gray)' }}>
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--gsc-light-gray)' }}>
+                    <th className="text-left p-1">Location</th>
+                    <th className="text-right p-1">Weighted Mean</th>
+                    <th className="text-right p-1">Geometric Mean</th>
+                    <th className="text-right p-1">Power Mean</th>
+                    <th className="text-right p-1">OWA Optimistic</th>
+                    <th className="text-right p-1">OWA Pessimistic</th>
+                    <th className="text-right p-1">Current</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparisonData.map((row, idx) => (
+                    <tr key={row.admin_pcode} className="border-b" style={{ borderColor: 'var(--gsc-light-gray)' }}>
+                      <td className="p-1 font-medium">{row.admin_name || row.admin_pcode}</td>
+                      <td className="text-right p-1">{row.weighted_mean?.toFixed(2) || '-'}</td>
+                      <td className="text-right p-1">{row.geometric_mean?.toFixed(2) || '-'}</td>
+                      <td className="text-right p-1">{row.power_mean?.toFixed(2) || '-'}</td>
+                      <td className="text-right p-1">{row.owa_optimistic?.toFixed(2) || '-'}</td>
+                      <td className="text-right p-1">{row.owa_pessimistic?.toFixed(2) || '-'}</td>
+                      <td className="text-right p-1 font-semibold">{row.current_score?.toFixed(2) || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Info panel explaining aggregation methods */}
         <div className="mb-3 p-2 rounded border" style={{ backgroundColor: 'rgba(99, 7, 16, 0.05)', borderColor: 'var(--gsc-blue)' }}>
-          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--gsc-gray)' }}>How Aggregation Works:</div>
+          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--gsc-gray)' }}>Category-Level Aggregation:</div>
           <div className="text-xs space-y-1" style={{ color: 'var(--gsc-gray)' }}>
             <div><strong>Weighted Mean:</strong> Each dataset's score is multiplied by its weight, then averaged. Best for combining different types of data.</div>
             <div><strong>Compounding Hazards:</strong> Scores are normalized (1→0, 5→1), weighted, then summed with a bonus for areas hit by multiple hazards. Best when multiple hazards overlap.</div>
-            <div><strong>Simple Average:</strong> All datasets contribute equally, regardless of weights.</div>
+            <div><strong>SSC Decision Tree:</strong> Fixed tree system for compiling P1, P2, P3 framework pillar scores using predefined decision rules.</div>
           </div>
         </div>
 
@@ -822,29 +999,44 @@ export default function InstanceScoringModal({
                   {categoryData.datasets.length > 1 && (
                     <div className="mt-0.5">
                       <select
-                        value={cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 ? 'compounding_hazards' : 'weighted_mean'}
+                        value={
+                          cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 
+                            ? 'compounding_hazards' 
+                            : (cat === 'SSC Framework - P1' || cat === 'SSC Framework - P2' || cat === 'SSC Framework - P3')
+                            ? 'ssc_decision_tree'
+                            : 'weighted_mean'
+                        }
                         onChange={(e) => {
-                          // For now, only Hazard category can use compounding_hazards
-                          // Other categories use weighted_mean
-                          // This could be expanded in the future
+                          // Method selection is handled at the framework aggregation level
+                          // This is informational for now
                         }}
                         className="text-xs px-1 py-0.5 border rounded"
                         style={{ 
                           borderColor: 'var(--gsc-light-gray)',
-                          backgroundColor: cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 ? 'rgba(211, 84, 0, 0.1)' : 'transparent'
+                          backgroundColor: 
+                            cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 
+                              ? 'rgba(211, 84, 0, 0.1)' 
+                              : (cat === 'SSC Framework - P1' || cat === 'SSC Framework - P2' || cat === 'SSC Framework - P3')
+                              ? 'rgba(34, 139, 34, 0.1)'
+                              : 'transparent'
                         }}
-                        disabled={cat !== 'Hazard' || categoryData.datasets.filter(d => d.is_hazard_event).length <= 1}
+                        disabled={true}
                         title={
                           cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1
                             ? 'Compounding Hazards: Normalizes scores (1→0, 5→1), applies weights, sums them, then adds a bonus (product × 0.5) for areas hit by multiple hazards. This emphasizes locations affected by both earthquake AND typhoon.'
                             : cat === 'Hazard'
                             ? 'Compounding method requires 2+ hazard events'
+                            : (cat === 'SSC Framework - P1' || cat === 'SSC Framework - P2' || cat === 'SSC Framework - P3')
+                            ? 'SSC Decision Tree: Fixed tree system for compiling P1, P2, P3 framework pillar scores using predefined decision rules.'
                             : 'Multiple datasets in this category use weighted mean'
                         }
                       >
                         <option value="weighted_mean">Weighted Mean</option>
                         {cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 && (
                           <option value="compounding_hazards">Compounding Hazards</option>
+                        )}
+                        {(cat === 'SSC Framework - P1' || cat === 'SSC Framework - P2' || cat === 'SSC Framework - P3') && (
+                          <option value="ssc_decision_tree">🌳 SSC Decision Tree</option>
                         )}
                       </select>
                       {cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 && (
