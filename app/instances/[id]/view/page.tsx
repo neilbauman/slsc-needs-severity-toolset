@@ -44,6 +44,7 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
   const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set());
   const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string>, geometryTypes?: Set<string> }>>({});
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
+  const [showCopySuccess, setShowCopySuccess] = useState(false);
 
   const instanceId = params?.id;
   
@@ -628,6 +629,46 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
     }
   };
 
+  // Copy iframe code to clipboard
+  const copyIframeCode = async () => {
+    if (!instanceId) return;
+    
+    const currentUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const embedUrl = `${currentUrl}/instances/${instanceId}/embed`;
+    
+    const iframeCode = `<iframe 
+  src="${embedUrl}" 
+  width="100%" 
+  height="900px" 
+  frameborder="0"
+  allowfullscreen>
+</iframe>`;
+    
+    try {
+      await navigator.clipboard.writeText(iframeCode);
+      setShowCopySuccess(true);
+      setTimeout(() => setShowCopySuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = iframeCode;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        setShowCopySuccess(true);
+        setTimeout(() => setShowCopySuccess(false), 3000);
+      } catch (fallbackErr) {
+        console.error('Fallback copy failed:', fallbackErr);
+        alert('Failed to copy. Please copy manually:\n\n' + iframeCode);
+      }
+      document.body.removeChild(textArea);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-4">
@@ -813,6 +854,31 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
           </p>
         </div>
       )}
+
+      {/* Copy iFrame Code Button - Subtle placement at bottom right */}
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={copyIframeCode}
+          className="text-xs px-2.5 py-1 rounded border hover:opacity-80 transition-all"
+          style={{ 
+            backgroundColor: 'rgba(0, 75, 135, 0.03)', 
+            borderColor: 'rgba(0, 75, 135, 0.2)',
+            color: 'var(--gsc-gray)',
+            fontSize: '11px'
+          }}
+          title="Copy iframe embed code to clipboard for sharing on other websites"
+        >
+          {showCopySuccess ? (
+            <span className="flex items-center gap-1">
+              <span style={{ color: 'var(--gsc-green)' }}>✓</span> Copied!
+            </span>
+          ) : (
+            <span className="flex items-center gap-1">
+              <span style={{ opacity: 0.6 }}>📋</span> Copy iFrame Code
+            </span>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
