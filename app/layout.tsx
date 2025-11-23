@@ -5,7 +5,7 @@ import Header from "../components/Header";
 import Breadcrumb from "../components/Breadcrumb";
 
 export const metadata = {
-  title: "Smart Safe Communities Toolset",
+  title: "Philippines Shelter Severity Toolset",
   description: "Philippines SSC data and decision support system",
 };
 

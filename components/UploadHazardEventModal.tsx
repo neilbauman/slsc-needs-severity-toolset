@@ -155,8 +155,32 @@ export default function UploadHazardEventModal({
     setError(null);
 
     try {
+      // Preprocessing: For typhoon events, filter out Polygon features (cone)
+      // Keep only LineString/MultiLineString features (track)
+      const originalCount = geoJsonData.features.length;
+      let processedGeoJson = geoJsonData;
+      
+      if (meta.event_type === 'typhoon') {
+        processedGeoJson = {
+          ...geoJsonData,
+          features: geoJsonData.features.filter((feature: any) => {
+            const geomType = feature?.geometry?.type || '';
+            // Keep LineString, MultiLineString, Point (track and points)
+            // Exclude Polygon, MultiPolygon (cone)
+            return geomType === 'LineString' || 
+                   geomType === 'MultiLineString' || 
+                   geomType === 'Point' ||
+                   geomType === 'MultiPoint';
+          })
+        };
+        const filteredCount = processedGeoJson.features.length;
+        if (originalCount !== filteredCount) {
+          console.log(`Preprocessing: Filtered out ${originalCount - filteredCount} Polygon features (cone) for typhoon event. Keeping ${filteredCount} track features.`);
+        }
+      }
+
       // Extract sample metadata from first feature
-      const sampleProperties = geoJsonData.features[0]?.properties || {};
+      const sampleProperties = processedGeoJson.features[0]?.properties || {};
       const units = sampleProperties.units || 'mmi';
 
       // Use RPC function to insert with proper geometry conversion
@@ -165,12 +189,14 @@ export default function UploadHazardEventModal({
         p_name: meta.name.trim(),
         p_description: meta.description.trim() || null,
         p_event_type: meta.event_type,
-        p_geojson: geoJsonData,
+        p_geojson: processedGeoJson,
         p_magnitude_field: magnitudeField,
         p_metadata: {
           units: units,
-          feature_count: geoJsonData.features.length,
+          feature_count: processedGeoJson.features.length,
+          original_feature_count: geoJsonData.features.length,
           sample_properties: sampleProperties,
+          preprocessing_applied: meta.event_type === 'typhoon' ? 'polygon_features_removed' : null,
         },
       });
 
@@ -178,7 +204,11 @@ export default function UploadHazardEventModal({
         throw rpcError;
       }
 
-      alert(`✅ Uploaded hazard event "${meta.name}" with ${geoJsonData.features.length} features.`);
+      const filteredCount = processedGeoJson.features.length;
+      const message = meta.event_type === 'typhoon' && originalCount !== filteredCount
+        ? `✅ Uploaded hazard event "${meta.name}" with ${filteredCount} features (${originalCount - filteredCount} Polygon features removed automatically).`
+        : `✅ Uploaded hazard event "${meta.name}" with ${filteredCount} features.`;
+      alert(message);
 
       await onUploaded();
       onClose();

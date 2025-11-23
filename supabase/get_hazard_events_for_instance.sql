@@ -26,9 +26,23 @@ BEGIN
     he.description,
     he.event_type,
     -- Convert PostGIS geometry back to GeoJSON
+    -- For typhoon events, filter out Polygon features if they still exist
     CASE
       WHEN he.metadata->'original_geojson' IS NOT NULL THEN
-        he.metadata->'original_geojson'
+        CASE
+          WHEN he.event_type = 'typhoon' THEN
+            -- Filter out Polygon/MultiPolygon features for typhoons (keep only track)
+            jsonb_build_object(
+              'type', 'FeatureCollection',
+              'features', (
+                SELECT jsonb_agg(feature)
+                FROM jsonb_array_elements(he.metadata->'original_geojson'->'features') AS feature
+                WHERE LOWER(COALESCE(feature->'geometry'->>'type', '')) IN ('linestring', 'multilinestring', 'point', 'multipoint')
+              )
+            )
+          ELSE
+            he.metadata->'original_geojson'
+        END
       ELSE
         -- Fallback: convert PostGIS geometry to GeoJSON
         ST_AsGeoJSON(he.geometry::GEOMETRY)::JSONB
