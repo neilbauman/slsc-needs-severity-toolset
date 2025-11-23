@@ -227,7 +227,7 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
     }
   };
 
-  // Load features for selected layer (simplified version)
+  // Load features for selected layer (full implementation)
   const loadFeaturesForSelection = async (
     selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
     overallFeatures?: any[]
@@ -318,8 +318,236 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         setFeatures(features);
         setOverallFeatures(features);
         setLoadingFeatures(false);
+      } else if (selection.type === 'dataset' && selection.datasetId) {
+        // Load scores for specific dataset
+        const { data: scores, error: scoresError } = await supabase
+          .from("instance_dataset_scores")
+          .select("admin_pcode, score")
+          .eq("instance_id", instanceId)
+          .eq("dataset_id", selection.datasetId);
+
+        if (scoresError) {
+          console.error("Error fetching dataset scores:", scoresError);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        const scoreMap = new Map(scores?.map((s: any) => [s.admin_pcode, Number(s.score)]) || []);
+        
+        // Load raw values for this dataset
+        const { data: rawValues } = await supabase
+          .from("dataset_values_numeric")
+          .select("admin_pcode, value")
+          .eq("dataset_id", selection.datasetId);
+        
+        const rawValueMap = new Map(rawValues?.map((v: any) => [v.admin_pcode, Number(v.value)]) || []);
+
+        // Get geometry from view
+        const { data: geoRows, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode, geojson")
+          .eq("instance_id", instanceId);
+        
+        if (geoError || !geoRows || geoRows.length === 0) {
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        const allFeatures = geoRows
+          .map((row: any) => {
+            try {
+              const feature = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+              const datasetScore = scoreMap.get(row.admin_pcode);
+              const rawValue = rawValueMap.get(row.admin_pcode);
+              
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: row.admin_pcode,
+                  admin_name: feature.properties?.admin_name || feature.properties?.name,
+                  score: datasetScore,
+                  raw_value: rawValue,
+                  has_score: datasetScore !== undefined,
+                }
+              };
+            } catch (e) {
+              console.warn("Error parsing GeoJSON feature:", e);
+              return null;
+            }
+          })
+          .filter((f: any) => f !== null);
+        
+        setFeatures(allFeatures);
+        setLoadingFeatures(false);
+      } else if (selection.type === 'category_score' && selection.category) {
+        // Load category score - aggregate all dataset scores within this category
+        const { data: categoryDatasets } = await supabase
+          .from("instance_datasets")
+          .select("dataset_id, datasets!inner(id, name, category)")
+          .eq("instance_id", instanceId);
+        
+        const categoryDatasetIds = (categoryDatasets || [])
+          .filter((cd: any) => cd.datasets?.category === selection.category)
+          .map((cd: any) => cd.dataset_id);
+        
+        let categoryScores: any[] = [];
+        if (categoryDatasetIds.length > 0) {
+          const { data: datasetScores } = await supabase
+            .from("instance_dataset_scores")
+            .select("admin_pcode, score")
+            .eq("instance_id", instanceId)
+            .in("dataset_id", categoryDatasetIds);
+          
+          if (datasetScores) {
+            categoryScores = datasetScores;
+          }
+        }
+        
+        // For Hazard category, also include hazard event scores
+        if (selection.category === 'Hazard') {
+          const { data: hazardEventsData } = await supabase
+            .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
+          
+          if (hazardEventsData && hazardEventsData.length > 0) {
+            const hazardEventIds = hazardEventsData.map((e: any) => e.id);
+            const { data: hazardScores } = await supabase
+              .from("hazard_event_scores")
+              .select("admin_pcode, score")
+              .eq("instance_id", instanceId)
+              .in("hazard_event_id", hazardEventIds);
+            
+            if (hazardScores) {
+              categoryScores = [...categoryScores, ...hazardScores];
+            }
+          }
+        }
+        
+        if (categoryScores.length === 0) {
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        // Aggregate scores by admin_pcode (average)
+        const locationScoreMap: Record<string, { sum: number; count: number }> = {};
+        categoryScores.forEach((s: any) => {
+          if (!locationScoreMap[s.admin_pcode]) {
+            locationScoreMap[s.admin_pcode] = { sum: 0, count: 0 };
+          }
+          locationScoreMap[s.admin_pcode].sum += Number(s.score);
+          locationScoreMap[s.admin_pcode].count += 1;
+        });
+        
+        const avgCategoryScores = new Map<string, number>();
+        Object.keys(locationScoreMap).forEach((pcode) => {
+          avgCategoryScores.set(pcode, locationScoreMap[pcode].sum / locationScoreMap[pcode].count);
+        });
+        
+        // Get geometry from view
+        const { data: geoRows, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode, geojson")
+          .eq("instance_id", instanceId);
+        
+        if (geoError || !geoRows || geoRows.length === 0) {
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        const categoryFeatures = geoRows
+          .map((row: any) => {
+            try {
+              const feature = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+              const categoryScore = avgCategoryScores.get(row.admin_pcode);
+              
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: row.admin_pcode,
+                  admin_name: feature.properties?.admin_name || feature.properties?.name,
+                  score: categoryScore,
+                  has_score: categoryScore !== undefined,
+                }
+              };
+            } catch (e) {
+              console.warn("Error parsing GeoJSON feature:", e);
+              return null;
+            }
+          })
+          .filter((f: any) => f !== null);
+        
+        setFeatures(categoryFeatures);
+        setLoadingFeatures(false);
+      } else if (selection.type === 'category' && selection.datasetId && selection.category) {
+        // For categorical datasets, show dataset scores
+        if (selection.category === 'overall') {
+          await loadFeaturesForSelection({ type: 'dataset', datasetId: selection.datasetId }, overallFeatures);
+        } else {
+          await loadFeaturesForSelection({ type: 'dataset', datasetId: selection.datasetId }, overallFeatures);
+        }
+      } else if (selection.type === 'hazard_event' && selection.hazardEventId) {
+        // Load hazard event scores
+        const { data: scores, error: scoresError } = await supabase
+          .from("hazard_event_scores")
+          .select("admin_pcode, score, magnitude_value")
+          .eq("instance_id", instanceId)
+          .eq("hazard_event_id", selection.hazardEventId);
+
+        if (scoresError || !scores || scores.length === 0) {
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+
+        const scoreMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.score)]));
+        const magnitudeMap = new Map(scores.map((s: any) => [s.admin_pcode, Number(s.magnitude_value)]));
+        
+        // Get geometry from view
+        const { data: geoRows, error: geoError } = await supabase
+          .from("v_instance_admin_scores_geojson")
+          .select("admin_pcode, geojson")
+          .eq("instance_id", instanceId);
+        
+        if (geoError || !geoRows || geoRows.length === 0) {
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
+        
+        const hazardFeatures = geoRows
+          .map((row: any) => {
+            try {
+              const feature = typeof row.geojson === 'string' ? JSON.parse(row.geojson) : row.geojson;
+              const hazardScore = scoreMap.get(row.admin_pcode);
+              const magnitude = magnitudeMap.get(row.admin_pcode);
+              
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: row.admin_pcode,
+                  admin_name: feature.properties?.admin_name || feature.properties?.name,
+                  score: hazardScore,
+                  magnitude_value: magnitude,
+                  has_score: hazardScore !== undefined,
+                }
+              };
+            } catch (e) {
+              console.warn("Error parsing GeoJSON feature:", e);
+              return null;
+            }
+          })
+          .filter((f: any) => f !== null);
+        
+        setFeatures(hazardFeatures);
+        setLoadingFeatures(false);
       } else {
-        // For other types, just use overall for now (can be enhanced later)
+        // Fallback to overall
         setFeatures(overallFeatures || []);
         setLoadingFeatures(false);
       }
@@ -349,6 +577,8 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
   const onEachFeature = (feature: any, layer: any) => {
     const score = feature.properties?.score;
     const name = feature.properties?.admin_name || feature.properties?.name || 'Unknown';
+    const rawValue = feature.properties?.raw_value;
+    const magnitude = feature.properties?.magnitude_value;
     
     if (score !== undefined && !isNaN(score)) {
       const color = getColor(score);
@@ -377,7 +607,15 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         },
       });
       
-      layer.bindPopup(`<strong>${name}</strong><br/>Score: ${score.toFixed(2)}`);
+      // Build popup content based on available data
+      let popupContent = `<strong>${name}</strong><br/>Score: ${score.toFixed(2)}`;
+      if (rawValue !== undefined && !isNaN(rawValue)) {
+        popupContent += `<br/>Value: ${rawValue.toFixed(2)}`;
+      }
+      if (magnitude !== undefined && !isNaN(magnitude)) {
+        popupContent += `<br/>Magnitude: ${magnitude.toFixed(2)}`;
+      }
+      layer.bindPopup(popupContent);
     } else {
       layer.setStyle({
         fillColor: '#ccc',
