@@ -136,6 +136,26 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         });
         setHazardEventLayers(layers);
         
+        // Load filters from localStorage right after loading hazard events
+        // This ensures filters are available when layers are rendered
+        const savedFilters = localStorage.getItem(`hazard_filters_${instanceId}`);
+        if (savedFilters) {
+          try {
+            const parsed = JSON.parse(savedFilters);
+            const filtersWithSets: Record<string, any> = {};
+            Object.keys(parsed).forEach(key => {
+              filtersWithSets[key] = {
+                ...parsed[key],
+                visibleFeatureIds: parsed[key].visibleFeatureIds ? new Set(parsed[key].visibleFeatureIds) : undefined,
+                geometryTypes: parsed[key].geometryTypes ? new Set(parsed[key].geometryTypes) : undefined,
+              };
+            });
+            setHazardEventFilters(filtersWithSets);
+          } catch (e) {
+            console.warn('Error loading saved filters in fetchData:', e);
+          }
+        }
+        
         // Check if we already have saved visibility from the earlier useEffect
         // If not, load it now or default to all visible
         const savedVisible = localStorage.getItem(`hazard_visibility_${instanceId}`);
