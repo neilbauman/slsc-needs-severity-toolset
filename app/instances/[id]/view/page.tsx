@@ -59,10 +59,11 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
     );
   }
 
-  // Load localStorage filters on mount
+  // Load localStorage filters on mount (using same keys as edit page)
   useEffect(() => {
     if (instanceId) {
-      const savedFilters = localStorage.getItem(`hazardEventFilters_${instanceId}`);
+      // Load filters (same key as edit page: hazard_filters_${instanceId})
+      const savedFilters = localStorage.getItem(`hazard_filters_${instanceId}`);
       if (savedFilters) {
         try {
           const parsed = JSON.parse(savedFilters);
@@ -81,7 +82,8 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         }
       }
       
-      const savedVisible = localStorage.getItem(`visibleHazardEvents_${instanceId}`);
+      // Load visibility (same key as edit page: hazard_visibility_${instanceId})
+      const savedVisible = localStorage.getItem(`hazard_visibility_${instanceId}`);
       if (savedVisible) {
         try {
           setVisibleHazardEvents(new Set(JSON.parse(savedVisible)));
@@ -91,6 +93,18 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
       }
     }
   }, [instanceId]);
+
+  // Save visibility changes to localStorage (so view-only toggles persist)
+  useEffect(() => {
+    if (!instanceId) return;
+    
+    const visibilityKey = `hazard_visibility_${instanceId}`;
+    try {
+      localStorage.setItem(visibilityKey, JSON.stringify(Array.from(visibleHazardEvents)));
+    } catch (e) {
+      console.warn('Error saving visibility to localStorage:', e);
+    }
+  }, [visibleHazardEvents, instanceId]);
 
   const fetchData = async () => {
     if (!instanceId) return;
@@ -544,10 +558,7 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
                   } else {
                     next.delete(hazardEventId);
                   }
-                  // Save to localStorage
-                  if (instanceId) {
-                    localStorage.setItem(`visibleHazardEvents_${instanceId}`, JSON.stringify(Array.from(next)));
-                  }
+                  // Note: Saving is handled by useEffect above
                   return next;
                 });
               }}
