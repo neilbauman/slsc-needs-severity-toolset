@@ -71,6 +71,7 @@ export default function InstanceScoringModal({
   const [loadingComparison, setLoadingComparison] = useState(false);
   const [comparisonData, setComparisonData] = useState<any[]>([]);
   const [showMethodGuidance, setShowMethodGuidance] = useState(false);
+  const [weightInputMode, setWeightInputMode] = useState<'slider' | 'number' | 'percentage'>('slider');
 
   const CATEGORY_ORDER = [
     'SSC Framework - P1',
@@ -844,16 +845,31 @@ export default function InstanceScoringModal({
             ×
           </button>
         </div>
-        <p className="text-xs mb-3" style={{ color: 'var(--gsc-gray)' }}>
-          Adjust weights per dataset and category. All levels auto-balance to 100%.
-          {(() => {
-            const selectedMethod = getMethodById(overallMethod);
-            if (selectedMethod?.id === 'geometric_mean') {
-              return ' Note: With Geometric Mean, category weights affect compounding - low scores in any category reduce overall significantly.';
-            }
-            return '';
-          })()}
-        </p>
+        <div className="flex justify-between items-center mb-3">
+          <p className="text-xs flex-1" style={{ color: 'var(--gsc-gray)' }}>
+            Adjust weights per dataset and category. All levels auto-balance to 100%.
+            {(() => {
+              const selectedMethod = getMethodById(overallMethod);
+              if (selectedMethod?.id === 'geometric_mean') {
+                return ' Note: With Geometric Mean, category weights affect compounding - low scores in any category reduce overall significantly.';
+              }
+              return '';
+            })()}
+          </p>
+          <div className="flex items-center gap-2 ml-2">
+            <span className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Input:</span>
+            <select
+              value={weightInputMode}
+              onChange={(e) => setWeightInputMode(e.target.value as any)}
+              className="text-xs px-2 py-1 border rounded"
+              style={{ borderColor: 'var(--gsc-light-gray)' }}
+            >
+              <option value="slider">Slider</option>
+              <option value="number">Number Input</option>
+              <option value="percentage">Percentage</option>
+            </select>
+          </div>
+        </div>
 
         {/* Impact Preview Panel */}
         {showImpact && (
@@ -1126,30 +1142,68 @@ export default function InstanceScoringModal({
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Category:</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(categoryData.categoryWeight)}
-                    onChange={(e) => {
-                      handleCategoryWeightChange(cat, parseFloat(e.target.value));
-                    }}
-                    onMouseUp={(e) => {
-                      // Don't prevent default - let the slider finish its interaction
-                      // Small delay to ensure slider value is fully updated
-                      setTimeout(() => normalizeAllCategories(), 50);
-                    }}
-                    onTouchEnd={(e) => {
-                      // Don't prevent default - let the slider finish its interaction
-                      setTimeout(() => normalizeAllCategories(), 50);
-                    }}
-                    className="w-20 h-1.5 rounded-lg appearance-none cursor-pointer"
-                    style={{
-                      background: `linear-gradient(to right, var(--gsc-blue) 0%, var(--gsc-blue) ${categoryData.categoryWeight}%, var(--gsc-light-gray) ${categoryData.categoryWeight}%, var(--gsc-light-gray) 100%)`
-                    }}
-                  />
-                  <span className="w-10 text-right font-semibold text-xs">{Math.round(categoryData.categoryWeight)}%</span>
+                  {weightInputMode === 'slider' ? (
+                    <>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Math.round(categoryData.categoryWeight)}
+                        onChange={(e) => {
+                          handleCategoryWeightChange(cat, parseFloat(e.target.value));
+                        }}
+                        onMouseUp={(e) => {
+                          setTimeout(() => normalizeAllCategories(), 50);
+                        }}
+                        onTouchEnd={(e) => {
+                          setTimeout(() => normalizeAllCategories(), 50);
+                        }}
+                        className="w-20 h-1.5 rounded-lg appearance-none cursor-pointer"
+                        style={{
+                          background: `linear-gradient(to right, var(--gsc-blue) 0%, var(--gsc-blue) ${categoryData.categoryWeight}%, var(--gsc-light-gray) ${categoryData.categoryWeight}%, var(--gsc-light-gray) 100%)`
+                        }}
+                      />
+                      <span className="w-10 text-right font-semibold text-xs">{Math.round(categoryData.categoryWeight)}%</span>
+                    </>
+                  ) : weightInputMode === 'number' ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={categoryData.categoryWeight.toFixed(1)}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          handleCategoryWeightChange(cat, Math.max(0, Math.min(100, val)));
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => normalizeAllCategories(), 50);
+                        }}
+                        className="w-16 px-1 py-0.5 border rounded text-xs text-right"
+                        style={{ borderColor: 'var(--gsc-light-gray)' }}
+                      />
+                      <span className="text-xs">%</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={`${categoryData.categoryWeight.toFixed(1)}%`}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value.replace('%', '')) || 0;
+                          handleCategoryWeightChange(cat, Math.max(0, Math.min(100, val)));
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => normalizeAllCategories(), 50);
+                        }}
+                        className="w-16 px-1 py-0.5 border rounded text-xs text-right"
+                        style={{ borderColor: 'var(--gsc-light-gray)' }}
+                        placeholder="0%"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1175,30 +1229,68 @@ export default function InstanceScoringModal({
                       )}
                     </span>
                     <div className="flex items-center gap-1.5 flex-1 max-w-[200px]">
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={Math.round(weight)}
+                      {weightInputMode === 'slider' ? (
+                        <>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={Math.round(weight)}
                             onChange={(e) => {
                               handleWeightChange(d.id, parseFloat(e.target.value));
                             }}
                             onMouseUp={(e) => {
-                              // Don't prevent default - let the slider finish its interaction
-                              // Small delay to ensure slider value is fully updated
                               setTimeout(() => normalizeCategory(cat), 50);
                             }}
                             onTouchEnd={(e) => {
-                              // Don't prevent default - let the slider finish its interaction
                               setTimeout(() => normalizeCategory(cat), 50);
                             }}
-                        className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer"
-                        style={{
-                          background: `linear-gradient(to right, var(--gsc-green) 0%, var(--gsc-green) ${weight}%, var(--gsc-light-gray) ${weight}%, var(--gsc-light-gray) 100%)`
-                        }}
-                      />
-                      <span className="w-8 text-right font-semibold text-xs">{Math.round(weight)}%</span>
+                            className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer"
+                            style={{
+                              background: `linear-gradient(to right, var(--gsc-green) 0%, var(--gsc-green) ${weight}%, var(--gsc-light-gray) ${weight}%, var(--gsc-light-gray) 100%)`
+                            }}
+                          />
+                          <span className="w-8 text-right font-semibold text-xs">{Math.round(weight)}%</span>
+                        </>
+                      ) : weightInputMode === 'number' ? (
+                        <div className="flex items-center gap-1 flex-1">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={weight.toFixed(1)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              handleWeightChange(d.id, Math.max(0, Math.min(100, val)));
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => normalizeCategory(cat), 50);
+                            }}
+                            className="flex-1 px-1 py-0.5 border rounded text-xs text-right"
+                            style={{ borderColor: 'var(--gsc-light-gray)' }}
+                          />
+                          <span className="text-xs w-4">%</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 flex-1">
+                          <input
+                            type="text"
+                            value={`${weight.toFixed(1)}%`}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value.replace('%', '')) || 0;
+                              handleWeightChange(d.id, Math.max(0, Math.min(100, val)));
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => normalizeCategory(cat), 50);
+                            }}
+                            className="flex-1 px-1 py-0.5 border rounded text-xs text-right"
+                            style={{ borderColor: 'var(--gsc-light-gray)' }}
+                            placeholder="0%"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                   );
