@@ -641,6 +641,7 @@ export default function InstanceScoringModal({
     
     setLoadingComparison(true);
     setShowMethodComparison(true);
+    setError(null);
     
     try {
       // First, calculate all methods
@@ -650,7 +651,19 @@ export default function InstanceScoringModal({
       
       if (calcError) {
         console.error('Error calculating methods:', calcError);
-        setError(`Error calculating comparison: ${calcError.message}`);
+        // Check if function doesn't exist
+        if (calcError.message?.includes('Could not find the function') || calcError.code === 'PGRST202') {
+          setError(
+            `Database function not found. Please deploy the SQL functions to your Supabase database:\n\n` +
+            `1. Open Supabase SQL Editor\n` +
+            `2. Run: supabase/create_instance_category_scores_comparison_table.sql\n` +
+            `3. Run: supabase/score_final_aggregate_all_methods.sql\n` +
+            `4. Run: supabase/get_method_comparison.sql\n\n` +
+            `See docs/HOW_TO_APPLY_RPC_FUNCTION.md for detailed instructions.`
+          );
+        } else {
+          setError(`Error calculating comparison: ${calcError.message}`);
+        }
         setLoadingComparison(false);
         return;
       }
@@ -664,9 +677,18 @@ export default function InstanceScoringModal({
       
       if (fetchError) {
         console.error('Error fetching comparison:', fetchError);
-        setError(`Error fetching comparison: ${fetchError.message}`);
+        if (fetchError.message?.includes('Could not find the function') || fetchError.code === 'PGRST202') {
+          setError(
+            `Database function not found. Please deploy get_method_comparison function to your Supabase database.`
+          );
+        } else {
+          setError(`Error fetching comparison: ${fetchError.message}`);
+        }
       } else {
         setComparisonData(data || []);
+        if (data && data.length === 0) {
+          setError('No comparison data available. Make sure scores have been calculated first.');
+        }
       }
     } catch (err: any) {
       console.error('Error in method comparison:', err);
@@ -824,6 +846,13 @@ export default function InstanceScoringModal({
         </div>
         <p className="text-xs mb-3" style={{ color: 'var(--gsc-gray)' }}>
           Adjust weights per dataset and category. All levels auto-balance to 100%.
+          {(() => {
+            const selectedMethod = getMethodById(overallMethod);
+            if (selectedMethod?.id === 'geometric_mean') {
+              return ' Note: With Geometric Mean, category weights affect compounding - low scores in any category reduce overall significantly.';
+            }
+            return '';
+          })()}
         </p>
 
         {/* Impact Preview Panel */}
@@ -915,8 +944,56 @@ export default function InstanceScoringModal({
                 <div className="mb-1"><strong>When to use:</strong> {selectedMethod.whenToUse}</div>
                 <div className="mb-1"><strong>Example:</strong> {selectedMethod.example.explanation}</div>
                 <div><strong>Best for:</strong> {selectedMethod.bestFor}</div>
+                {selectedMethod.formula && (
+                  <div className="mt-1 pt-1 border-t" style={{ borderColor: 'var(--gsc-light-gray)' }}>
+                    <strong>Formula:</strong> <code className="text-xs">{selectedMethod.formula}</code>
+                  </div>
+                )}
               </div>
             ) : null;
+          })()}
+          
+          {/* Method-Specific Guidance */}
+          {(() => {
+            const selectedMethod = getMethodById(overallMethod);
+            if (!selectedMethod) return null;
+            
+            return (
+              <div className="mt-2 p-2 rounded text-xs" style={{ 
+                backgroundColor: selectedMethod.id === 'geometric_mean' ? 'rgba(34, 139, 34, 0.1)' : 'rgba(255, 255, 255, 0.5)',
+                borderLeft: `3px solid ${selectedMethod.id === 'geometric_mean' ? 'var(--gsc-green)' : 'var(--gsc-blue)'}`
+              }}>
+                {selectedMethod.id === 'geometric_mean' && (
+                  <div>
+                    <strong>⚠️ Important for Geometric Mean:</strong> Category weights still apply, but scores compound multiplicatively. 
+                    Low scores in any category will significantly reduce the overall score. Adjust category weights to reflect relative importance.
+                  </div>
+                )}
+                {selectedMethod.id === 'weighted_mean' && (
+                  <div>
+                    <strong>ℹ️ Weighted Mean:</strong> Category weights determine relative importance. Scores are averaged proportionally. 
+                    This is the most balanced approach and works well when factors are independent.
+                  </div>
+                )}
+                {selectedMethod.id === 'owa_optimistic' && (
+                  <div>
+                    <strong>ℹ️ OWA Optimistic:</strong> Emphasizes the highest score regardless of category. 
+                    Category weights have less impact - the method prioritizes areas with extreme scores in any dimension.
+                  </div>
+                )}
+                {selectedMethod.id === 'owa_pessimistic' && (
+                  <div>
+                    <strong>ℹ️ OWA Pessimistic:</strong> Requires consistency across categories. 
+                    Areas with balanced scores across all categories will rank higher than those with extreme scores in one category.
+                  </div>
+                )}
+                {selectedMethod.id === 'power_mean' && (
+                  <div>
+                    <strong>ℹ️ Power Mean:</strong> Moderate emphasis on extremes. Category weights apply, but high scores have more influence than in weighted mean.
+                  </div>
+                )}
+              </div>
+            );
           })()}
           
           <div className="mt-2 flex gap-2">
@@ -1140,6 +1217,18 @@ export default function InstanceScoringModal({
             );
           })}
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="mb-3 p-2 rounded border text-xs" style={{ 
+            backgroundColor: 'rgba(220, 38, 38, 0.1)', 
+            borderColor: 'var(--gsc-red)',
+            color: 'var(--gsc-red)'
+          }}>
+            <div className="font-semibold mb-1">Error:</div>
+            <div className="whitespace-pre-wrap">{error}</div>
+          </div>
+        )}
 
         <div className="flex justify-end gap-2 mt-3 pt-3 border-t" style={{ borderColor: 'var(--gsc-light-gray)' }}>
           <button
