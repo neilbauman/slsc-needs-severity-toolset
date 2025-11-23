@@ -123,18 +123,18 @@ export default function InstanceScoringModal({
         
         ds.forEach((d) => {
           const scaled = (weights[d.id] || 0) * scale;
-          // Round to 1 decimal for smoother experience
-          newWeights[d.id] = Math.round(scaled * 10) / 10;
+          // Round to whole number (1% precision)
+          newWeights[d.id] = Math.round(scaled);
           sum += newWeights[d.id];
         });
         
         // Adjust for any rounding differences (add/subtract from largest)
         const diff = 100 - sum;
-        if (Math.abs(diff) > 0.05 && ds.length > 0) {
+        if (Math.abs(diff) >= 1 && ds.length > 0) {
           const largest = ds.reduce((a, b) =>
             (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
           );
-          newWeights[largest.id] = Math.max(0, Math.min(100, Math.round((newWeights[largest.id] + diff) * 10) / 10));
+          newWeights[largest.id] = Math.max(0, Math.min(100, Math.round(newWeights[largest.id] + diff)));
         }
         
         setWeights(newWeights);
@@ -149,18 +149,18 @@ export default function InstanceScoringModal({
       let sum = 0;
       ds.forEach((d) => {
         const normalized = (weights[d.id] || 0) * scale;
-        // Round to 1 decimal for smoother experience
-        newWeights[d.id] = Math.round(normalized * 10) / 10;
+        // Round to whole number (1% precision)
+        newWeights[d.id] = Math.round(normalized);
         sum += newWeights[d.id];
       });
 
       // Adjust for rounding (add/subtract from largest)
       const diff = 100 - sum;
-      if (Math.abs(diff) > 0.05 && ds.length > 0) {
+      if (Math.abs(diff) >= 1 && ds.length > 0) {
         const largest = ds.reduce((a, b) =>
           (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
         );
-        newWeights[largest.id] = Math.max(0, Math.min(100, Math.round((newWeights[largest.id] + diff) * 10) / 10));
+        newWeights[largest.id] = Math.max(0, Math.min(100, Math.round(newWeights[largest.id] + diff)));
       }
 
       setWeights(newWeights);
@@ -196,14 +196,14 @@ export default function InstanceScoringModal({
         Object.keys(newCats).forEach((cat) => {
           const catData = newCats[cat] as CategoryData;
           const currentWeight = catData.categoryWeight || 0;
-          // Round to 1 decimal for smoother experience
-          catData.categoryWeight = Math.round(currentWeight * scale * 10) / 10;
+          // Round to whole number (1% precision)
+          catData.categoryWeight = Math.round(currentWeight * scale);
           sum += catData.categoryWeight;
         });
 
         // Adjust for rounding
         const diff = 100 - sum;
-        if (Math.abs(diff) > 0.05) {
+        if (Math.abs(diff) >= 1) {
           const largestCat = Object.keys(newCats).reduce((a, b) => {
             const aData = newCats[a] as CategoryData;
             const bData = newCats[b] as CategoryData;
@@ -212,7 +212,7 @@ export default function InstanceScoringModal({
           const largestCatData = newCats[largestCat] as CategoryData;
           largestCatData.categoryWeight = Math.max(
             0,
-            Math.min(100, Math.round((largestCatData.categoryWeight + diff) * 10) / 10)
+            Math.min(100, Math.round(largestCatData.categoryWeight + diff))
           );
         }
 
@@ -229,14 +229,14 @@ export default function InstanceScoringModal({
       Object.keys(newCats).forEach((cat) => {
         const catData = newCats[cat] as CategoryData;
         const currentWeight = catData.categoryWeight || 0;
-        // Round to 1 decimal for smoother experience
-        catData.categoryWeight = Math.round(currentWeight * scale * 10) / 10;
+        // Round to whole number (1% precision)
+        catData.categoryWeight = Math.round(currentWeight * scale);
         sum += catData.categoryWeight;
       });
 
       // Adjust for rounding
       const diff = 100 - sum;
-      if (Math.abs(diff) > 0.05) {
+      if (Math.abs(diff) >= 1) {
         const largestCat = Object.keys(newCats).reduce((a, b) => {
           const aData = newCats[a] as CategoryData;
           const bData = newCats[b] as CategoryData;
@@ -245,7 +245,7 @@ export default function InstanceScoringModal({
         const largestCatData = newCats[largestCat] as CategoryData;
         largestCatData.categoryWeight = Math.max(
           0,
-          Math.min(100, Math.round((largestCatData.categoryWeight + diff) * 10) / 10)
+          Math.min(100, Math.round(largestCatData.categoryWeight + diff))
         );
       }
 
@@ -1172,10 +1172,10 @@ export default function InstanceScoringModal({
                         type="number"
                         min="0"
                         max="100"
-                        step="0.1"
-                        value={categoryData.categoryWeight.toFixed(1)}
+                        step="1"
+                        value={Math.round(categoryData.categoryWeight)}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
+                          const val = Math.round(parseFloat(e.target.value) || 0);
                           handleCategoryWeightChange(cat, Math.max(0, Math.min(100, val)));
                         }}
                         onBlur={() => {
@@ -1190,9 +1190,9 @@ export default function InstanceScoringModal({
                     <div className="flex items-center gap-1">
                       <input
                         type="text"
-                        value={`${categoryData.categoryWeight.toFixed(1)}%`}
+                        value={`${Math.round(categoryData.categoryWeight)}%`}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value.replace('%', '')) || 0;
+                          const val = Math.round(parseFloat(e.target.value.replace('%', '')) || 0);
                           handleCategoryWeightChange(cat, Math.max(0, Math.min(100, val)));
                         }}
                         onBlur={() => {
@@ -1259,10 +1259,10 @@ export default function InstanceScoringModal({
                             type="number"
                             min="0"
                             max="100"
-                            step="0.1"
-                            value={weight.toFixed(1)}
+                            step="1"
+                            value={Math.round(weight)}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
+                              const val = Math.round(parseFloat(e.target.value) || 0);
                               handleWeightChange(d.id, Math.max(0, Math.min(100, val)));
                             }}
                             onBlur={() => {
@@ -1277,9 +1277,9 @@ export default function InstanceScoringModal({
                         <div className="flex items-center gap-1 flex-1">
                           <input
                             type="text"
-                            value={`${weight.toFixed(1)}%`}
+                            value={`${Math.round(weight)}%`}
                             onChange={(e) => {
-                              const val = parseFloat(e.target.value.replace('%', '')) || 0;
+                              const val = Math.round(parseFloat(e.target.value.replace('%', '')) || 0);
                               handleWeightChange(d.id, Math.max(0, Math.min(100, val)));
                             }}
                             onBlur={() => {
