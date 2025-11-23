@@ -1827,7 +1827,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       {/* Vulnerable Locations Panel */}
       <div className="mt-4">
-        <VulnerableLocationsPanel instanceId={instanceId} />
+        <VulnerableLocationsPanel instanceId={instanceId} refreshKey={metricsRefreshKey} />
       </div>
 
       {/* Scoring Modal */}

@@ -21,9 +21,10 @@ interface ScoreDistribution {
 
 interface Props {
   instanceId: string;
+  refreshKey?: number; // Optional key to force refresh
 }
 
-export default function VulnerableLocationsPanel({ instanceId }: Props) {
+export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Props) {
   const [locations, setLocations] = useState<VulnerableLocation[]>([]);
   const [scoreDistribution, setScoreDistribution] = useState<ScoreDistribution | null>(null);
   const [loading, setLoading] = useState(true);
@@ -255,7 +256,7 @@ export default function VulnerableLocationsPanel({ instanceId }: Props) {
     };
 
     loadVulnerableLocations();
-  }, [instanceId, showAll]);
+  }, [instanceId, refreshKey, showAll]); // Reload when instanceId, refreshKey, or showAll changes
 
   const formatNumber = (num: number | null | undefined): string => {
     if (num === null || num === undefined || isNaN(num)) return 'N/A';
