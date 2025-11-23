@@ -847,7 +847,7 @@ export default function InstanceScoringModal({
         </div>
         <div className="flex justify-between items-center mb-3">
           <p className="text-xs flex-1" style={{ color: 'var(--gsc-gray)' }}>
-            Adjust weights per dataset and category. All levels auto-balance to 100%.
+            Adjust weights per dataset and category. Weights should total 100% for best results.
             {(() => {
               const selectedMethod = getMethodById(overallMethod);
               if (selectedMethod?.id === 'geometric_mean') {
@@ -1153,12 +1153,6 @@ export default function InstanceScoringModal({
                         onChange={(e) => {
                           handleCategoryWeightChange(cat, parseFloat(e.target.value));
                         }}
-                        onMouseUp={(e) => {
-                          setTimeout(() => normalizeAllCategories(), 50);
-                        }}
-                        onTouchEnd={(e) => {
-                          setTimeout(() => normalizeAllCategories(), 50);
-                        }}
                         className="w-20 h-1.5 rounded-lg appearance-none cursor-pointer"
                         style={{
                           background: `linear-gradient(to right, var(--gsc-blue) 0%, var(--gsc-blue) ${categoryData.categoryWeight}%, var(--gsc-light-gray) ${categoryData.categoryWeight}%, var(--gsc-light-gray) 100%)`
@@ -1178,9 +1172,6 @@ export default function InstanceScoringModal({
                           const val = Math.round(parseFloat(e.target.value) || 0);
                           handleCategoryWeightChange(cat, Math.max(0, Math.min(100, val)));
                         }}
-                        onBlur={() => {
-                          setTimeout(() => normalizeAllCategories(), 50);
-                        }}
                         className="w-16 px-1 py-0.5 border rounded text-xs text-right"
                         style={{ borderColor: 'var(--gsc-light-gray)' }}
                       />
@@ -1195,15 +1186,34 @@ export default function InstanceScoringModal({
                           const val = Math.round(parseFloat(e.target.value.replace('%', '')) || 0);
                           handleCategoryWeightChange(cat, Math.max(0, Math.min(100, val)));
                         }}
-                        onBlur={() => {
-                          setTimeout(() => normalizeAllCategories(), 50);
-                        }}
                         className="w-16 px-1 py-0.5 border rounded text-xs text-right"
                         style={{ borderColor: 'var(--gsc-light-gray)' }}
                         placeholder="0%"
                       />
                     </div>
                   )}
+                  {/* Category total warning and normalize button */}
+                  {(() => {
+                    const categoryTotal = Object.values(categories).reduce((sum, c) => sum + (c.categoryWeight || 0), 0);
+                    if (Math.abs(categoryTotal - 100) >= 1) {
+                      return (
+                        <div className="flex items-center gap-2 ml-2">
+                          <button
+                            onClick={() => normalizeAllCategories()}
+                            className="text-xs px-2 py-0.5 rounded hover:opacity-80"
+                            style={{ backgroundColor: 'var(--gsc-blue)', color: 'white' }}
+                            title="Normalize all category weights to total 100%"
+                          >
+                            Normalize
+                          </button>
+                          <span className="text-xs font-semibold" style={{ color: 'var(--gsc-red)' }} title={`Category weights total ${categoryTotal.toFixed(0)}%, not 100%`}>
+                            ⚠️ Total: {Math.round(categoryTotal)}%
+                          </span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               </div>
 
@@ -1240,12 +1250,6 @@ export default function InstanceScoringModal({
                             onChange={(e) => {
                               handleWeightChange(d.id, parseFloat(e.target.value));
                             }}
-                            onMouseUp={(e) => {
-                              setTimeout(() => normalizeCategory(cat), 50);
-                            }}
-                            onTouchEnd={(e) => {
-                              setTimeout(() => normalizeCategory(cat), 50);
-                            }}
                             className="flex-1 h-1.5 rounded-lg appearance-none cursor-pointer"
                             style={{
                               background: `linear-gradient(to right, var(--gsc-green) 0%, var(--gsc-green) ${weight}%, var(--gsc-light-gray) ${weight}%, var(--gsc-light-gray) 100%)`
@@ -1265,9 +1269,6 @@ export default function InstanceScoringModal({
                               const val = Math.round(parseFloat(e.target.value) || 0);
                               handleWeightChange(d.id, Math.max(0, Math.min(100, val)));
                             }}
-                            onBlur={() => {
-                              setTimeout(() => normalizeCategory(cat), 50);
-                            }}
                             className="flex-1 px-1 py-0.5 border rounded text-xs text-right"
                             style={{ borderColor: 'var(--gsc-light-gray)' }}
                           />
@@ -1282,9 +1283,6 @@ export default function InstanceScoringModal({
                               const val = Math.round(parseFloat(e.target.value.replace('%', '')) || 0);
                               handleWeightChange(d.id, Math.max(0, Math.min(100, val)));
                             }}
-                            onBlur={() => {
-                              setTimeout(() => normalizeCategory(cat), 50);
-                            }}
                             className="flex-1 px-1 py-0.5 border rounded text-xs text-right"
                             style={{ borderColor: 'var(--gsc-light-gray)' }}
                             placeholder="0%"
@@ -1296,11 +1294,29 @@ export default function InstanceScoringModal({
                   );
                 })}
                 
-                {/* Total indicator */}
+                {/* Total indicator with warning */}
                 {categoryData.datasets.length > 1 && (
-                  <div className="flex justify-end items-center gap-1 text-xs pt-0.5 border-t" style={{ borderColor: 'var(--gsc-light-gray)' }}>
-                    <span style={{ color: totalDatasetWeight > 100.1 || totalDatasetWeight < 99.9 ? 'var(--gsc-red)' : 'var(--gsc-green)' }}>
-                      Total: {totalDatasetWeight.toFixed(1)}%
+                  <div className="flex justify-between items-center gap-1 text-xs pt-0.5 border-t" style={{ borderColor: 'var(--gsc-light-gray)' }}>
+                    <button
+                      onClick={() => normalizeCategory(cat)}
+                      className="text-xs px-2 py-0.5 rounded hover:opacity-80"
+                      style={{ 
+                        backgroundColor: Math.abs(totalDatasetWeight - 100) >= 1 ? 'var(--gsc-blue)' : 'transparent',
+                        color: Math.abs(totalDatasetWeight - 100) >= 1 ? 'white' : 'var(--gsc-gray)',
+                        border: Math.abs(totalDatasetWeight - 100) >= 1 ? 'none' : '1px solid var(--gsc-light-gray)'
+                      }}
+                      title="Normalize weights to total 100%"
+                    >
+                      Normalize
+                    </button>
+                    <span style={{ 
+                      color: Math.abs(totalDatasetWeight - 100) >= 1 ? 'var(--gsc-red)' : 'var(--gsc-green)',
+                      fontWeight: Math.abs(totalDatasetWeight - 100) >= 1 ? 'bold' : 'normal'
+                    }}>
+                      Total: {Math.round(totalDatasetWeight)}%
+                      {Math.abs(totalDatasetWeight - 100) >= 1 && (
+                        <span className="ml-1" title="Weights don't total 100%">⚠️</span>
+                      )}
                     </span>
                   </div>
                 )}
