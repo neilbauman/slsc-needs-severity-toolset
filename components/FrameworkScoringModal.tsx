@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { fetchHazardEventScores } from '@/lib/fetchHazardEventScoresClient';
 
 type Method = 'average' | 'median' | 'worst_case' | 'custom_weighted';
 
@@ -163,25 +164,29 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
         let hazardEventAvgScores: Record<string, number> = {};
         
         if (hazardEventIds.length > 0) {
-          const { data: hazardScoresData } = await supabase
-            .from('hazard_event_scores')
-            .select('hazard_event_id, score')
-            .eq('instance_id', instance.id)
-            .in('hazard_event_id', hazardEventIds);
-
-          if (hazardScoresData) {
-            const scoreMap: Record<string, { sum: number; count: number }> = {};
-            hazardScoresData.forEach((s: any) => {
-              if (!scoreMap[s.hazard_event_id]) {
-                scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
-              }
-              scoreMap[s.hazard_event_id].sum += Number(s.score);
-              scoreMap[s.hazard_event_id].count += 1;
+          try {
+            const hazardScoresData = await fetchHazardEventScores({
+              instanceId: instance.id,
+              hazardEventIds,
             });
 
-            Object.keys(scoreMap).forEach((eventId) => {
-              hazardEventAvgScores[eventId] = scoreMap[eventId].sum / scoreMap[eventId].count;
-            });
+            if (hazardScoresData && hazardScoresData.length > 0) {
+              const scoreMap: Record<string, { sum: number; count: number }> = {};
+              hazardScoresData.forEach((s: any) => {
+                if (!scoreMap[s.hazard_event_id]) {
+                  scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
+                }
+                scoreMap[s.hazard_event_id].sum += Number(s.score);
+                scoreMap[s.hazard_event_id].count += 1;
+              });
+
+              Object.keys(scoreMap).forEach((eventId) => {
+                hazardEventAvgScores[eventId] =
+                  scoreMap[eventId].sum / scoreMap[eventId].count;
+              });
+            }
+          } catch (error) {
+            console.error('Error loading hazard event scores for framework modal:', error);
           }
         }
 
@@ -408,19 +413,22 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
 
       // Load current hazard event scores
       if (hazardEventIds.length > 0) {
-        const { data: hazardScores } = await supabase
-          .from('hazard_event_scores')
-          .select('hazard_event_id, admin_pcode, score')
-          .eq('instance_id', instance.id)
-          .in('hazard_event_id', hazardEventIds)
-          .in('admin_pcode', adminPcodes);
+        try {
+          const hazardScores = await fetchHazardEventScores({
+            instanceId: instance.id,
+            hazardEventIds: hazardEventIds.filter(Boolean),
+            adminPcodes,
+          });
 
-        (hazardScores || []).forEach((s: any) => {
-          if (!currentDatasetScores[s.admin_pcode]) {
-            currentDatasetScores[s.admin_pcode] = {};
-          }
-          currentDatasetScores[s.admin_pcode][`hazard_event_${s.hazard_event_id}`] = Number(s.score);
-        });
+          (hazardScores || []).forEach((s: any) => {
+            if (!currentDatasetScores[s.admin_pcode]) {
+              currentDatasetScores[s.admin_pcode] = {};
+            }
+            currentDatasetScores[s.admin_pcode][`hazard_event_${s.hazard_event_id}`] = Number(s.score);
+          });
+        } catch (error) {
+          console.error('Error loading hazard event scores for preview:', error);
+        }
       }
 
       setCurrentScores(currentDatasetScores);

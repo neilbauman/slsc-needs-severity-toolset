@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchHazardEventScores } from "@/lib/fetchHazardEventScoresClient";
 import Link from "next/link";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
 import InstanceMetricsPanel from "@/components/InstanceMetricsPanel";
@@ -462,14 +463,16 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
           
           if (hazardEventsData && hazardEventsData.length > 0) {
             const hazardEventIds = hazardEventsData.map((e: any) => e.id);
-            const { data: hazardScores } = await supabase
-              .from("hazard_event_scores")
-              .select("admin_pcode, score")
-              .eq("instance_id", instanceId)
-              .in("hazard_event_id", hazardEventIds);
-            
-            if (hazardScores) {
-              categoryScores = [...categoryScores, ...hazardScores];
+            try {
+              const hazardScores = await fetchHazardEventScores({
+                instanceId,
+                hazardEventIds,
+              });
+              if (hazardScores.length > 0) {
+                categoryScores = [...categoryScores, ...hazardScores];
+              }
+            } catch (error) {
+              console.error("Error fetching hazard event scores:", error);
             }
           }
         }
@@ -541,13 +544,21 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         }
       } else if (selection.type === 'hazard_event' && selection.hazardEventId) {
         // Load hazard event scores
-        const { data: scores, error: scoresError } = await supabase
-          .from("hazard_event_scores")
-          .select("admin_pcode, score, magnitude_value")
-          .eq("instance_id", instanceId)
-          .eq("hazard_event_id", selection.hazardEventId);
+        let scores: any[] = [];
+        try {
+          scores = await fetchHazardEventScores({
+            instanceId,
+            hazardEventId: selection.hazardEventId,
+            includeMagnitude: true,
+          });
+        } catch (error) {
+          console.error("Error fetching hazard event scores:", error);
+          setFeatures([]);
+          setLoadingFeatures(false);
+          return;
+        }
 
-        if (scoresError || !scores || scores.length === 0) {
+        if (!scores || scores.length === 0) {
           setFeatures([]);
           setLoadingFeatures(false);
           return;

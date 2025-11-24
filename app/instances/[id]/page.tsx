@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchHazardEventScores } from "@/lib/fetchHazardEventScoresClient";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import ScoreLayerSelector from "@/components/ScoreLayerSelector";
@@ -567,11 +568,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         let categoryScores: any[] = [];
         if (categoryDatasetIds.length > 0) {
           const { data: datasetScores, error: datasetScoresError } = await supabase
-            .from("instance_dataset_scores")
-            .select("admin_pcode, score")
-            .eq("instance_id", instanceId)
-            .in("dataset_id", categoryDatasetIds);
-          
+          .from("instance_dataset_scores")
+          .select("admin_pcode, score")
+          .eq("instance_id", instanceId)
+          .in("dataset_id", categoryDatasetIds);
+        
           if (datasetScoresError) {
             console.error("Error fetching dataset scores:", datasetScoresError);
           } else if (datasetScores) {
@@ -586,16 +587,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           
           if (hazardEventsData && hazardEventsData.length > 0) {
             const hazardEventIds = hazardEventsData.map((e: any) => e.id);
-            const { data: hazardScores, error: hazardScoresError } = await supabase
-              .from("hazard_event_scores")
-              .select("admin_pcode, score")
-              .eq("instance_id", instanceId)
-              .in("hazard_event_id", hazardEventIds);
-            
-            if (hazardScoresError) {
-              console.error("Error fetching hazard event scores:", hazardScoresError);
-            } else if (hazardScores) {
-              categoryScores = [...categoryScores, ...hazardScores];
+            try {
+              const hazardScores = await fetchHazardEventScores({
+                instanceId,
+                hazardEventIds,
+              });
+              if (hazardScores.length > 0) {
+                categoryScores = [...categoryScores, ...hazardScores];
+              }
+            } catch (error) {
+              console.error("Error fetching hazard event scores:", error);
             }
           }
         }
@@ -691,14 +692,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         // Load hazard event scores
         console.log(`Loading features for hazard event: ${selection.hazardEventId}`);
         
-        const { data: scores, error: scoresError } = await supabase
-          .from("hazard_event_scores")
-          .select("admin_pcode, score, magnitude_value")
-          .eq("instance_id", instanceId)
-          .eq("hazard_event_id", selection.hazardEventId);
-
-        if (scoresError) {
-          console.error("Error fetching hazard event scores:", scoresError);
+        let scores: any[] = [];
+        try {
+          scores = await fetchHazardEventScores({
+            instanceId,
+            hazardEventId: selection.hazardEventId,
+            includeMagnitude: true,
+          });
+        } catch (error) {
+          console.error("Error fetching hazard event scores:", error);
           setFeatures([]);
           setLoadingFeatures(false);
           return;

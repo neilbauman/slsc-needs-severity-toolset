@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { fetchHazardEventScores } from '@/lib/fetchHazardEventScoresClient';
 import { AGGREGATION_METHODS, AggregationMethod, recommendMethod, getMethodById } from '@/lib/aggregationMethods';
 
 // Slider styles
@@ -531,19 +532,22 @@ export default function InstanceScoringModal({
 
       // Load hazard event scores
       if (hazardEventIds.length > 0) {
-        const { data: hazardScores } = await supabase
-          .from('hazard_event_scores')
-          .select('hazard_event_id, admin_pcode, score')
-          .eq('instance_id', instance.id)
-          .in('hazard_event_id', hazardEventIds)
-          .in('admin_pcode', topLocations);
+        try {
+          const hazardScores = await fetchHazardEventScores({
+            instanceId: instance.id,
+            hazardEventIds,
+            adminPcodes: topLocations,
+          });
 
-        (hazardScores || []).forEach((s: any) => {
-          if (!datasetScores[s.admin_pcode]) {
-            datasetScores[s.admin_pcode] = {};
-          }
-          datasetScores[s.admin_pcode][`hazard_event_${s.hazard_event_id}`] = Number(s.score);
-        });
+          (hazardScores || []).forEach((s: any) => {
+            if (!datasetScores[s.admin_pcode]) {
+              datasetScores[s.admin_pcode] = {};
+            }
+            datasetScores[s.admin_pcode][`hazard_event_${s.hazard_event_id}`] = Number(s.score);
+          });
+        } catch (error) {
+          console.error('Error loading hazard event scores for impact preview:', error);
+        }
       }
 
       // Calculate projected scores

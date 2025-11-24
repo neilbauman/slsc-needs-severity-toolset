@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { fetchHazardEventScores } from "@/lib/fetchHazardEventScoresClient";
 
 export interface ScoreLayerSelectorProps {
   instanceId: string;
@@ -181,26 +182,30 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
 
           const hazardEventIds = hazardEventsData.map((e: any) => e.id);
           if (hazardEventIds.length > 0) {
-            const { data: scoresData } = await supabase
-              .from("hazard_event_scores")
-              .select("hazard_event_id, score")
-              .eq("instance_id", instanceId)
-              .in("hazard_event_id", hazardEventIds);
-
-            if (scoresData) {
-              const scoreMap: Record<string, { sum: number; count: number }> = {};
-              scoresData.forEach((s: any) => {
-                if (!scoreMap[s.hazard_event_id]) {
-                  scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
-                }
-                scoreMap[s.hazard_event_id].sum += Number(s.score);
-                scoreMap[s.hazard_event_id].count += 1;
+            try {
+              const scoresData = await fetchHazardEventScores({
+                instanceId,
+                hazardEventIds,
               });
 
-              Object.keys(scoreMap).forEach((eventId) => {
-                hazardEventAvgScores[eventId] = scoreMap[eventId].sum / scoreMap[eventId].count;
-              });
-              setHazardEventScores(hazardEventAvgScores);
+              if (scoresData && scoresData.length > 0) {
+                const scoreMap: Record<string, { sum: number; count: number }> = {};
+                scoresData.forEach((s: any) => {
+                  if (!scoreMap[s.hazard_event_id]) {
+                    scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
+                  }
+                  scoreMap[s.hazard_event_id].sum += Number(s.score);
+                  scoreMap[s.hazard_event_id].count += 1;
+                });
+
+                Object.keys(scoreMap).forEach((eventId) => {
+                  hazardEventAvgScores[eventId] =
+                    scoreMap[eventId].sum / scoreMap[eventId].count;
+                });
+                setHazardEventScores(hazardEventAvgScores);
+              }
+            } catch (error) {
+              console.error("Error loading hazard event scores via API:", error);
             }
           }
 
