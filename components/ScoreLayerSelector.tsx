@@ -19,8 +19,6 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
   const [loading, setLoading] = useState(true);
   // Initialize with all categories expanded by default
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  const [datasetCategories, setDatasetCategories] = useState<Record<string, string[]>>({});
-  const [loadingCategories, setLoadingCategories] = useState<Record<string, boolean>>({});
   const [hazardEvents, setHazardEvents] = useState<any[]>([]);
   const [hazardEventScores, setHazardEventScores] = useState<Record<string, number>>({});
 
@@ -286,27 +284,6 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
     }
   }, [datasets.length]); // Re-run when datasets change
 
-  // ✅ Get categories for categorical datasets
-  const loadCategoriesForDataset = async (datasetId: string) => {
-    if (datasetCategories[datasetId]) return; // Already loaded
-    
-    setLoadingCategories(prev => ({ ...prev, [datasetId]: true }));
-    try {
-      const { data } = await supabase
-        .from("dataset_values_categorical")
-        .select("category")
-        .eq("dataset_id", datasetId)
-        .limit(1000);
-      
-      const uniqueCategories = [...new Set((data || []).map((d: any) => d.category))].sort();
-      setDatasetCategories(prev => ({ ...prev, [datasetId]: uniqueCategories }));
-    } catch (err) {
-      console.error("Error loading categories:", err);
-    } finally {
-      setLoadingCategories(prev => ({ ...prev, [datasetId]: false }));
-    }
-  };
-
   if (loading) return <p className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Loading layers...</p>;
 
   return (
@@ -394,9 +371,6 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
                         handleSelect('hazard_event', d.dataset_id, undefined, d.dataset_name, undefined, hazardEventId);
                       } else {
                         handleSelect('dataset', d.dataset_id, undefined, d.dataset_name);
-                        if (d.type === 'categorical') {
-                          loadCategoriesForDataset(d.dataset_id);
-                        }
                       }
                     }}
                     className="block w-full text-left px-1.5 py-1 rounded text-xs transition-colors"
@@ -471,44 +445,6 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
                     </div>
                   </div>
                 </button>
-                {!isHazardEvent && d.type === 'categorical' && activeSelection.datasetId === d.dataset_id && (
-                  <div className="ml-1.5 mt-0.5 space-y-0.5">
-                    <button
-                      onClick={() => handleSelect('category', d.dataset_id, 'overall', d.dataset_name)}
-                      className="block w-full text-left px-1.5 py-0.5 rounded text-xs transition-colors"
-                        style={{
-                          backgroundColor: activeSelection.type === 'category' && activeSelection.category === 'overall'
-                            ? 'rgba(0, 75, 135, 0.7)'
-                            : 'var(--gsc-light-gray)',
-                          color: activeSelection.type === 'category' && activeSelection.category === 'overall'
-                            ? '#fff'
-                            : 'var(--gsc-gray)'
-                        }}
-                      >
-                        Overall
-                      </button>
-                      {loadingCategories[d.dataset_id] && (
-                        <div className="text-xs px-1.5 py-0.5" style={{ color: 'var(--gsc-gray)' }}>Loading categories...</div>
-                      )}
-                      {!loadingCategories[d.dataset_id] && datasetCategories[d.dataset_id]?.map((cat) => (
-                        <button
-                          key={cat}
-                          onClick={() => handleSelect('category', d.dataset_id, cat, d.dataset_name)}
-                          className="block w-full text-left px-1.5 py-0.5 rounded text-xs transition-colors"
-                          style={{
-                            backgroundColor: activeSelection.type === 'category' && activeSelection.category === cat
-                              ? 'rgba(0, 75, 135, 0.7)'
-                              : 'var(--gsc-light-gray)',
-                            color: activeSelection.type === 'category' && activeSelection.category === cat
-                              ? '#fff'
-                              : 'var(--gsc-gray)'
-                          }}
-                        >
-                          {cat}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               );
               })}
