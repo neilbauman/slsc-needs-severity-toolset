@@ -83,30 +83,31 @@ BEGIN
        CASE WHEN v_hazard_weight > 0 AND MAX(hazard_score) IS NOT NULL THEN 1 ELSE 0 END +
        CASE WHEN v_uv_weight > 0 AND MAX(uv_score) IS NOT NULL THEN 1 ELSE 0 END) AS component_count
     FROM (
-      SELECT admin_pcode, score AS framework_score, NULL::NUMERIC AS hazard_score, NULL::NUMERIC AS uv_score
-      FROM instance_category_scores
-      WHERE instance_id = in_instance_id AND category = 'SSC Framework' AND v_framework_weight > 0
+      SELECT ics_framework.admin_pcode, ics_framework.score AS framework_score, NULL::NUMERIC AS hazard_score, NULL::NUMERIC AS uv_score
+      FROM instance_category_scores ics_framework
+      WHERE ics_framework.instance_id = in_instance_id AND ics_framework.category = 'SSC Framework' AND v_framework_weight > 0
       UNION ALL
-      SELECT admin_pcode, AVG(score) AS framework_score, NULL::NUMERIC AS hazard_score, NULL::NUMERIC AS uv_score
-      FROM instance_category_scores
-      WHERE instance_id = in_instance_id
-        AND category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3')
+      SELECT ics_pillar.admin_pcode, AVG(ics_pillar.score) AS framework_score, NULL::NUMERIC AS hazard_score, NULL::NUMERIC AS uv_score
+      FROM instance_category_scores ics_pillar
+      WHERE ics_pillar.instance_id = in_instance_id
+        AND ics_pillar.category IN ('SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3')
         AND v_framework_weight > 0
         AND NOT EXISTS (
-          SELECT 1 FROM instance_category_scores 
-          WHERE instance_id = in_instance_id 
-            AND category = 'SSC Framework' 
-            AND admin_pcode = instance_category_scores.admin_pcode
+          SELECT 1 
+          FROM instance_category_scores ics_framework_existing
+          WHERE ics_framework_existing.instance_id = in_instance_id 
+            AND ics_framework_existing.category = 'SSC Framework' 
+            AND ics_framework_existing.admin_pcode = ics_pillar.admin_pcode
         )
-      GROUP BY admin_pcode
+      GROUP BY ics_pillar.admin_pcode
       UNION ALL
-      SELECT admin_pcode, NULL::NUMERIC AS framework_score, score AS hazard_score, NULL::NUMERIC AS uv_score
-      FROM instance_category_scores
-      WHERE instance_id = in_instance_id AND category = 'Hazard' AND v_hazard_weight > 0
+      SELECT ics_hazard.admin_pcode, NULL::NUMERIC AS framework_score, ics_hazard.score AS hazard_score, NULL::NUMERIC AS uv_score
+      FROM instance_category_scores ics_hazard
+      WHERE ics_hazard.instance_id = in_instance_id AND ics_hazard.category = 'Hazard' AND v_hazard_weight > 0
       UNION ALL
-      SELECT admin_pcode, NULL::NUMERIC AS framework_score, NULL::NUMERIC AS hazard_score, score AS uv_score
-      FROM instance_category_scores
-      WHERE instance_id = in_instance_id AND category = 'Underlying Vulnerability' AND v_uv_weight > 0
+      SELECT ics_uv.admin_pcode, NULL::NUMERIC AS framework_score, NULL::NUMERIC AS hazard_score, ics_uv.score AS uv_score
+      FROM instance_category_scores ics_uv
+      WHERE ics_uv.instance_id = in_instance_id AND ics_uv.category = 'Underlying Vulnerability' AND v_uv_weight > 0
     ) AS category_scores
     GROUP BY admin_pcode
     HAVING COUNT(*) > 0

@@ -856,19 +856,6 @@ export default function InstanceScoringModal({
               return '';
             })()}
           </p>
-          <div className="flex items-center gap-2 ml-2">
-            <span className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Input:</span>
-            <select
-              value={weightInputMode}
-              onChange={(e) => setWeightInputMode(e.target.value as any)}
-              className="text-xs px-2 py-1 border rounded"
-              style={{ borderColor: 'var(--gsc-light-gray)' }}
-            >
-              <option value="slider">Slider</option>
-              <option value="number">Number Input</option>
-              <option value="percentage">Percentage</option>
-            </select>
-          </div>
         </div>
 
         {/* Impact Preview Panel */}
@@ -1078,6 +1065,23 @@ export default function InstanceScoringModal({
             <div><strong>Compounding Hazards:</strong> Scores are normalized (1→0, 5→1), weighted, then summed with a bonus for areas hit by multiple hazards. Best when multiple hazards overlap.</div>
             <div><strong>SSC Decision Tree:</strong> Fixed tree system for compiling P1, P2, P3 framework pillar scores using predefined decision rules.</div>
           </div>
+        </div>
+
+        {/* Weight input mode selector, placed directly above scoring panel */}
+        <div className="flex justify-end items-center mb-2">
+          <span className="text-xs mr-2" style={{ color: 'var(--gsc-gray)' }}>
+            Weight input mode:
+          </span>
+          <select
+            value={weightInputMode}
+            onChange={(e) => setWeightInputMode(e.target.value as any)}
+            className="text-xs px-2 py-1 border rounded"
+            style={{ borderColor: 'var(--gsc-light-gray)' }}
+          >
+            <option value="slider">Slider</option>
+            <option value="number">Number Input</option>
+            <option value="percentage">Percentage</option>
+          </select>
         </div>
 
         <div className="space-y-2">

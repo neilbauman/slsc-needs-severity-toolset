@@ -41,12 +41,12 @@ BEGIN
   ),
   current_scores AS (
     SELECT 
-      admin_pcode,
-      score,
+      ics.admin_pcode,
+      ics.score,
       'weighted_mean' AS method -- Default method, could be stored in instance metadata
-    FROM instance_category_scores
-    WHERE instance_id = in_instance_id
-      AND category = in_category
+    FROM instance_category_scores ics
+    WHERE ics.instance_id = in_instance_id
+      AND ics.category = in_category
   )
   SELECT 
     cd.admin_pcode,
