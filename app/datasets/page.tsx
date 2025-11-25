@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Info, Pencil, Trash2, Wand2 } from 'lucide-react';
@@ -27,15 +27,15 @@ const matchesPopulation = (dataset: any) => {
   return haystack.includes('population');
 };
 
-export default function DatasetsPage() {
+function DatasetsPageContent() {
   const searchParams = useSearchParams();
-  const initialPillar = searchParams.get('pillar');
-  const initialFocus = searchParams.get('focus');
+  const pillarParam = searchParams.get('pillar');
+  const focusParam = searchParams.get('focus');
   const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDataset, setEditingDataset] = useState<any | null>(null);
-  const [pillarFilter, setPillarFilter] = useState<string | null>(initialPillar);
-  const [focusFilter, setFocusFilter] = useState<string | null>(initialFocus);
+  const [pillarFilter, setPillarFilter] = useState<string | null>(pillarParam);
+  const [focusFilter, setFocusFilter] = useState<string | null>(focusParam);
 
   const loadDatasets = async () => {
     setLoading(true);
@@ -55,6 +55,11 @@ export default function DatasetsPage() {
   useEffect(() => {
     loadDatasets();
   }, []);
+
+  useEffect(() => {
+    setPillarFilter(pillarParam);
+    setFocusFilter(focusParam);
+  }, [pillarParam, focusParam]);
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this dataset?')) return;
@@ -265,5 +270,13 @@ export default function DatasetsPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function DatasetsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading datasets…</div>}>
+      <DatasetsPageContent />
+    </Suspense>
   );
 }
