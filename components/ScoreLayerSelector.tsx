@@ -221,7 +221,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
           // Merge hazard events into datasets array
           setDatasets([...transformed, ...hazardEventDatasets]);
         } else {
-          setDatasets(transformed);
+        setDatasets(transformed);
         }
       } catch (err) {
         console.error("Error loading datasets:", err);
@@ -244,9 +244,9 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
       }
     } else {
       const selection = { type, datasetId, category, hazardEventId };
-      setActiveSelection(selection);
-      if (onSelect) {
-        onSelect({ ...selection, datasetName, categoryName });
+    setActiveSelection(selection);
+    if (onSelect) {
+      onSelect({ ...selection, datasetName, categoryName });
       }
     }
   };
@@ -370,7 +370,7 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
                       if (isHazardEvent && hazardEventId) {
                         handleSelect('hazard_event', d.dataset_id, undefined, d.dataset_name, undefined, hazardEventId);
                       } else {
-                        handleSelect('dataset', d.dataset_id, undefined, d.dataset_name);
+                      handleSelect('dataset', d.dataset_id, undefined, d.dataset_name);
                       }
                     }}
                     className="block w-full text-left px-1.5 py-1 rounded text-xs transition-colors"

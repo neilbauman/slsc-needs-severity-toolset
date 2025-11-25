@@ -100,7 +100,7 @@ export default function InstanceScoringModal({
       }
       
       const ds = categoryData.datasets;
-      const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
+    const total = ds.reduce((sum, d) => sum + (weights[d.id] || 0), 0);
       
       if (total === 0) {
         // If total is 0, distribute equally
@@ -119,7 +119,7 @@ export default function InstanceScoringModal({
       if (Math.abs(total - 100) < 2) {
         // Close to 100%, just make minor adjustment to exact 100%
         const scale = 100 / total;
-        const newWeights = { ...weights };
+    const newWeights = { ...weights };
         let sum = 0;
         
         ds.forEach((d) => {
@@ -147,24 +147,24 @@ export default function InstanceScoringModal({
       const newWeights = { ...weights };
       const scale = 100 / total;
 
-      let sum = 0;
-      ds.forEach((d) => {
+    let sum = 0;
+    ds.forEach((d) => {
         const normalized = (weights[d.id] || 0) * scale;
         // Round to whole number (1% precision)
         newWeights[d.id] = Math.round(normalized);
-        sum += newWeights[d.id];
-      });
+      sum += newWeights[d.id];
+    });
 
       // Adjust for rounding (add/subtract from largest)
-      const diff = 100 - sum;
+    const diff = 100 - sum;
       if (Math.abs(diff) >= 1 && ds.length > 0) {
-        const largest = ds.reduce((a, b) =>
-          (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
-        );
+      const largest = ds.reduce((a, b) =>
+        (newWeights[a.id] || 0) > (newWeights[b.id] || 0) ? a : b
+      );
         newWeights[largest.id] = Math.max(0, Math.min(100, Math.round(newWeights[largest.id] + diff)));
-      }
+    }
 
-      setWeights(newWeights);
+    setWeights(newWeights);
       setIsNormalizing(false);
     });
   }, [categories, weights, isNormalizing]);
@@ -192,9 +192,9 @@ export default function InstanceScoringModal({
         // Close to 100%, just make minor adjustment
         const scale = 100 / total;
         const newCats: Record<string, CategoryData> = { ...categories };
-        let sum = 0;
+    let sum = 0;
 
-        Object.keys(newCats).forEach((cat) => {
+    Object.keys(newCats).forEach((cat) => {
           const catData = newCats[cat] as CategoryData;
           const currentWeight = catData.categoryWeight || 0;
           // Round to whole number (1% precision)
@@ -233,10 +233,10 @@ export default function InstanceScoringModal({
         // Round to whole number (1% precision)
         catData.categoryWeight = Math.round(currentWeight * scale);
         sum += catData.categoryWeight;
-      });
+    });
 
       // Adjust for rounding
-      const diff = 100 - sum;
+    const diff = 100 - sum;
       if (Math.abs(diff) >= 1) {
         const largestCat = Object.keys(newCats).reduce((a, b) => {
           const aData = newCats[a] as CategoryData;
@@ -245,12 +245,12 @@ export default function InstanceScoringModal({
         });
         const largestCatData = newCats[largestCat] as CategoryData;
         largestCatData.categoryWeight = Math.max(
-          0,
+        0,
           Math.min(100, Math.round(largestCatData.categoryWeight + diff))
-        );
-      }
+      );
+    }
 
-      setCategories(newCats);
+    setCategories(newCats);
       setIsNormalizing(false);
     });
   }, [categories, isNormalizing]);
@@ -313,7 +313,7 @@ export default function InstanceScoringModal({
         // Map saved weights by dataset_id (UUID)
         weightMap[w.dataset_id] = (w.dataset_weight ?? 0) * 100;
       });
-      
+
       // Also load hazard event weights from metadata if available
       if (!hazardError && hazardEventsData && hazardEventsData.length > 0) {
         hazardEventsData.forEach((event: any) => {
@@ -370,7 +370,7 @@ export default function InstanceScoringModal({
           sorted[cat].categoryWeight = categoryWeightMap[cat];
         } else {
           // Default to equal distribution if not saved
-          sorted[cat].categoryWeight = 100 / numCats;
+        sorted[cat].categoryWeight = 100 / numCats;
         }
         
         const numDs = sorted[cat].datasets.length;
@@ -745,16 +745,16 @@ export default function InstanceScoringModal({
               // Try to parse as UUID to validate
               const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
               if (uuidRegex.test(d.id)) {
-                const { error } = await supabase.from('instance_scoring_weights').upsert({
-                  instance_id: instance.id,
-                  dataset_id: d.id,
-                  category: cat,
-                  dataset_weight: weightDecimal,
-                  category_weight: catDecimal,
-                  updated_at: new Date().toISOString(),
-                });
-                if (error) console.error('Save weight error:', error);
-              }
+          const { error } = await supabase.from('instance_scoring_weights').upsert({
+            instance_id: instance.id,
+            dataset_id: d.id,
+            category: cat,
+            dataset_weight: weightDecimal,
+            category_weight: catDecimal,
+            updated_at: new Date().toISOString(),
+          });
+          if (error) console.error('Save weight error:', error);
+        }
             } catch (err) {
               console.error('Error saving weight for dataset:', d.id, err);
             }
@@ -999,7 +999,7 @@ export default function InstanceScoringModal({
                     <strong>ℹ️ Power Mean:</strong> Moderate emphasis on extremes. Category weights apply, but high scores have more influence than in weighted mean.
                   </div>
                 )}
-              </div>
+            </div>
             );
           })()}
           
@@ -1131,7 +1131,7 @@ export default function InstanceScoringModal({
                             ? 'SSC Decision Tree: Fixed tree system for compiling P1, P2, P3 framework pillar scores using predefined decision rules.'
                             : 'Multiple datasets in this category use weighted mean'
                         }
-                      >
+              >
                         <option value="weighted_mean">Weighted Mean</option>
                         {cat === 'Hazard' && categoryData.datasets.filter(d => d.is_hazard_event).length > 1 && (
                           <option value="compounding_hazards">Compounding Hazards</option>
@@ -1169,11 +1169,11 @@ export default function InstanceScoringModal({
                       <span className="w-10 text-right font-semibold text-xs">{Math.round(categoryData.categoryWeight)}%</span>
                     </>
                   ) : weightInputMode === 'number' ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
                         step="1"
                         value={Math.round(categoryData.categoryWeight)}
                         onChange={(e) => {

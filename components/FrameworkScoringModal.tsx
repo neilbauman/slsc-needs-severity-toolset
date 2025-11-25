@@ -218,10 +218,10 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
             next[idx].include = true; // Ensure it's included if datasets exist
           }
         } else {
-          // If no datasets, set include to false
+            // If no datasets, set include to false
           const idx = next.findIndex((c) => c.key === key);
           if (idx >= 0) {
-            next[idx].include = false;
+              next[idx].include = false;
           }
         }
       }
@@ -617,7 +617,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[90vh] flex flex-col">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-center border-b px-6 py-4 bg-gray-50">
           <div>
@@ -833,7 +833,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                           {list.map((d) => (
                             <div key={d.dataset_id} className="p-3 bg-gray-50 rounded border border-gray-200">
                               <div className="flex items-start justify-between mb-2">
-                                <div className="flex-1">
+                              <div className="flex-1">
                                   <div className="font-medium text-sm text-gray-900 flex items-center gap-2">
                                     {d.dataset_name}
                                     {isHazardEventId(d.dataset_id) && (
@@ -842,38 +842,38 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                                       </span>
                                     )}
                                   </div>
-                                  {d.avg_score !== null && (
+                                {d.avg_score !== null && (
                                     <div className="text-xs text-gray-500 mt-1">
-                                      Avg Score: {Number(d.avg_score).toFixed(2)}
-                                    </div>
-                                  )}
+                                    Avg Score: {Number(d.avg_score).toFixed(2)}
+                                  </div>
+                                )}
                                 </div>
                               </div>
                               {cat.method === 'custom_weighted' && (
                                 <div className="flex items-center gap-3">
-                                  <div className="flex items-center gap-2">
-                                    <label className="text-xs text-gray-600">Weight:</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      max="1"
-                                      value={cat.weights[d.dataset_id] ?? 0}
-                                      onChange={(e) => {
-                                        const newWeights = {
-                                          ...cat.weights,
-                                          [d.dataset_id]: parseFloat(e.target.value) || 0,
-                                        };
-                                        // Auto-normalize if sum > 1
-                                        const sum = sumWeights(newWeights);
-                                        if (sum > 1.01) {
-                                          updateCategory(key, { weights: normalizeWeights(newWeights) });
-                                        } else {
-                                          updateCategory(key, { weights: newWeights });
-                                        }
-                                      }}
-                                      className="w-20 border border-gray-300 rounded px-2 py-1 text-sm"
-                                    />
+                                <div className="flex items-center gap-2">
+                                  <label className="text-xs text-gray-600">Weight:</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    max="1"
+                                    value={cat.weights[d.dataset_id] ?? 0}
+                                    onChange={(e) => {
+                                      const newWeights = {
+                                        ...cat.weights,
+                                        [d.dataset_id]: parseFloat(e.target.value) || 0,
+                                      };
+                                      // Auto-normalize if sum > 1
+                                      const sum = sumWeights(newWeights);
+                                      if (sum > 1.01) {
+                                        updateCategory(key, { weights: normalizeWeights(newWeights) });
+                                      } else {
+                                        updateCategory(key, { weights: newWeights });
+                                      }
+                                    }}
+                                    className="w-20 border border-gray-300 rounded px-2 py-1 text-sm"
+                                  />
                                   </div>
                                   {/* Visual weight indicator */}
                                   <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -930,21 +930,21 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                           <label className="text-xs font-medium text-gray-700 block mb-2">{k}</label>
                           <div className="space-y-2">
                             {/* Slider */}
-                            <input
+                          <input
                               type="range"
-                              min="0"
+                            min="0"
                               max="100"
                               step="1"
                               value={((sscRollup.weights[k] ?? 0) * 100)}
-                              onChange={(e) => {
+                            onChange={(e) => {
                                 const newValue = parseFloat(e.target.value) / 100;
-                                const newWeights = {
-                                  ...sscRollup.weights,
+                              const newWeights = {
+                                ...sscRollup.weights,
                                   [k]: newValue,
-                                };
+                              };
                                 setSscRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
-                              }}
-                              disabled={!hasData}
+                            }}
+                            disabled={!hasData}
                               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
                               style={{
                                 background: `linear-gradient(to right, #14b8a6 0%, #14b8a6 ${((sscRollup.weights[k] ?? 0) * 100)}%, #e5e7eb ${((sscRollup.weights[k] ?? 0) * 100)}%, #e5e7eb 100%)`
@@ -1007,21 +1007,21 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
                           <label className="text-xs font-medium text-gray-700 block mb-2">{label}</label>
                           <div className="space-y-2">
                             {/* Slider */}
-                            <input
+                          <input
                               type="range"
-                              min="0"
+                            min="0"
                               max="100"
                               step="1"
                               value={((overallRollup.weights[key] ?? 0) * 100)}
-                              onChange={(e) => {
+                            onChange={(e) => {
                                 const newValue = parseFloat(e.target.value) / 100;
-                                const newWeights = {
-                                  ...overallRollup.weights,
+                              const newWeights = {
+                                ...overallRollup.weights,
                                   [key]: newValue,
-                                };
+                              };
                                 setOverallRollup((p) => ({ ...p, weights: normalizeWeights(newWeights) }));
-                              }}
-                              disabled={!hasData}
+                            }}
+                            disabled={!hasData}
                               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
                               style={{
                                 background: `linear-gradient(to right, #f59e0b 0%, #f59e0b ${((overallRollup.weights[key] ?? 0) * 100)}%, #e5e7eb ${((overallRollup.weights[key] ?? 0) * 100)}%, #e5e7eb 100%)`
