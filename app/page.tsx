@@ -48,17 +48,53 @@ type PillarKey =
   | 'Underlying Vulnerability'
   | 'Other';
 
-const PILLAR_ORDER: { key: PillarKey; label: string; description: string }[] = [
-  { key: 'Core', label: 'Core Baseline', description: 'Static national baselines & census data.' },
-  { key: 'SSC Framework - P1', label: 'P1 Exposure', description: 'People & settlements exposed to hazards.' },
-  { key: 'SSC Framework - P2', label: 'P2 Sensitivity', description: 'Physical & socioeconomic fragility factors.' },
-  { key: 'SSC Framework - P3', label: 'P3 Adaptive Capacity', description: 'Readiness of systems & services.' },
-  { key: 'Hazard', label: 'Hazard Layers', description: 'Recent hazard footprints & alerts.' },
-  { key: 'Underlying Vulnerability', label: 'Underlying Vulnerability', description: 'Chronic structural drivers.' },
-  { key: 'Other', label: 'Uncategorized', description: 'Datasets awaiting classification.' },
+const PILLAR_ORDER: { key: PillarKey; label: string; description: string; group: 'ssc' | 'supporting' | 'core' }[] = [
+  {
+    key: 'Core',
+    label: 'Core Baseline',
+    description: 'Static national baselines & census data.',
+    group: 'core',
+  },
+  {
+    key: 'SSC Framework - P1',
+    label: 'The Shelter (P1)',
+    description: 'Structural safety & direct exposure of homes.',
+    group: 'ssc',
+  },
+  {
+    key: 'SSC Framework - P2',
+    label: 'The Living Conditions (P2)',
+    description: 'Physical & socioeconomic fragility factors.',
+    group: 'ssc',
+  },
+  {
+    key: 'SSC Framework - P3',
+    label: 'The Settlement (P3)',
+    description: 'Readiness of services, governance & access.',
+    group: 'ssc',
+  },
+  {
+    key: 'Hazard',
+    label: 'Hazard Layers',
+    description: 'Recent hazard footprints & alerts.',
+    group: 'supporting',
+  },
+  {
+    key: 'Underlying Vulnerability',
+    label: 'Underlying Vulnerability',
+    description: 'Chronic structural drivers.',
+    group: 'supporting',
+  },
+  {
+    key: 'Other',
+    label: 'Uncategorized',
+    description: 'Datasets awaiting classification.',
+    group: 'supporting',
+  },
 ];
 
 const DEFAULT_PILLAR: PillarKey = 'Underlying Vulnerability';
+const ADMIN_LEVELS: Array<'ADM1' | 'ADM2' | 'ADM3' | 'ADM4'> = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
 
 const formatDate = (value?: string | null) => {
   if (!value) return '—';
@@ -149,6 +185,36 @@ function PillarCard({
   );
 }
 
+function ReferenceCard({
+  title,
+  subtitle,
+  stat,
+  detail,
+  icon: Icon,
+}: {
+  title: string;
+  subtitle: string;
+  stat: string;
+  detail?: string;
+  icon: typeof Database;
+}) {
+  return (
+    <div className="border border-gray-200 rounded-2xl p-4 bg-white shadow-sm flex items-start gap-4">
+      <div className="p-3 rounded-full bg-gray-100 text-gray-600">
+        <Icon size={18} />
+      </div>
+      <div className="space-y-1">
+        <p className="text-xs uppercase tracking-wide text-amber-600 font-semibold">{subtitle}</p>
+        <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+        <p className="text-2xl font-semibold text-gray-900">{stat}</p>
+        {detail && <p className="text-sm text-gray-600">{detail}</p>}
+      </div>
+    </div>
+  );
+}
+
+const numberFormatter = new Intl.NumberFormat('en-PH');
+
 export default function HomePage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -156,13 +222,23 @@ export default function HomePage() {
   const [adminBoundaryGeo, setAdminBoundaryGeo] = useState<GeoJSON | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [boundaryCounts, setBoundaryCounts] = useState<Record<string, number>>({
+    ADM1: 0,
+    ADM2: 0,
+    ADM3: 0,
+    ADM4: 0,
+  });
 
   const loadDashboard = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [{ data: datasetData, error: datasetError }, { data: instanceData, error: instanceError }, { data: instanceDatasetData, error: linkError }] =
+      const [
+        { data: datasetData, error: datasetError },
+        { data: instanceData, error: instanceError },
+        { data: instanceDatasetData, error: linkError },
+      ] =
         await Promise.all([
           supabase.from('datasets').select('*').order('name', { ascending: true }),
           supabase.from('instances').select('*'),
@@ -194,6 +270,26 @@ export default function HomePage() {
       } else {
         setAdminBoundaryGeo(geojsonData as GeoJSON);
       }
+
+      const levelCounts = await Promise.all(
+        ADMIN_LEVELS.map((level) =>
+          supabase
+            .from('admin_boundaries')
+            .select('admin_pcode', { count: 'exact', head: true })
+            .eq('admin_level', level),
+        ),
+      );
+      const nextCounts = { ...boundaryCounts };
+      levelCounts.forEach((result, idx) => {
+        const level = ADMIN_LEVELS[idx];
+        if (result.error) {
+          console.warn(`Failed to count ${level}`, result.error);
+          nextCounts[level] = 0;
+        } else {
+          nextCounts[level] = result.count ?? 0;
+        }
+      });
+      setBoundaryCounts(nextCounts);
     } catch (err: any) {
       console.error('Failed to load dashboard:', err);
       setError(err?.message || 'Unable to load dashboard data.');
@@ -259,6 +355,18 @@ export default function HomePage() {
     });
   }, [datasets]);
 
+  const sscPillars = useMemo(
+    () => pillarSummary.filter((pillar) => pillar.key === 'SSC Framework - P1' || pillar.key === 'SSC Framework - P2' || pillar.key === 'SSC Framework - P3'),
+    [pillarSummary],
+  );
+  const supportingPillars = useMemo(
+    () =>
+      pillarSummary.filter(
+        (pillar) => pillar.key === 'Hazard' || pillar.key === 'Underlying Vulnerability' || pillar.key === 'Other',
+      ),
+    [pillarSummary],
+  );
+
   const datasetById = useMemo(() => {
     const map = new Map<string, Dataset>();
     datasets.forEach((d) => map.set(d.id, d));
@@ -286,6 +394,22 @@ export default function HomePage() {
       };
     });
   }, [instances, instanceDatasets, datasetById, instanceDatasetCounts]);
+
+  const populationDatasets = useMemo(() => {
+    return datasets.filter((dataset) => {
+      const text = `${dataset.name ?? ''} ${dataset.description ?? ''} ${JSON.stringify(dataset.metadata ?? {})}`.toLowerCase();
+      return text.includes('population');
+    });
+  }, [datasets]);
+
+  const primaryPopulation = useMemo(() => {
+    return (
+      populationDatasets.find((dataset) => {
+        const meta = dataset.metadata || {};
+        return Boolean(meta.is_active_baseline ?? meta.active_baseline ?? meta.is_primary);
+      }) || populationDatasets[0]
+    );
+  }, [populationDatasets]);
 
   return (
     <div className="px-6 py-8 space-y-8 max-w-7xl mx-auto">
@@ -367,6 +491,27 @@ export default function HomePage() {
         />
       </section>
 
+      <section className="grid gap-4 md:grid-cols-2">
+        <ReferenceCard
+          title="Admin boundaries"
+          subtitle="Reference layers"
+          stat={`${numberFormatter.format(boundaryCounts.ADM3)} ADM3 • ${numberFormatter.format(boundaryCounts.ADM4)} ADM4`}
+          detail={`ADM1 ${numberFormatter.format(boundaryCounts.ADM1)} • ADM2 ${numberFormatter.format(boundaryCounts.ADM2)}`}
+          icon={MapPinned}
+        />
+        <ReferenceCard
+          title="Population baselines"
+          subtitle="Reference layers"
+          stat={`${populationDatasets.length} dataset${populationDatasets.length === 1 ? '' : 's'}`}
+          detail={
+            primaryPopulation
+              ? `Primary: ${primaryPopulation.name}`
+              : 'No active population baseline is flagged yet.'
+          }
+          icon={Database}
+        />
+      </section>
+
       <section className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
@@ -374,23 +519,25 @@ export default function HomePage() {
               <p className="text-xs font-semibold uppercase tracking-wider text-amber-600">
                 SSC Framework coverage
               </p>
-              <h2 className="text-lg font-semibold text-gray-900">Pillars at a glance</h2>
+              <h2 className="text-lg font-semibold text-gray-900">The Shelter · The Living Conditions · The Settlement</h2>
               <p className="text-sm text-gray-600">
-                Keep the Core, SSC P1-3, Hazard, and Underlying Vulnerability layers balanced as a
-                replicable baseline package.
+                Keep the shelter-centric pillars balanced—the place where shelter-specific datasets should live. Hazard and underlying vulnerability layers support but do not replace SSC framing.
               </p>
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            {pillarSummary.map((pillar) => (
-              <PillarCard
-                key={pillar.key}
-                label={pillar.label}
-                description={pillar.description}
-                value={pillar.value}
-                percent={pillar.percent}
-              />
-            ))}
+            {sscPillars.map((pillar) => {
+              const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
+              return (
+                <PillarCard
+                  key={pillar.key}
+                  label={pillarMeta?.label || pillar.label}
+                  description={pillarMeta?.description || pillar.description}
+                  value={pillar.value}
+                  percent={pillar.percent}
+                />
+              );
+            })}
           </div>
         </div>
         <DashboardMap
@@ -399,6 +546,33 @@ export default function HomePage() {
           description="ADM1 boundaries shown as the base canvas for layering SSC instances."
         />
       </section>
+      {supportingPillars.length > 0 && (
+        <section className="space-y-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-600">
+              Supporting analyses
+            </p>
+            <h2 className="text-lg font-semibold text-gray-900">Hazards & underlying vulnerabilities</h2>
+            <p className="text-sm text-gray-600">
+              These layers complement SSC results: hazard footprints for current events and chronic vulnerability datasets that sit outside the shelter pillars.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {supportingPillars.map((pillar) => {
+              const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
+              return (
+                <PillarCard
+                  key={pillar.key}
+                  label={pillarMeta?.label || pillar.label}
+                  description={pillarMeta?.description || pillar.description}
+                  value={pillar.value}
+                  percent={pillar.percent}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
     <section className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
