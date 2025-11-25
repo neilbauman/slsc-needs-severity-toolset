@@ -48,6 +48,52 @@ const mapQueryParamToCategoryKey = (param: string | null): CategoryKey | null =>
 
 const getCategoryLabel = (key?: CategoryKey | null) => CATEGORY_LABELS[key ?? 'OTHER'];
 
+type DataHealthInfo = {
+  matched?: number | null;
+  total?: number | null;
+  percent?: number | null;
+};
+
+const getDataHealthInfo = (dataset: any): DataHealthInfo | null => {
+  const health = dataset?.metadata?.data_health;
+  if (!health) return null;
+  const rawPercent = health.percent;
+  let percent: number | null = null;
+  if (typeof rawPercent === 'number') {
+    percent = rawPercent > 1 ? rawPercent / 100 : rawPercent;
+  }
+  const matched = typeof health.matched === 'number' ? health.matched : health.aligned;
+  const total = typeof health.total === 'number' ? health.total : health.count;
+  if ((percent == null || Number.isNaN(percent)) && typeof matched === 'number' && typeof total === 'number' && total > 0) {
+    percent = matched / total;
+  }
+  return {
+    matched: typeof matched === 'number' ? matched : null,
+    total: typeof total === 'number' ? total : null,
+    percent: typeof percent === 'number' ? percent : null,
+  };
+};
+
+const formatHealthPercent = (info: DataHealthInfo | null) => {
+  if (!info || info.percent == null || Number.isNaN(info.percent)) return null;
+  return Math.round(info.percent * 100);
+};
+
+const getHealthChip = (dataset: any) => {
+  const info = getDataHealthInfo(dataset);
+  const percent = formatHealthPercent(info);
+  if (percent == null) {
+    return { label: '—', color: 'bg-gray-100 text-gray-500', info: null };
+  }
+  let color = 'bg-green-100 text-green-700';
+  if (percent < 60) {
+    color = 'bg-red-100 text-red-700';
+  } else if (percent < 85) {
+    color = 'bg-amber-100 text-amber-700';
+  }
+  return { label: `${percent}%`, color, info };
+};
+
 const matchesPopulation = (dataset: any) => {
   const haystack = `${dataset?.name ?? ''} ${dataset?.description ?? ''} ${JSON.stringify(dataset?.metadata ?? {})}`.toLowerCase();
   return haystack.includes('population');
@@ -64,14 +110,20 @@ const FILTERS = [
 
 const statusChips: Record<string, { label: string; color: string }> = {
   ready: { label: 'Ready', color: 'bg-green-100 text-green-700' },
-  in_progress: { label: 'Cleaning', color: 'bg-amber-100 text-amber-700' },
-  needs_review: { label: 'Needs review', color: 'bg-red-100 text-red-700' },
+  in_progress: { label: 'In cleaning', color: 'bg-amber-100 text-amber-700' },
+  reviewing: { label: 'In review', color: 'bg-blue-100 text-blue-700' },
+  needs_review: { label: 'Needs attention', color: 'bg-red-100 text-red-700' },
+  raw: { label: 'Raw import', color: 'bg-gray-200 text-gray-700' },
   archived: { label: 'Archived', color: 'bg-gray-200 text-gray-600' },
 };
 
-const getStatusChip = (dataset: any) => {
+const getCleaningStatusKey = (dataset: any) => {
   const meta = dataset?.metadata || {};
-  const statusKey = meta.readiness || meta.cleaning_status || 'needs_review';
+  return meta.cleaning_status || meta.readiness || 'needs_review';
+};
+
+const getStatusChip = (dataset: any) => {
+  const statusKey = getCleaningStatusKey(dataset);
   return statusChips[statusKey] || statusChips.needs_review;
 };
 
@@ -168,6 +220,12 @@ function DatasetsPageContent() {
       if (sortConfig.key === 'category') {
         aValue = getCategoryLabel(deriveCategoryKey(a));
         bValue = getCategoryLabel(deriveCategoryKey(b));
+      } else if (sortConfig.key === 'data_health') {
+        aValue = formatHealthPercent(getDataHealthInfo(a)) ?? -1;
+        bValue = formatHealthPercent(getDataHealthInfo(b)) ?? -1;
+      } else if (sortConfig.key === 'cleaning_status') {
+        aValue = getCleaningStatusKey(a);
+        bValue = getCleaningStatusKey(b);
       } else {
         aValue = a?.[sortConfig.key] ?? a?.metadata?.[sortConfig.key] ?? '';
         bValue = b?.[sortConfig.key] ?? b?.metadata?.[sortConfig.key] ?? '';
@@ -225,6 +283,10 @@ function DatasetsPageContent() {
           </button>
         ))}
       </div>
+      <p className="text-xs text-gray-500">
+        Data health reflects the percentage of dataset rows that align with the reference admin boundaries (when
+        available). Cleaning status indicates whether the dataset is still raw, in review, or ready for use.
+      </p>
 
       {filterActive && (
         <div className="flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -278,7 +340,8 @@ function DatasetsPageContent() {
                       { key: 'category', label: 'Category' },
                       { key: 'admin_level', label: 'Admin level' },
                       { key: 'type', label: 'Type' },
-                      { key: 'status', label: 'Status' },
+                      { key: 'data_health', label: 'Data health' },
+                      { key: 'cleaning_status', label: 'Cleaning status' },
                       { key: 'updated_at', label: 'Updated' },
                     ].map((col) => (
                       <th key={col.key} className="px-4 py-3">
@@ -303,6 +366,7 @@ function DatasetsPageContent() {
                     const status = getStatusChip(dataset);
                     const categoryKey = deriveCategoryKey(dataset);
                     const categoryLabel = getCategoryLabel(categoryKey);
+                    const healthChip = getHealthChip(dataset);
                     return (
                       <tr
                         key={dataset.id}
@@ -316,6 +380,11 @@ function DatasetsPageContent() {
                         <td className="px-4 py-3 text-gray-600">{categoryLabel}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.admin_level || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.type || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${healthChip.color}`}>
+                            {healthChip.label}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`rounded-full px-2 py-1 text-xs font-semibold ${status.color}`}>
                             {status.label}

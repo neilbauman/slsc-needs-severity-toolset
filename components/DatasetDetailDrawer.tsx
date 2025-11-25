@@ -89,6 +89,37 @@ const getDatasetStatus = (dataset: Dataset | null) => {
   return statusConfig[state] || statusConfig.needs_review;
 };
 
+type DataHealthInfo = {
+  matched?: number | null;
+  total?: number | null;
+  percent?: number | null;
+};
+
+const getDataHealthInfo = (dataset: Dataset | null): DataHealthInfo | null => {
+  if (!dataset?.metadata?.data_health) return null;
+  const health = dataset.metadata.data_health;
+  const rawPercent = health.percent;
+  let percent: number | null = null;
+  if (typeof rawPercent === 'number') {
+    percent = rawPercent > 1 ? rawPercent / 100 : rawPercent;
+  }
+  const matched = typeof health.matched === 'number' ? health.matched : health.aligned;
+  const total = typeof health.total === 'number' ? health.total : health.count;
+  if ((percent == null || Number.isNaN(percent)) && typeof matched === 'number' && typeof total === 'number' && total > 0) {
+    percent = matched / total;
+  }
+  return {
+    matched: typeof matched === 'number' ? matched : null,
+    total: typeof total === 'number' ? total : null,
+    percent: typeof percent === 'number' ? percent : null,
+  };
+};
+
+const formatHealthPercent = (info: DataHealthInfo | null) => {
+  if (!info || info.percent == null || Number.isNaN(info.percent)) return null;
+  return Math.round(info.percent * 100);
+};
+
 export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, onSaved, onDelete }: Props) {
   const [editing, setEditing] = useState(mode === 'edit');
   const [saving, setSaving] = useState(false);
@@ -149,6 +180,8 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
 
   if (!dataset) return null;
   const status = getDatasetStatus(dataset);
+  const dataHealth = useMemo(() => getDataHealthInfo(dataset), [dataset]);
+  const healthPercent = formatHealthPercent(dataHealth);
 
   const infoRows = [
     { label: 'Type', value: dataset.type || '—' },
@@ -288,9 +321,18 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
           </button>
         </div>
 
-        <div className="px-5 py-4 border-b border-gray-100 space-y-2">
+        <div className="px-5 py-4 border-b border-gray-100 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${status.color}`}>{status.label}</span>
+            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${status.color}`}>{`Cleaning status: ${status.label}`}</span>
+            {healthPercent != null ? (
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${healthPercent >= 85 ? 'bg-green-100 text-green-700' : healthPercent >= 60 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                Data health: {healthPercent}%
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-600">
+                Data health: not computed
+              </span>
+            )}
             {dataset.is_baseline && (
               <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-indigo-100 text-indigo-700">Reference</span>
             )}
@@ -298,10 +340,17 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
               <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-700">Derived</span>
             )}
           </div>
-          <p className="text-xs text-gray-500 flex items-start gap-1">
-            <Info size={14} className="mt-0.5 text-gray-400" />
-            {status.description}
-          </p>
+          <div className="text-xs text-gray-500 space-y-1">
+            <p className="flex items-start gap-1">
+              <Info size={14} className="mt-0.5 text-gray-400" />
+              {status.description}
+            </p>
+            <p>
+              {dataHealth && dataHealth.total
+                ? `Aligned ${dataHealth.matched ?? '?'} of ${dataHealth.total} rows to reference pcodes.`
+                : 'Run the cleaning workflow to capture data health metrics.'}
+            </p>
+          </div>
         </div>
 
         <div className="divide-y divide-gray-100">
