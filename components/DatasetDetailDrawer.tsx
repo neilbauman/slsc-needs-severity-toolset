@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Pencil, Trash2, Wand2, Layers, MapPinned, Info, Database, Save, Loader2 } from 'lucide-react';
+import { X, Pencil, Trash2, Wand2, Layers, MapPinned, Info, Database, Save, Loader2, Sparkles, AlertTriangle } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import Link from 'next/link';
+import DatasetCleaningWorkflow from './DatasetCleaningWorkflow';
+import UnmatchedRowsViewer from './UnmatchedRowsViewer';
 
 type Dataset = {
   id: string;
@@ -125,6 +127,10 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
   const [saving, setSaving] = useState(false);
   const [sampleData, setSampleData] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
+  const [showCleaningWorkflow, setShowCleaningWorkflow] = useState(false);
+  const [showUnmatchedViewer, setShowUnmatchedViewer] = useState(false);
+  const [healthMetrics, setHealthMetrics] = useState<any>(null);
+  const [loadingHealth, setLoadingHealth] = useState(false);
   const [formValues, setFormValues] = useState({
     name: '',
     description: '',
@@ -176,7 +182,24 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
       }
     };
     fetchSampleData();
+    loadHealthMetrics();
   }, [dataset]);
+
+  const loadHealthMetrics = async () => {
+    if (!dataset) return;
+    setLoadingHealth(true);
+    try {
+      const { data, error } = await supabase.rpc('compute_data_health', {
+        dataset_id: dataset.id,
+      });
+      if (error) throw error;
+      setHealthMetrics(data);
+    } catch (err) {
+      console.error('Failed to load health metrics:', err);
+    } finally {
+      setLoadingHealth(false);
+    }
+  };
 
   if (!dataset) return null;
   const status = getDatasetStatus(dataset);
@@ -470,6 +493,61 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
           </section>
 
           <section className="px-5 py-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <Sparkles size={16} className="text-gray-400" />
+              Data Cleaning
+            </h3>
+            {healthMetrics && (
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Alignment</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {healthMetrics.alignment_rate != null
+                      ? `${Math.round(healthMetrics.alignment_rate * 100)}%`
+                      : '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Coverage</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {healthMetrics.coverage != null ? `${Math.round(healthMetrics.coverage * 100)}%` : '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Completeness</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {healthMetrics.completeness != null
+                      ? `${Math.round(healthMetrics.completeness * 100)}%`
+                      : '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                  <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Uniqueness</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {healthMetrics.uniqueness != null ? `${Math.round(healthMetrics.uniqueness * 100)}%` : '—'}
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setShowCleaningWorkflow(true)}
+                className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600"
+              >
+                <Sparkles size={14} />
+                Start Cleaning Workflow
+              </button>
+              <button
+                onClick={() => setShowUnmatchedViewer(true)}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
+              >
+                <AlertTriangle size={14} />
+                View Unmatched Rows
+              </button>
+            </div>
+          </section>
+
+          <section className="px-5 py-4 space-y-3">
             <h3 className="text-sm font-semibold text-gray-900">Actions</h3>
             <div className="flex flex-wrap gap-2">
               <Link
@@ -490,6 +568,34 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
           </section>
         </div>
       </div>
+
+      {showCleaningWorkflow && dataset && (
+        <DatasetCleaningWorkflow
+          dataset={dataset}
+          onClose={() => {
+            setShowCleaningWorkflow(false);
+            loadHealthMetrics();
+            onSaved();
+          }}
+          onCleaned={() => {
+            loadHealthMetrics();
+            onSaved();
+          }}
+        />
+      )}
+
+      {showUnmatchedViewer && dataset && (
+        <UnmatchedRowsViewer
+          dataset={dataset}
+          onClose={() => setShowUnmatchedViewer(false)}
+          onManualMap={async (rowId, mappedPcode) => {
+            // Handle manual mapping - this would need to be implemented
+            // For now, just refresh
+            loadHealthMetrics();
+            onSaved();
+          }}
+        />
+      )}
     </div>
   );
 }

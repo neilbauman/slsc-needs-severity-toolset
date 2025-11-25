@@ -52,6 +52,11 @@ type DataHealthInfo = {
   matched?: number | null;
   total?: number | null;
   percent?: number | null;
+  alignment_rate?: number | null;
+  coverage?: number | null;
+  completeness?: number | null;
+  uniqueness?: number | null;
+  validation_errors?: number | null;
 };
 
 const getDataHealthInfo = (dataset: any): DataHealthInfo | null => {
@@ -67,10 +72,17 @@ const getDataHealthInfo = (dataset: any): DataHealthInfo | null => {
   if ((percent == null || Number.isNaN(percent)) && typeof matched === 'number' && typeof total === 'number' && total > 0) {
     percent = matched / total;
   }
+  // Use alignment_rate if available, otherwise fall back to calculated percent
+  const alignmentRate = typeof health.alignment_rate === 'number' ? health.alignment_rate : percent;
   return {
     matched: typeof matched === 'number' ? matched : null,
     total: typeof total === 'number' ? total : null,
-    percent: typeof percent === 'number' ? percent : null,
+    percent: alignmentRate,
+    alignment_rate: alignmentRate,
+    coverage: typeof health.coverage === 'number' ? health.coverage : null,
+    completeness: typeof health.completeness === 'number' ? health.completeness : null,
+    uniqueness: typeof health.uniqueness === 'number' ? health.uniqueness : null,
+    validation_errors: typeof health.validation_errors === 'number' ? health.validation_errors : null,
   };
 };
 
@@ -284,8 +296,8 @@ function DatasetsPageContent() {
         ))}
       </div>
       <p className="text-xs text-gray-500">
-        Data health reflects the percentage of dataset rows that align with the reference admin boundaries (when
-        available). Cleaning status indicates whether the dataset is still raw, in review, or ready for use.
+        Data health reflects alignment, coverage, completeness, and uniqueness metrics. Click on a dataset to view
+        detailed metrics and start the cleaning workflow.
       </p>
 
       {filterActive && (
@@ -340,8 +352,8 @@ function DatasetsPageContent() {
                       { key: 'category', label: 'Category' },
                       { key: 'admin_level', label: 'Admin level' },
                       { key: 'type', label: 'Type' },
-                      { key: 'data_health', label: 'Data health' },
-                      { key: 'cleaning_status', label: 'Cleaning status' },
+                      { key: 'data_health', label: 'Alignment' },
+                      { key: 'cleaning_status', label: 'Status' },
                       { key: 'updated_at', label: 'Updated' },
                     ].map((col) => (
                       <th key={col.key} className="px-4 py-3">
@@ -381,9 +393,22 @@ function DatasetsPageContent() {
                         <td className="px-4 py-3 text-gray-600">{dataset.admin_level || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.type || '—'}</td>
                         <td className="px-4 py-3">
-                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${healthChip.color}`}>
-                            {healthChip.label}
-                          </span>
+                          <div className="flex flex-col gap-1">
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${healthChip.color} w-fit`}>
+                              {healthChip.label}
+                            </span>
+                            {healthChip.info && (
+                              <div className="text-xs text-gray-500">
+                                {healthChip.info.coverage != null && (
+                                  <span>Coverage: {Math.round(healthChip.info.coverage * 100)}%</span>
+                                )}
+                                {healthChip.info.completeness != null && healthChip.info.coverage != null && ' • '}
+                                {healthChip.info.completeness != null && (
+                                  <span>Complete: {Math.round(healthChip.info.completeness * 100)}%</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`rounded-full px-2 py-1 text-xs font-semibold ${status.color}`}>
