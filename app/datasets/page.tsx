@@ -122,6 +122,26 @@ function DatasetsPageContent() {
     });
   }, [datasets, pillarFilter, focusFilter, scopeFilter]);
 
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({
+    key: 'name',
+    direction: 'asc',
+  });
+
+  const sortedDatasets = useMemo(() => {
+    const list = [...filteredDatasets];
+    list.sort((a, b) => {
+      const aValue = a?.[sortConfig.key] ?? a?.metadata?.[sortConfig.key] ?? '';
+      const bValue = b?.[sortConfig.key] ?? b?.metadata?.[sortConfig.key] ?? '';
+      if (aValue === bValue) return 0;
+      if (aValue == null) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (bValue == null) return sortConfig.direction === 'asc' ? 1 : -1;
+      return sortConfig.direction === 'asc'
+        ? String(aValue).localeCompare(String(bValue))
+        : String(bValue).localeCompare(String(aValue));
+    });
+    return list;
+  }, [filteredDatasets, sortConfig]);
+
   const clearFilters = () => {
     setPillarFilter(null);
     setFocusFilter(null);
@@ -204,54 +224,88 @@ function DatasetsPageContent() {
         <p className="text-sm text-gray-500">Loading datasets…</p>
       ) : (
         <>
-          {filteredDatasets.length === 0 ? (
+          {sortedDatasets.length === 0 ? (
             <p className="rounded border border-dashed border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
               No datasets found for the current filters.
             </p>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredDatasets.map((dataset) => {
-                const status = getStatusChip(dataset);
-                const isPopulation = matchesPopulation(dataset);
-                return (
-                  <button
-                    key={dataset.id}
-                    onClick={() => setSelectedDataset(dataset)}
-                    className="flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-amber-200 hover:shadow"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-gray-500">
-                          {dataset.is_baseline ? 'Reference layer' : 'Dataset'}
-                        </p>
-                        <h3 className="text-lg font-semibold text-gray-900">{dataset.name}</h3>
-                      </div>
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${status.color}`}>
-                        {status.label}
-                      </span>
-                    </div>
-                    <p className="mt-2 line-clamp-2 text-sm text-gray-600">
-                      {dataset.description || 'No description yet.'}
-                    </p>
-                    <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-gray-600">
-                      {dataset.admin_level && (
-                        <span className="rounded-full bg-indigo-50 px-2 py-1 text-indigo-700">
-                          {dataset.admin_level}
-                        </span>
-                      )}
-                      {dataset.type && (
-                        <span className="rounded-full bg-gray-100 px-2 py-1">{dataset.type}</span>
-                      )}
-                      {dataset.is_derived && (
-                        <span className="rounded-full bg-blue-100 px-2 py-1 text-blue-700">Derived</span>
-                      )}
-                      {isPopulation && (
-                        <span className="rounded-full bg-green-100 px-2 py-1 text-green-700">Population</span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+              <table className="min-w-full divide-y divide-gray-100 text-sm">
+                <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <tr>
+                    {[
+                      { key: 'name', label: 'Name' },
+                      { key: 'pillar', label: 'Group' },
+                      { key: 'admin_level', label: 'Admin level' },
+                      { key: 'type', label: 'Type' },
+                      { key: 'status', label: 'Status' },
+                      { key: 'updated_at', label: 'Updated' },
+                    ].map((col) => (
+                      <th key={col.key} className="px-4 py-3">
+                        <button
+                          className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-900"
+                          onClick={() =>
+                            setSortConfig((prev) => ({
+                              key: col.key === 'pillar' ? 'metadata' : col.key,
+                              direction:
+                                prev.key === (col.key === 'pillar' ? 'metadata' : col.key) && prev.direction === 'asc'
+                                  ? 'desc'
+                                  : 'asc',
+                            }))
+                          }
+                        >
+                          {col.label}
+                        </button>
+                      </th>
+                    ))}
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {sortedDatasets.map((dataset) => {
+                    const status = getStatusChip(dataset);
+                    const pillar = determinePillar(dataset);
+                    return (
+                      <tr
+                        key={dataset.id}
+                        className="hover:bg-amber-50/40 cursor-pointer"
+                        onClick={() => setSelectedDataset(dataset)}
+                      >
+                        <td className="px-4 py-3 font-medium text-gray-900">{dataset.name}</td>
+                        <td className="px-4 py-3 text-gray-600">{pillar || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">{dataset.admin_level || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">{dataset.type || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${status.color}`}>
+                            {status.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {dataset.updated_at ? new Date(dataset.updated_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-right space-x-2">
+                          <Link
+                            href={`/datasets/raw/${dataset.id}`}
+                            className="text-xs font-semibold text-amber-600 hover:text-amber-700"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            View
+                          </Link>
+                          <button
+                            className="text-xs font-semibold text-gray-600 hover:text-gray-900"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingDataset(dataset);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </>
