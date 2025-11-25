@@ -3,51 +3,50 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Info, Layers3, ShieldCheck, AlertTriangle, Filter } from 'lucide-react';
+import { Info, Filter } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
-import EditDatasetModal from '@/components/EditDatasetModal';
 import DatasetDetailDrawer from '@/components/DatasetDetailDrawer';
 
-const determinePillar = (dataset: any) => {
-  const meta = dataset?.metadata || {};
-  const raw = (meta.pillar || meta.category || meta.ssc_component || meta.framework_layer || '').toString().trim();
-  if (raw) {
-    const normalized = raw.toLowerCase();
-    if (normalized.includes('p1')) return 'SSC Framework - P1';
-    if (normalized.includes('p2')) return 'SSC Framework - P2';
-    if (normalized.includes('p3')) return 'SSC Framework - P3';
-    if (normalized.includes('hazard')) return 'Hazard';
-    if (normalized.includes('underlying') || normalized.includes('uv')) return 'Underlying Vulnerability';
-  }
-  if (dataset?.is_baseline) return 'Core';
-  return 'Other';
+type CategoryKey = 'CORE' | 'SSC_P1' | 'SSC_P2' | 'SSC_P3' | 'HAZARD' | 'UNDERLYING' | 'OTHER';
+
+const CATEGORY_LABELS: Record<CategoryKey, string> = {
+  CORE: 'Core',
+  SSC_P1: 'SSC P1',
+  SSC_P2: 'SSC P2',
+  SSC_P3: 'SSC P3',
+  HAZARD: 'Hazard',
+  UNDERLYING: 'Underlying Vulnerability',
+  OTHER: 'Uncategorized',
 };
 
-const getPillarLabel = (pillarKey: string): string => {
-  const labels: Record<string, string> = {
-    'Core': 'Core Baseline',
-    'SSC Framework - P1': 'The Shelter (P1)',
-    'SSC Framework - P2': 'The Living Conditions (P2)',
-    'SSC Framework - P3': 'The Settlement (P3)',
-    'Hazard': 'Hazard Layers',
-    'Underlying Vulnerability': 'Underlying Vulnerability',
-    'Other': 'Uncategorized',
-  };
-  return labels[pillarKey] || pillarKey;
+const mapStringToCategoryKey = (value?: string | null): CategoryKey | null => {
+  if (!value) return null;
+  const normalized = value.toLowerCase();
+  if (normalized.includes('core')) return 'CORE';
+  if (normalized.includes('p1')) return 'SSC_P1';
+  if (normalized.includes('p2')) return 'SSC_P2';
+  if (normalized.includes('p3')) return 'SSC_P3';
+  if (normalized.includes('hazard')) return 'HAZARD';
+  if (normalized.includes('underlying') || normalized.includes('uv')) return 'UNDERLYING';
+  return null;
 };
 
-const mapQueryParamToPillar = (param: string | null): string | null => {
-  if (!param) return null;
-  const mapping: Record<string, string> = {
-    'core': 'Core',
-    'SSC_P1': 'SSC Framework - P1',
-    'SSC_P2': 'SSC Framework - P2',
-    'SSC_P3': 'SSC Framework - P3',
-    'hazard': 'Hazard',
-    'underlying': 'Underlying Vulnerability',
-  };
-  return mapping[param] || param;
+const deriveCategoryKey = (dataset: any): CategoryKey => {
+  return (
+    mapStringToCategoryKey(dataset?.category) ||
+    mapStringToCategoryKey(dataset?.metadata?.pillar) ||
+    mapStringToCategoryKey(dataset?.metadata?.ssc_component) ||
+    mapStringToCategoryKey(dataset?.metadata?.framework_layer) ||
+    (dataset?.is_baseline ? 'CORE' : null) ||
+    'OTHER'
+  );
 };
+
+const mapQueryParamToCategoryKey = (param: string | null): CategoryKey | null => {
+  return mapStringToCategoryKey(param);
+};
+
+const getCategoryLabel = (key?: CategoryKey | null) => CATEGORY_LABELS[key ?? 'OTHER'];
 
 const matchesPopulation = (dataset: any) => {
   const haystack = `${dataset?.name ?? ''} ${dataset?.description ?? ''} ${JSON.stringify(dataset?.metadata ?? {})}`.toLowerCase();
@@ -82,9 +81,9 @@ function DatasetsPageContent() {
   const focusParam = searchParams.get('focus');
   const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editingDataset, setEditingDataset] = useState<any | null>(null);
   const [selectedDataset, setSelectedDataset] = useState<any | null>(null);
-  const [pillarFilter, setPillarFilter] = useState<string | null>(pillarParam);
+  const [drawerMode, setDrawerMode] = useState<'view' | 'edit'>('view');
+  const [categoryFilter, setCategoryFilter] = useState<CategoryKey | null>(mapQueryParamToCategoryKey(pillarParam));
   const [focusFilter, setFocusFilter] = useState<string | null>(focusParam);
   const [scopeFilter, setScopeFilter] = useState<string>('all');
 
@@ -108,24 +107,23 @@ function DatasetsPageContent() {
   }, []);
 
   useEffect(() => {
-    const mappedPillar = mapQueryParamToPillar(pillarParam);
-    setPillarFilter(mappedPillar);
+    const mappedCategory = mapQueryParamToCategoryKey(pillarParam);
+    setCategoryFilter(mappedCategory);
     setFocusFilter(focusParam);
-    if (mappedPillar) {
-      if (['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3'].includes(mappedPillar)) {
+    if (mappedCategory) {
+      if (['SSC_P1', 'SSC_P2', 'SSC_P3'].includes(mappedCategory)) {
         setScopeFilter('ssc');
-      } else if (mappedPillar === 'Core') {
+      } else if (mappedCategory === 'CORE') {
         setScopeFilter('reference');
-      } else if (mappedPillar === 'Hazard') {
+      } else if (mappedCategory === 'HAZARD') {
         setScopeFilter('hazard');
-      } else if (mappedPillar === 'Underlying Vulnerability') {
+      } else if (mappedCategory === 'UNDERLYING') {
         setScopeFilter('underlying');
       }
     }
   }, [pillarParam, focusParam]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this dataset?')) return;
     const { error } = await supabase.from('datasets').delete().eq('id', id);
     if (error) {
       console.error('Error deleting dataset:', error);
@@ -138,8 +136,8 @@ function DatasetsPageContent() {
 
   const filteredDatasets = useMemo(() => {
     return datasets.filter((dataset) => {
-      const pillar = determinePillar(dataset);
-      if (pillarFilter && pillarFilter !== pillar && pillarFilter !== dataset.metadata?.pillar) {
+      const categoryKey = deriveCategoryKey(dataset);
+      if (categoryFilter && categoryFilter !== categoryKey) {
         return false;
       }
       if (focusFilter === 'population' && !matchesPopulation(dataset)) {
@@ -148,14 +146,14 @@ function DatasetsPageContent() {
       if (focusFilter === 'admin_boundaries') {
         return false;
       }
-      if (scopeFilter === 'reference' && pillar !== 'Core') return false;
-      if (scopeFilter === 'ssc' && !['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3'].includes(pillar)) return false;
-      if (scopeFilter === 'hazard' && pillar !== 'Hazard') return false;
-      if (scopeFilter === 'underlying' && pillar !== 'Underlying Vulnerability') return false;
+      if (scopeFilter === 'reference' && categoryKey !== 'CORE') return false;
+      if (scopeFilter === 'ssc' && !['SSC_P1', 'SSC_P2', 'SSC_P3'].includes(categoryKey)) return false;
+      if (scopeFilter === 'hazard' && categoryKey !== 'HAZARD') return false;
+      if (scopeFilter === 'underlying' && categoryKey !== 'UNDERLYING') return false;
       if (scopeFilter === 'instance' && dataset.is_baseline) return false;
       return true;
     });
-  }, [datasets, pillarFilter, focusFilter, scopeFilter]);
+  }, [datasets, categoryFilter, focusFilter, scopeFilter]);
 
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({
     key: 'name',
@@ -165,8 +163,15 @@ function DatasetsPageContent() {
   const sortedDatasets = useMemo(() => {
     const list = [...filteredDatasets];
     list.sort((a, b) => {
-      const aValue = a?.[sortConfig.key] ?? a?.metadata?.[sortConfig.key] ?? '';
-      const bValue = b?.[sortConfig.key] ?? b?.metadata?.[sortConfig.key] ?? '';
+      let aValue: any;
+      let bValue: any;
+      if (sortConfig.key === 'category') {
+        aValue = getCategoryLabel(deriveCategoryKey(a));
+        bValue = getCategoryLabel(deriveCategoryKey(b));
+      } else {
+        aValue = a?.[sortConfig.key] ?? a?.metadata?.[sortConfig.key] ?? '';
+        bValue = b?.[sortConfig.key] ?? b?.metadata?.[sortConfig.key] ?? '';
+      }
       if (aValue === bValue) return 0;
       if (aValue == null) return sortConfig.direction === 'asc' ? -1 : 1;
       if (bValue == null) return sortConfig.direction === 'asc' ? 1 : -1;
@@ -178,12 +183,12 @@ function DatasetsPageContent() {
   }, [filteredDatasets, sortConfig]);
 
   const clearFilters = () => {
-    setPillarFilter(null);
+    setCategoryFilter(null);
     setFocusFilter(null);
     setScopeFilter('all');
   };
 
-  const filterActive = Boolean(pillarFilter || focusFilter || scopeFilter !== 'all');
+  const filterActive = Boolean(categoryFilter || focusFilter || scopeFilter !== 'all');
 
   return (
     <div className="px-6 py-8 space-y-6">
@@ -227,7 +232,7 @@ function DatasetsPageContent() {
             Showing datasets filtered to{' '}
             {[
               scopeFilter && scopeFilter !== 'all' ? `group "${scopeFilter}"` : null,
-              pillarFilter ? `pillar "${pillarFilter}"` : null,
+              categoryFilter ? `category "${getCategoryLabel(categoryFilter)}"` : null,
               focusFilter ? `focus "${focusFilter}"` : null,
             ]
               .filter(Boolean)
@@ -270,7 +275,7 @@ function DatasetsPageContent() {
                   <tr>
                     {[
                       { key: 'name', label: 'Name' },
-                      { key: 'pillar', label: 'Group' },
+                      { key: 'category', label: 'Category' },
                       { key: 'admin_level', label: 'Admin level' },
                       { key: 'type', label: 'Type' },
                       { key: 'status', label: 'Status' },
@@ -281,11 +286,8 @@ function DatasetsPageContent() {
                           className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-900"
                           onClick={() =>
                             setSortConfig((prev) => ({
-                              key: col.key === 'pillar' ? 'metadata' : col.key,
-                              direction:
-                                prev.key === (col.key === 'pillar' ? 'metadata' : col.key) && prev.direction === 'asc'
-                                  ? 'desc'
-                                  : 'asc',
+                              key: col.key,
+                              direction: prev.key === col.key && prev.direction === 'asc' ? 'desc' : 'asc',
                             }))
                           }
                         >
@@ -299,15 +301,19 @@ function DatasetsPageContent() {
                 <tbody className="divide-y divide-gray-100">
                   {sortedDatasets.map((dataset) => {
                     const status = getStatusChip(dataset);
-                    const pillar = determinePillar(dataset);
+                    const categoryKey = deriveCategoryKey(dataset);
+                    const categoryLabel = getCategoryLabel(categoryKey);
                     return (
                       <tr
                         key={dataset.id}
                         className="hover:bg-amber-50/40 cursor-pointer"
-                        onClick={() => setSelectedDataset(dataset)}
+                        onClick={() => {
+                          setDrawerMode('view');
+                          setSelectedDataset(dataset);
+                        }}
                       >
                         <td className="px-4 py-3 font-medium text-gray-900">{dataset.name}</td>
-                        <td className="px-4 py-3 text-gray-600">{getPillarLabel(pillar) || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">{categoryLabel}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.admin_level || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.type || '—'}</td>
                         <td className="px-4 py-3">
@@ -323,6 +329,7 @@ function DatasetsPageContent() {
                             className="text-xs font-semibold text-amber-600 hover:text-amber-700"
                             onClick={(e) => {
                               e.stopPropagation();
+                              setDrawerMode('view');
                               setSelectedDataset(dataset);
                             }}
                           >
@@ -332,7 +339,8 @@ function DatasetsPageContent() {
                             className="text-xs font-semibold text-gray-600 hover:text-gray-900"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setEditingDataset(dataset);
+                              setDrawerMode('edit');
+                              setSelectedDataset(dataset);
                             }}
                           >
                             Edit
@@ -348,21 +356,12 @@ function DatasetsPageContent() {
         </>
       )}
 
-      {editingDataset && (
-        <EditDatasetModal
-          dataset={editingDataset}
-          onClose={() => setEditingDataset(null)}
-          onSaved={loadDatasets}
-        />
-      )}
-
       {selectedDataset && (
         <DatasetDetailDrawer
           dataset={selectedDataset}
+          mode={drawerMode}
           onClose={() => setSelectedDataset(null)}
-          onEdit={(dataset) => {
-            setEditingDataset(dataset);
-          }}
+          onSaved={loadDatasets}
           onDelete={handleDelete}
         />
       )}

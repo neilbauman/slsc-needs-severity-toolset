@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { X, Pencil, Trash2, Wand2, Layers, MapPinned, Info, Database } from 'lucide-react';
-import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Pencil, Trash2, Wand2, Layers, MapPinned, Info, Database, Save, Loader2 } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
+import Link from 'next/link';
 
 type Dataset = {
   id: string;
@@ -12,6 +12,8 @@ type Dataset = {
   type?: string | null;
   admin_level?: string | null;
   source?: string | null;
+  value_type?: string | null;
+  category?: string | null;
   metadata?: Record<string, any> | null;
   is_baseline?: boolean | null;
   is_derived?: boolean | null;
@@ -21,10 +23,21 @@ type Dataset = {
 
 type Props = {
   dataset: Dataset | null;
+  mode?: 'view' | 'edit';
   onClose: () => void;
-  onEdit: (dataset: Dataset) => void;
+  onSaved: () => void;
   onDelete: (datasetId: string) => void;
 };
+
+const CATEGORY_OPTIONS = [
+  { value: 'Core', label: 'Core' },
+  { value: 'SSC P1', label: 'SSC P1 – The Shelter' },
+  { value: 'SSC P2', label: 'SSC P2 – Living Conditions' },
+  { value: 'SSC P3', label: 'SSC P3 – Settlement' },
+  { value: 'Hazard', label: 'Hazard' },
+  { value: 'Underlying Vulnerability', label: 'Underlying Vulnerability' },
+  { value: 'Uncategorized', label: 'Uncategorized' },
+];
 
 const formatDate = (value?: string | null) => {
   if (!value) return '—';
@@ -76,35 +89,54 @@ const getDatasetStatus = (dataset: Dataset | null) => {
   return statusConfig[state] || statusConfig.needs_review;
 };
 
-export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete }: Props) {
+export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, onSaved, onDelete }: Props) {
+  const [editing, setEditing] = useState(mode === 'edit');
+  const [saving, setSaving] = useState(false);
   const [sampleData, setSampleData] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(false);
+  const [formValues, setFormValues] = useState({
+    name: '',
+    description: '',
+    type: 'numeric',
+    admin_level: '',
+    value_type: 'absolute',
+    category: 'Uncategorized',
+  });
+
+  useEffect(() => {
+    if (!dataset) return;
+    setFormValues({
+      name: dataset.name || '',
+      description: dataset.description || '',
+      type: dataset.type || 'numeric',
+      admin_level: dataset.admin_level || '',
+      value_type: dataset.value_type || 'absolute',
+      category: dataset.category || 'Uncategorized',
+    });
+    setEditing(mode === 'edit');
+  }, [dataset, mode]);
 
   useEffect(() => {
     if (!dataset) return;
     const fetchSampleData = async () => {
       setLoadingData(true);
       try {
-        if (dataset.type === 'numeric') {
-          const { data, error } = await supabase
-            .from('dataset_values_numeric')
-            .select('admin_pcode, value')
-            .eq('dataset_id', dataset.id)
-            .limit(10)
-            .order('admin_pcode', { ascending: true });
-          if (!error && data) {
-            setSampleData(data);
-          }
-        } else if (dataset.type === 'categorical') {
-          const { data, error } = await supabase
+        if (dataset.type === 'categorical') {
+          const { data } = await supabase
             .from('dataset_values_categorical')
             .select('admin_pcode, category, value')
             .eq('dataset_id', dataset.id)
             .limit(10)
             .order('admin_pcode', { ascending: true });
-          if (!error && data) {
-            setSampleData(data);
-          }
+          setSampleData(data || []);
+        } else {
+          const { data } = await supabase
+            .from('dataset_values_numeric')
+            .select('admin_pcode, value')
+            .eq('dataset_id', dataset.id)
+            .limit(10)
+            .order('admin_pcode', { ascending: true });
+          setSampleData(data || []);
         }
       } catch (err) {
         console.error('Failed to load sample data:', err);
@@ -122,58 +154,151 @@ export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete
     { label: 'Type', value: dataset.type || '—' },
     { label: 'Admin level', value: dataset.admin_level || '—' },
     { label: 'Source', value: dataset.source || '—' },
-    {
-      label: 'Created',
-      value: formatDate(dataset.created_at),
-    },
-    {
-      label: 'Updated',
-      value: formatDate(dataset.updated_at),
-    },
+    { label: 'Created', value: formatDate(dataset.created_at) },
+    { label: 'Updated', value: formatDate(dataset.updated_at) },
   ];
+
+  const handleFieldChange = (field: string, value: string) => {
+    setFormValues((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase
+        .from('datasets')
+        .update({
+          name: formValues.name,
+          description: formValues.description,
+          type: formValues.type,
+          admin_level: formValues.admin_level,
+          value_type: formValues.value_type,
+          category: formValues.category,
+        })
+        .eq('id', dataset.id);
+      if (error) throw error;
+      onSaved();
+      setEditing(false);
+    } catch (err) {
+      console.error('Failed to save dataset:', err);
+      alert('Failed to save dataset changes.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this dataset? This action cannot be undone.')) return;
+    await onDelete(dataset.id);
+    onClose();
+  };
 
   const metadataEntries = Object.entries(dataset.metadata || {}).filter(
     ([key]) => !['cleaning_state', 'readiness'].includes(key),
   );
 
+  const editingFields = (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs uppercase tracking-wide text-gray-500">Name</label>
+        <input
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          value={formValues.name}
+          onChange={(e) => handleFieldChange('name', e.target.value)}
+        />
+      </div>
+      <div>
+        <label className="text-xs uppercase tracking-wide text-gray-500">Description</label>
+        <textarea
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          rows={3}
+          value={formValues.description}
+          onChange={(e) => handleFieldChange('description', e.target.value)}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs uppercase tracking-wide text-gray-500">Type</label>
+          <select
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            value={formValues.type}
+            onChange={(e) => handleFieldChange('type', e.target.value)}
+          >
+            <option value="numeric">Numeric</option>
+            <option value="categorical">Categorical</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs uppercase tracking-wide text-gray-500">Value type</label>
+          <select
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            value={formValues.value_type}
+            onChange={(e) => handleFieldChange('value_type', e.target.value)}
+          >
+            <option value="absolute">Absolute</option>
+            <option value="relative">Relative</option>
+          </select>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs uppercase tracking-wide text-gray-500">Admin level</label>
+          <select
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            value={formValues.admin_level}
+            onChange={(e) => handleFieldChange('admin_level', e.target.value)}
+          >
+            <option value="">—</option>
+            <option value="ADM1">ADM1</option>
+            <option value="ADM2">ADM2</option>
+            <option value="ADM3">ADM3</option>
+            <option value="ADM4">ADM4</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs uppercase tracking-wide text-gray-500">Category</label>
+          <select
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            value={formValues.category}
+            onChange={(e) => handleFieldChange('category', e.target.value)}
+          >
+            {CATEGORY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-40 flex">
       <div className="flex-1 bg-black/20" onClick={onClose} />
-      <div className="w-full max-w-md bg-white shadow-2xl h-full overflow-y-auto">
+      <div className="h-full w-full max-w-xl overflow-y-auto bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-gray-100 px-5 py-4">
           <div>
-            <p className="text-xs uppercase tracking-wide text-amber-600 font-semibold">
-              Dataset detail
-            </p>
+            <p className="text-xs uppercase tracking-wide text-amber-600 font-semibold">Dataset detail</p>
             <h2 className="text-xl font-semibold text-gray-900">{dataset.name}</h2>
             <p className="text-sm text-gray-500">{dataset.description || 'No description provided.'}</p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="p-2 rounded-full hover:bg-gray-100 text-gray-500"
-          >
+          <button onClick={onClose} aria-label="Close" className="rounded-full p-2 text-gray-500 hover:bg-gray-100">
             <X size={18} />
           </button>
         </div>
 
-        <div className="px-5 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${status.color}`}>
-              {status.label}
-            </span>
+        <div className="px-5 py-4 border-b border-gray-100 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${status.color}`}>{status.label}</span>
             {dataset.is_baseline && (
-              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-indigo-100 text-indigo-700">
-                Reference layer
-              </span>
+              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-indigo-100 text-indigo-700">Reference</span>
             )}
             {dataset.is_derived && (
-              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-700">
-                Derived
-              </span>
+              <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-700">Derived</span>
             )}
           </div>
-          <p className="text-xs text-gray-500 mt-2 flex items-start gap-1">
+          <p className="text-xs text-gray-500 flex items-start gap-1">
             <Info size={14} className="mt-0.5 text-gray-400" />
             {status.description}
           </p>
@@ -181,18 +306,52 @@ export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete
 
         <div className="divide-y divide-gray-100">
           <section className="px-5 py-4 space-y-3">
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Layers size={16} className="text-gray-400" />
-              Overview
-            </h3>
-            <dl className="grid grid-cols-2 gap-3 text-sm">
-              {infoRows.map((row) => (
-                <div key={row.label}>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{row.label}</dt>
-                  <dd className="font-medium text-gray-900">{row.value}</dd>
-                </div>
-              ))}
-            </dl>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <Layers size={16} className="text-gray-400" />
+                {editing ? 'Edit details' : 'Overview'}
+              </h3>
+              <div className="flex gap-2">
+                {editing ? (
+                  <>
+                    <button
+                      onClick={() => setEditing(false)}
+                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      className="inline-flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-amber-600"
+                      disabled={saving}
+                    >
+                      {saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                      Save
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                  >
+                    <Pencil size={14} />
+                    Edit
+                  </button>
+                )}
+              </div>
+            </div>
+            {editing ? (
+              editingFields
+            ) : (
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                {infoRows.map((row) => (
+                  <div key={row.label}>
+                    <dt className="text-xs uppercase tracking-wide text-gray-500">{row.label}</dt>
+                    <dd className="font-medium text-gray-900">{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
           </section>
 
           <section className="px-5 py-4 space-y-3">
@@ -240,7 +399,7 @@ export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete
                   <tbody className="divide-y divide-gray-100 bg-white">
                     {sampleData.map((row, idx) => (
                       <tr key={idx} className="hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-900 font-mono text-[11px]">{row.admin_pcode}</td>
+                        <td className="px-3 py-2 font-mono text-[11px] text-gray-900">{row.admin_pcode}</td>
                         {dataset.type === 'categorical' && (
                           <td className="px-3 py-2 text-gray-700">{row.category || '—'}</td>
                         )}
@@ -254,34 +413,30 @@ export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete
               </div>
             )}
             <p className="text-xs text-gray-500">
-              Showing first {sampleData.length} rows. <Link href={`/datasets/raw/${dataset.id}`} className="text-amber-600 hover:text-amber-700 font-semibold">View full dataset</Link>
+              Showing first {sampleData.length} rows.{' '}
+              <Link href={`/datasets/raw/${dataset.id}`} className="font-semibold text-amber-600 hover:text-amber-700">
+                View full dataset
+              </Link>
             </p>
           </section>
 
           <section className="px-5 py-4 space-y-3">
             <h3 className="text-sm font-semibold text-gray-900">Actions</h3>
             <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => onEdit(dataset)}
-                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <Pencil size={14} />
-                Edit metadata
-              </button>
-              <button
-                onClick={() => onDelete(dataset.id)}
-                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-              >
-                <Trash2 size={14} />
-                Delete
-              </button>
               <Link
                 href={`/datasets/raw/${dataset.id}`}
                 className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
               >
                 <Wand2 size={14} />
-                Inspect raw data
+                Inspect raw values
               </Link>
+              <button
+                onClick={handleDelete}
+                className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={14} />
+                Delete dataset
+              </button>
             </div>
           </section>
         </div>
@@ -289,4 +444,3 @@ export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete
     </div>
   );
 }
-
