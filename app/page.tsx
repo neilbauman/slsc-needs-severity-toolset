@@ -165,7 +165,7 @@ export default function HomePage() {
       const [{ data: datasetData, error: datasetError }, { data: instanceData, error: instanceError }, { data: instanceDatasetData, error: linkError }] =
         await Promise.all([
           supabase.from('datasets').select('*').order('name', { ascending: true }),
-          supabase.from('instances').select('*').order('updated_at', { ascending: false }),
+          supabase.from('instances').select('*'),
           supabase.from('instance_datasets').select('instance_id,dataset_id'),
         ]);
 
@@ -174,7 +174,16 @@ export default function HomePage() {
       if (linkError) throw linkError;
 
       setDatasets(datasetData || []);
-      setInstances(instanceData || []);
+      const sortedInstances = (instanceData || []).slice().sort((a, b) => {
+        const aTime = a?.updated_at || a?.created_at;
+        const bTime = b?.updated_at || b?.created_at;
+        const aMsRaw = aTime ? new Date(aTime).getTime() : NaN;
+        const bMsRaw = bTime ? new Date(bTime).getTime() : NaN;
+        const aMs = Number.isFinite(aMsRaw) ? aMsRaw : 0;
+        const bMs = Number.isFinite(bMsRaw) ? bMsRaw : 0;
+        return bMs - aMs;
+      });
+      setInstances(sortedInstances);
       setInstanceDatasets(instanceDatasetData || []);
 
       const { data: geojsonData, error: geoError } = await supabase.rpc('get_admin_boundaries_geojson', {
