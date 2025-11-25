@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
-import type { GeoJSON as GeoJSONType } from 'geojson';
+import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 
 type DashboardMapProps = {
@@ -56,7 +56,7 @@ export default function DashboardMap({
               data={{
                 type: 'FeatureCollection',
                 features,
-              }}
+              } as GeoJsonObject}
               style={() => ({
                 color: '#2563eb',
                 weight: 1,
