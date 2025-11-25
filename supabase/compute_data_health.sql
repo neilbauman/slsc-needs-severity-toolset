@@ -31,7 +31,7 @@ BEGIN
   -- Get dataset metadata
   SELECT type, admin_level INTO v_dataset_type, v_admin_level
   FROM datasets
-  WHERE id = dataset_id;
+  WHERE id = compute_data_health.dataset_id;
   
   IF v_dataset_type IS NULL THEN
     RAISE EXCEPTION 'Dataset not found: %', dataset_id;
@@ -176,7 +176,7 @@ BEGIN
   UPDATE datasets
   SET metadata = COALESCE(metadata, '{}'::JSONB) || jsonb_build_object('data_health', v_result),
       updated_at = NOW()
-  WHERE id = dataset_id;
+  WHERE id = compute_data_health.dataset_id;
 
   RETURN v_result;
 END;
