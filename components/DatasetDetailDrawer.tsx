@@ -1,7 +1,9 @@
 'use client';
 
-import { X, Pencil, Trash2, Wand2, Layers, MapPinned, Info } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, Pencil, Trash2, Wand2, Layers, MapPinned, Info, Database } from 'lucide-react';
 import Link from 'next/link';
+import supabase from '@/lib/supabaseClient';
 
 type Dataset = {
   id: string;
@@ -75,6 +77,44 @@ const getDatasetStatus = (dataset: Dataset | null) => {
 };
 
 export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete }: Props) {
+  const [sampleData, setSampleData] = useState<any[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+
+  useEffect(() => {
+    if (!dataset) return;
+    const fetchSampleData = async () => {
+      setLoadingData(true);
+      try {
+        if (dataset.type === 'numeric') {
+          const { data, error } = await supabase
+            .from('dataset_values_numeric')
+            .select('admin_pcode, value')
+            .eq('dataset_id', dataset.id)
+            .limit(10)
+            .order('admin_pcode', { ascending: true });
+          if (!error && data) {
+            setSampleData(data);
+          }
+        } else if (dataset.type === 'categorical') {
+          const { data, error } = await supabase
+            .from('dataset_values_categorical')
+            .select('admin_pcode, category, value')
+            .eq('dataset_id', dataset.id)
+            .limit(10)
+            .order('admin_pcode', { ascending: true });
+          if (!error && data) {
+            setSampleData(data);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load sample data:', err);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+    fetchSampleData();
+  }, [dataset]);
+
   if (!dataset) return null;
   const status = getDatasetStatus(dataset);
 
@@ -174,6 +214,48 @@ export default function DatasetDetailDrawer({ dataset, onClose, onEdit, onDelete
                 ))}
               </dl>
             )}
+          </section>
+
+          <section className="px-5 py-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <Database size={16} className="text-gray-400" />
+              Data preview
+            </h3>
+            {loadingData ? (
+              <p className="text-sm text-gray-500">Loading sample data…</p>
+            ) : sampleData.length === 0 ? (
+              <p className="text-sm text-gray-500">No data values found for this dataset.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full divide-y divide-gray-100 text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-700">Admin PCode</th>
+                      {dataset.type === 'categorical' && (
+                        <th className="px-3 py-2 text-left font-semibold text-gray-700">Category</th>
+                      )}
+                      <th className="px-3 py-2 text-left font-semibold text-gray-700">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 bg-white">
+                    {sampleData.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 text-gray-900 font-mono text-[11px]">{row.admin_pcode}</td>
+                        {dataset.type === 'categorical' && (
+                          <td className="px-3 py-2 text-gray-700">{row.category || '—'}</td>
+                        )}
+                        <td className="px-3 py-2 text-gray-900 font-medium">
+                          {typeof row.value === 'number' ? row.value.toLocaleString() : row.value || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-xs text-gray-500">
+              Showing first {sampleData.length} rows. <Link href={`/datasets/raw/${dataset.id}`} className="text-amber-600 hover:text-amber-700 font-semibold">View full dataset</Link>
+            </p>
           </section>
 
           <section className="px-5 py-4 space-y-3">

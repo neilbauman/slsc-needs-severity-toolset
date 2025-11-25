@@ -13,14 +13,27 @@ const determinePillar = (dataset: any) => {
   const raw = (meta.pillar || meta.category || meta.ssc_component || meta.framework_layer || '').toString().trim();
   if (raw) {
     const normalized = raw.toLowerCase();
-    if (normalized.includes('p1')) return 'SSC_P1';
-    if (normalized.includes('p2')) return 'SSC_P2';
-    if (normalized.includes('p3')) return 'SSC_P3';
-    if (normalized.includes('hazard')) return 'hazard';
-    if (normalized.includes('underlying') || normalized.includes('uv')) return 'underlying';
+    if (normalized.includes('p1')) return 'SSC Framework - P1';
+    if (normalized.includes('p2')) return 'SSC Framework - P2';
+    if (normalized.includes('p3')) return 'SSC Framework - P3';
+    if (normalized.includes('hazard')) return 'Hazard';
+    if (normalized.includes('underlying') || normalized.includes('uv')) return 'Underlying Vulnerability';
   }
-  if (dataset?.is_baseline) return 'reference';
-  return 'other';
+  if (dataset?.is_baseline) return 'Core';
+  return 'Other';
+};
+
+const getPillarLabel = (pillarKey: string): string => {
+  const labels: Record<string, string> = {
+    'Core': 'Core Baseline',
+    'SSC Framework - P1': 'The Shelter (P1)',
+    'SSC Framework - P2': 'The Living Conditions (P2)',
+    'SSC Framework - P3': 'The Settlement (P3)',
+    'Hazard': 'Hazard Layers',
+    'Underlying Vulnerability': 'Underlying Vulnerability',
+    'Other': 'Uncategorized',
+  };
+  return labels[pillarKey] || pillarKey;
 };
 
 const matchesPopulation = (dataset: any) => {
@@ -272,7 +285,7 @@ function DatasetsPageContent() {
                         onClick={() => setSelectedDataset(dataset)}
                       >
                         <td className="px-4 py-3 font-medium text-gray-900">{dataset.name}</td>
-                        <td className="px-4 py-3 text-gray-600">{pillar || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">{getPillarLabel(pillar) || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.admin_level || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.type || '—'}</td>
                         <td className="px-4 py-3">
@@ -284,13 +297,15 @@ function DatasetsPageContent() {
                           {dataset.updated_at ? new Date(dataset.updated_at).toLocaleDateString() : '—'}
                         </td>
                         <td className="px-4 py-3 text-right space-x-2">
-                          <Link
-                            href={`/datasets/raw/${dataset.id}`}
+                          <button
                             className="text-xs font-semibold text-amber-600 hover:text-amber-700"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedDataset(dataset);
+                            }}
                           >
                             View
-                          </Link>
+                          </button>
                           <button
                             className="text-xs font-semibold text-gray-600 hover:text-gray-900"
                             onClick={(e) => {
