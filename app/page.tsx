@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Activity, AlertTriangle, Database, Layers, MapPinned, RefreshCcw } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
-import DashboardMap from '@/components/DashboardMap';
+import dynamic from 'next/dynamic';
 import type { GeoJSON } from 'geojson';
+
+const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
 
 type Dataset = {
   id: string;
