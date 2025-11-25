@@ -1,15 +1,41 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Pencil, Trash2, Wand2 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Info, Pencil, Trash2, Wand2 } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import EditDatasetModal from '@/components/EditDatasetModal';
 
+const determinePillar = (dataset: any) => {
+  const meta = dataset?.metadata || {};
+  const raw = (meta.pillar || meta.category || meta.ssc_component || meta.framework_layer || '').toString().trim();
+  if (raw) {
+    const normalized = raw.toLowerCase();
+    if (normalized.includes('p1')) return 'SSC_P1';
+    if (normalized.includes('p2')) return 'SSC_P2';
+    if (normalized.includes('p3')) return 'SSC_P3';
+    if (normalized.includes('hazard')) return 'hazard';
+    if (normalized.includes('underlying') || normalized.includes('uv')) return 'underlying';
+  }
+  if (dataset?.is_baseline) return 'core';
+  return null;
+};
+
+const matchesPopulation = (dataset: any) => {
+  const haystack = `${dataset?.name ?? ''} ${dataset?.description ?? ''} ${JSON.stringify(dataset?.metadata ?? {})}`.toLowerCase();
+  return haystack.includes('population');
+};
+
 export default function DatasetsPage() {
+  const searchParams = useSearchParams();
+  const initialPillar = searchParams.get('pillar');
+  const initialFocus = searchParams.get('focus');
   const [datasets, setDatasets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDataset, setEditingDataset] = useState<any | null>(null);
+  const [pillarFilter, setPillarFilter] = useState<string | null>(initialPillar);
+  const [focusFilter, setFocusFilter] = useState<string | null>(initialFocus);
 
   const loadDatasets = async () => {
     setLoading(true);
@@ -41,6 +67,31 @@ export default function DatasetsPage() {
     }
   };
 
+  const filteredDatasets = useMemo(() => {
+    return datasets.filter((dataset) => {
+      if (pillarFilter) {
+        const datasetPillar = determinePillar(dataset);
+        if (datasetPillar !== pillarFilter) {
+          return false;
+        }
+      }
+      if (focusFilter === 'population') {
+        return matchesPopulation(dataset);
+      }
+      if (focusFilter === 'admin_boundaries') {
+        return false;
+      }
+      return true;
+    });
+  }, [datasets, pillarFilter, focusFilter]);
+
+  const clearFilters = () => {
+    setPillarFilter(null);
+    setFocusFilter(null);
+  };
+
+  const filterActive = Boolean(pillarFilter || focusFilter);
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -52,6 +103,38 @@ export default function DatasetsPage() {
           New Dataset
         </Link>
       </div>
+
+      {filterActive && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>
+            Showing datasets filtered to{' '}
+            {[
+              pillarFilter ? `pillar "${pillarFilter}"` : null,
+              focusFilter ? `focus "${focusFilter}"` : null,
+            ]
+              .filter(Boolean)
+              .join(' and ')}
+          </span>
+          <button
+            onClick={clearFilters}
+            className="rounded bg-white/80 px-2 py-1 text-xs font-semibold text-amber-700 hover:bg-white"
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
+      {focusFilter === 'admin_boundaries' && (
+        <div className="mb-4 flex items-start gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          <Info size={16} className="mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-semibold">Admin boundaries are managed outside this list.</p>
+            <p>
+              Use the Supabase table <code className="bg-white px-1">admin_boundaries</code> or the existing RPCs to
+              update PCodes, names, parent-child relationships, and geometry.
+            </p>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p>Loading datasets...</p>
@@ -70,7 +153,7 @@ export default function DatasetsPage() {
               </tr>
             </thead>
             <tbody>
-              {datasets.map((d) => (
+              {filteredDatasets.map((d) => (
                 <tr key={d.id} className="border-t hover:bg-gray-50">
                   {/* Name */}
                   <td className="p-3">
@@ -164,9 +247,11 @@ export default function DatasetsPage() {
             </tbody>
           </table>
 
-          {datasets.length === 0 && (
+          {filteredDatasets.length === 0 && (
             <p className="text-gray-500 text-sm p-4 text-center">
-              No datasets found.
+              {focusFilter === 'admin_boundaries'
+                ? 'Admin boundaries are maintained in the dedicated reference table.'
+                : 'No datasets found for the current filters.'}
             </p>
           )}
         </div>

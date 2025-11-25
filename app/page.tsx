@@ -94,6 +94,15 @@ const PILLAR_ORDER: { key: PillarKey; label: string; description: string; group:
 ];
 
 const DEFAULT_PILLAR: PillarKey = 'Underlying Vulnerability';
+const PILLAR_FILTER_PARAM: Record<PillarKey, string> = {
+  Core: 'core',
+  'SSC Framework - P1': 'SSC_P1',
+  'SSC Framework - P2': 'SSC_P2',
+  'SSC Framework - P3': 'SSC_P3',
+  Hazard: 'hazard',
+  'Underlying Vulnerability': 'underlying',
+  Other: 'other',
+};
 const ADMIN_LEVELS: Array<'ADM1' | 'ADM2' | 'ADM3' | 'ADM4'> = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
 
 const formatDate = (value?: string | null) => {
@@ -159,11 +168,15 @@ function PillarCard({
   description,
   value,
   percent,
+  href,
+  linkLabel,
 }: {
   label: string;
   description: string;
   value: number;
   percent: number;
+  href?: string;
+  linkLabel?: string;
 }) {
   return (
     <div className="border border-gray-200 rounded-xl p-4 bg-white shadow-sm">
@@ -181,6 +194,11 @@ function PillarCard({
         />
       </div>
       <p className="text-xs text-gray-500 mt-1">{percent.toFixed(0)}% of datasets</p>
+      {href && (
+        <Link href={href} className="text-xs font-semibold text-amber-600 hover:text-amber-700 mt-2 inline-block">
+          {linkLabel || 'Manage datasets'}
+        </Link>
+      )}
     </div>
   );
 }
@@ -191,23 +209,32 @@ function ReferenceCard({
   stat,
   detail,
   icon: Icon,
+  href,
+  linkLabel,
 }: {
   title: string;
   subtitle: string;
   stat: string;
   detail?: string;
   icon: typeof Database;
+  href?: string;
+  linkLabel?: string;
 }) {
   return (
     <div className="border border-gray-200 rounded-2xl p-4 bg-white shadow-sm flex items-start gap-4">
       <div className="p-3 rounded-full bg-gray-100 text-gray-600">
         <Icon size={18} />
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1 flex-1">
         <p className="text-xs uppercase tracking-wide text-amber-600 font-semibold">{subtitle}</p>
         <h3 className="text-base font-semibold text-gray-900">{title}</h3>
         <p className="text-2xl font-semibold text-gray-900">{stat}</p>
         {detail && <p className="text-sm text-gray-600">{detail}</p>}
+        {href && (
+          <Link href={href} className="text-xs font-semibold text-amber-600 hover:text-amber-700">
+            {linkLabel || 'Manage'}
+          </Link>
+        )}
       </div>
     </div>
   );
@@ -498,6 +525,8 @@ export default function HomePage() {
           stat={`${numberFormatter.format(boundaryCounts.ADM3)} ADM3 • ${numberFormatter.format(boundaryCounts.ADM4)} ADM4`}
           detail={`ADM1 ${numberFormatter.format(boundaryCounts.ADM1)} • ADM2 ${numberFormatter.format(boundaryCounts.ADM2)}`}
           icon={MapPinned}
+          href="/datasets?focus=admin_boundaries"
+          linkLabel="View guidance"
         />
         <ReferenceCard
           title="Population baselines"
@@ -509,6 +538,10 @@ export default function HomePage() {
               : 'No active population baseline is flagged yet.'
           }
           icon={Database}
+          href={
+            primaryPopulation ? `/datasets/raw/${primaryPopulation.id}` : '/datasets?focus=population'
+          }
+          linkLabel={primaryPopulation ? 'Open active dataset' : 'Review candidates'}
         />
       </section>
 
@@ -528,6 +561,7 @@ export default function HomePage() {
           <div className="grid gap-3 md:grid-cols-2">
             {sscPillars.map((pillar) => {
               const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
+              const pillarHref = pillarMeta ? `/datasets?pillar=${encodeURIComponent(PILLAR_FILTER_PARAM[pillarMeta.key as PillarKey])}` : undefined;
               return (
                 <PillarCard
                   key={pillar.key}
@@ -535,6 +569,7 @@ export default function HomePage() {
                   description={pillarMeta?.description || pillar.description}
                   value={pillar.value}
                   percent={pillar.percent}
+                  href={pillarHref}
                 />
               );
             })}
@@ -560,6 +595,7 @@ export default function HomePage() {
           <div className="grid gap-3 md:grid-cols-3">
             {supportingPillars.map((pillar) => {
               const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
+              const pillarHref = pillarMeta ? `/datasets?pillar=${encodeURIComponent(PILLAR_FILTER_PARAM[pillarMeta.key as PillarKey])}` : undefined;
               return (
                 <PillarCard
                   key={pillar.key}
@@ -567,6 +603,7 @@ export default function HomePage() {
                   description={pillarMeta?.description || pillar.description}
                   value={pillar.value}
                   percent={pillar.percent}
+                  href={pillarHref}
                 />
               );
             })}
