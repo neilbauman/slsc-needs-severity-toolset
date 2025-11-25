@@ -114,24 +114,22 @@ export default function DatasetCleaningWorkflow({ dataset, onClose, onCleaned }:
   // Auto-load preview when config changes (debounced)
   useEffect(() => {
     if (currentStep === 'alignment') {
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         setLoading(true);
         setError(null);
-        supabase
-          .rpc('preview_pcode_alignment', {
+        try {
+          const { data, error: rpcError } = await supabase.rpc('preview_pcode_alignment', {
             dataset_id: dataset.id,
             matching_config: matchingConfig,
-          })
-          .then(({ data, error: rpcError }) => {
-            if (rpcError) throw rpcError;
-            setAlignmentPreview(data || []);
-            setLoading(false);
-          })
-          .catch((err: any) => {
-            console.error('Failed to load alignment preview:', err);
-            setError(err.message || 'Failed to preview alignment');
-            setLoading(false);
           });
+          if (rpcError) throw rpcError;
+          setAlignmentPreview(data || []);
+        } catch (err: any) {
+          console.error('Failed to load alignment preview:', err);
+          setError(err.message || 'Failed to preview alignment');
+        } finally {
+          setLoading(false);
+        }
       }, 500);
       return () => clearTimeout(timer);
     }
