@@ -192,7 +192,13 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
       const { data, error } = await supabase.rpc('compute_data_health', {
         dataset_id: dataset.id,
       });
-      if (error) throw error;
+      if (error) {
+        // Provide helpful error message if function doesn't exist
+        if (error.message?.includes('could not find the function') || (error.message?.includes('function') && error.message?.includes('does not exist'))) {
+          console.warn('Database function not found. Please deploy supabase/compute_data_health.sql to your Supabase database. See supabase/DEPLOY_CLEANING_FUNCTIONS.md for instructions.');
+        }
+        throw error;
+      }
       setHealthMetrics(data);
     } catch (err) {
       console.error('Failed to load health metrics:', err);

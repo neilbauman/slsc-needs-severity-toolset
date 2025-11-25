@@ -83,7 +83,13 @@ export default function DatasetCleaningWorkflow({ dataset, onClose, onCleaned }:
       const { data, error: rpcError } = await supabase.rpc('compute_data_health', {
         dataset_id: dataset.id,
       });
-      if (rpcError) throw rpcError;
+      if (rpcError) {
+        // Provide helpful error message if function doesn't exist
+        if (rpcError.message?.includes('could not find the function') || rpcError.message?.includes('function') && rpcError.message?.includes('does not exist')) {
+          throw new Error('Database function not found. Please deploy the SQL functions from supabase/compute_data_health.sql to your Supabase database. See supabase/DEPLOY_CLEANING_FUNCTIONS.md for instructions.');
+        }
+        throw rpcError;
+      }
       setHealthMetrics(data || null);
     } catch (err: any) {
       console.error('Failed to load health metrics:', err);
@@ -101,7 +107,13 @@ export default function DatasetCleaningWorkflow({ dataset, onClose, onCleaned }:
         dataset_id: dataset.id,
         matching_config: matchingConfig,
       });
-      if (rpcError) throw rpcError;
+      if (rpcError) {
+        // Provide helpful error message if function doesn't exist
+        if (rpcError.message?.includes('could not find the function') || rpcError.message?.includes('function') && rpcError.message?.includes('does not exist')) {
+          throw new Error('Database function not found. Please deploy the SQL functions from supabase/preview_pcode_alignment.sql to your Supabase database. See supabase/DEPLOY_CLEANING_FUNCTIONS.md for instructions.');
+        }
+        throw rpcError;
+      }
       setAlignmentPreview(data || []);
     } catch (err: any) {
       console.error('Failed to load alignment preview:', err);
@@ -173,7 +185,13 @@ export default function DatasetCleaningWorkflow({ dataset, onClose, onCleaned }:
         dataset_id: dataset.id,
         matching_config: matchingConfig,
       });
-      if (rpcError) throw rpcError;
+      if (rpcError) {
+        // Provide helpful error message if function doesn't exist
+        if (rpcError.message?.includes('could not find the function') || rpcError.message?.includes('function') && rpcError.message?.includes('does not exist')) {
+          throw new Error(`Database function not found. Please deploy the SQL function from supabase/${rpcName}.sql to your Supabase database. See supabase/DEPLOY_CLEANING_FUNCTIONS.md for instructions.`);
+        }
+        throw rpcError;
+      }
       await onCleaned();
       onClose();
     } catch (err: any) {
