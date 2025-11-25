@@ -36,6 +36,19 @@ const getPillarLabel = (pillarKey: string): string => {
   return labels[pillarKey] || pillarKey;
 };
 
+const mapQueryParamToPillar = (param: string | null): string | null => {
+  if (!param) return null;
+  const mapping: Record<string, string> = {
+    'core': 'Core',
+    'SSC_P1': 'SSC Framework - P1',
+    'SSC_P2': 'SSC Framework - P2',
+    'SSC_P3': 'SSC Framework - P3',
+    'hazard': 'Hazard',
+    'underlying': 'Underlying Vulnerability',
+  };
+  return mapping[param] || param;
+};
+
 const matchesPopulation = (dataset: any) => {
   const haystack = `${dataset?.name ?? ''} ${dataset?.description ?? ''} ${JSON.stringify(dataset?.metadata ?? {})}`.toLowerCase();
   return haystack.includes('population');
@@ -95,10 +108,19 @@ function DatasetsPageContent() {
   }, []);
 
   useEffect(() => {
-    setPillarFilter(pillarParam);
+    const mappedPillar = mapQueryParamToPillar(pillarParam);
+    setPillarFilter(mappedPillar);
     setFocusFilter(focusParam);
-    if (pillarParam) {
-      setScopeFilter('ssc');
+    if (mappedPillar) {
+      if (['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3'].includes(mappedPillar)) {
+        setScopeFilter('ssc');
+      } else if (mappedPillar === 'Core') {
+        setScopeFilter('reference');
+      } else if (mappedPillar === 'Hazard') {
+        setScopeFilter('hazard');
+      } else if (mappedPillar === 'Underlying Vulnerability') {
+        setScopeFilter('underlying');
+      }
     }
   }, [pillarParam, focusParam]);
 
@@ -126,10 +148,10 @@ function DatasetsPageContent() {
       if (focusFilter === 'admin_boundaries') {
         return false;
       }
-      if (scopeFilter === 'reference' && pillar !== 'reference') return false;
-      if (scopeFilter === 'ssc' && !['SSC_P1', 'SSC_P2', 'SSC_P3'].includes(pillar)) return false;
-      if (scopeFilter === 'hazard' && pillar !== 'hazard') return false;
-      if (scopeFilter === 'underlying' && pillar !== 'underlying') return false;
+      if (scopeFilter === 'reference' && pillar !== 'Core') return false;
+      if (scopeFilter === 'ssc' && !['SSC Framework - P1', 'SSC Framework - P2', 'SSC Framework - P3'].includes(pillar)) return false;
+      if (scopeFilter === 'hazard' && pillar !== 'Hazard') return false;
+      if (scopeFilter === 'underlying' && pillar !== 'Underlying Vulnerability') return false;
       if (scopeFilter === 'instance' && dataset.is_baseline) return false;
       return true;
     });
