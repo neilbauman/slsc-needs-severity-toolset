@@ -452,6 +452,36 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   };
 
   // ✅ Load features for selected layer (overall, dataset, category, category_score, or hazard_event)
+  // Helper function to filter features by admin_scope
+  const filterFeaturesByAdminScope = async (features: any[]): Promise<any[]> => {
+    if (!instance?.admin_scope || !Array.isArray(instance.admin_scope) || instance.admin_scope.length === 0) {
+      return features; // No filtering if no admin_scope defined
+    }
+    
+    // Get valid ADM3 codes within the scope
+    const { data: affectedAdm3 } = await supabase.rpc('get_affected_adm3', {
+      in_scope: instance.admin_scope,
+    });
+    
+    if (!affectedAdm3 || !Array.isArray(affectedAdm3)) {
+      return features; // Return all if we can't get valid codes
+    }
+    
+    const validAdm3Codes = new Set(affectedAdm3.map((row: any) => 
+      typeof row === 'string' ? row : (row.admin_pcode || row.pcode || row.code)
+    ).filter(Boolean));
+    
+    const filtered = features.filter((f: any) => 
+      validAdm3Codes.has(f.properties?.admin_pcode)
+    );
+    
+    if (filtered.length !== features.length) {
+      console.log(`Filtered features by admin_scope: ${features.length} -> ${filtered.length}`);
+    }
+    
+    return filtered;
+  };
+
   const loadFeaturesForSelection = async (
     selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
     overallFeatures?: any[]
@@ -582,8 +612,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .filter((f: any) => f !== null);
         
         console.log(`Created ${features.length} features with overall scores`);
-        setFeatures(features);
-        setOverallFeatures(features); // Cache for future use
+        
+        // Filter by admin_scope if instance has one defined
+        const filteredFeatures = await filterFeaturesByAdminScope(features);
+        
+        setFeatures(filteredFeatures);
+        setOverallFeatures(filteredFeatures); // Cache for future use
         setLoadingFeatures(false);
       } else if (selection.type === 'dataset' && selection.datasetId) {
         console.log(`Loading features for dataset: ${selection.datasetId}`);
@@ -677,8 +711,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Processed ${allFeatures.length} features (${scoreMap.size} with scores, ${allFeatures.length - scoreMap.size} without scores)`);
         
+        // Filter by admin_scope if instance has one defined
+        const filteredFeatures = await filterFeaturesByAdminScope(allFeatures);
+        
         // Force a new array reference to ensure React detects the change
-        setFeatures([...allFeatures]);
+        setFeatures([...filteredFeatures]);
         setLoadingFeatures(false);
       } else if (selection.type === 'category_score' && selection.category) {
         // Load category score - aggregate all dataset scores within this category
@@ -806,7 +843,11 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .filter((f: any) => f !== null);
         
         console.log(`Mapped ${categoryFeatures.length} features with category scores`);
-        setFeatures([...categoryFeatures]);
+        
+        // Filter by admin_scope if instance has one defined
+        const filteredFeatures = await filterFeaturesByAdminScope(categoryFeatures);
+        
+        setFeatures([...filteredFeatures]);
         setLoadingFeatures(false);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
@@ -1214,16 +1255,24 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const handleAffectedAreaSaved = async () => {
     setShowAffectedAreaModal(false);
     
+    // Clear cached features immediately to prevent stale data
+    setOverallFeatures([]);
+    setFeatures([]);
+    
     // First, fetch the updated instance to get the new admin_scope
     const { data: updatedInstance, error: instanceError } = await supabase
       .from("instances")
-      .select("admin_scope")
+      .select("*")
       .eq("id", instanceId)
       .single();
     
     if (instanceError) {
       console.error("Failed to fetch updated instance:", instanceError);
+      return;
     }
+    
+    // Update instance state immediately
+    setInstance(updatedInstance);
     
     // If admin_scope was updated, delete scores for areas outside the new scope
     if (updatedInstance?.admin_scope && Array.isArray(updatedInstance.admin_scope) && updatedInstance.admin_scope.length > 0) {
@@ -1239,8 +1288,6 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         if (validAdm3Codes.length > 0) {
           // Delete scores for admin_pcodes NOT in the valid list
-          // Note: This deletes from both instance_dataset_scores and instance_category_scores
-          // We'll delete in batches to avoid query size limits
           const batchSize = 1000;
           
           // Get all current scores to find which ones to delete
@@ -1255,14 +1302,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               .filter((pcode: string) => !validAdm3Codes.includes(pcode));
             
             if (scoresToDelete.length > 0) {
+              console.log(`Deleting ${scoresToDelete.length} dataset scores outside new scope`);
               // Delete in batches
               for (let i = 0; i < scoresToDelete.length; i += batchSize) {
                 const batch = scoresToDelete.slice(i, i + batchSize);
-                await supabase
+                const { error: deleteError } = await supabase
                   .from("instance_dataset_scores")
                   .delete()
                   .eq("instance_id", instanceId)
                   .in("admin_pcode", batch);
+                if (deleteError) {
+                  console.error("Error deleting dataset scores:", deleteError);
+                }
               }
             }
           }
@@ -1279,13 +1330,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               .filter((pcode: string) => !validAdm3Codes.includes(pcode));
             
             if (catScoresToDelete.length > 0) {
+              console.log(`Deleting ${catScoresToDelete.length} category scores outside new scope`);
               for (let i = 0; i < catScoresToDelete.length; i += batchSize) {
                 const batch = catScoresToDelete.slice(i, i + batchSize);
-                await supabase
+                const { error: deleteError } = await supabase
                   .from("instance_category_scores")
                   .delete()
                   .eq("instance_id", instanceId)
                   .in("admin_pcode", batch);
+                if (deleteError) {
+                  console.error("Error deleting category scores:", deleteError);
+                }
               }
             }
           }
@@ -1293,13 +1348,20 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       }
     }
     
-    // Now refresh all data
+    // Add a small delay to ensure database updates are committed
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Now refresh all data with the updated instance
     await fetchData();
     
-    // Reload features for current selection
+    // Force reload features for current selection (don't use cached data)
     if (instanceId) {
+      // Wait a bit more for views to update
+      await new Promise(resolve => setTimeout(resolve, 300));
       await loadFeaturesForSelection(selectedLayer, undefined);
     }
+    
+    // Refresh metrics panel
     setMetricsRefreshKey(prev => prev + 1);
   };
 
