@@ -53,6 +53,11 @@ function MapBoundsController({ features }: { features: any[] }) {
   return null;
 }
 
+// Wrapper component to force GeoJSON updates when data changes
+function UpdatingGeoJSON({ data, onEachFeature, key }: { data: GeoJSON.FeatureCollection, onEachFeature: (feature: any, layer: any) => void, key: string }) {
+  return <GeoJSON key={key} data={data} onEachFeature={onEachFeature} />;
+}
+
 export default function InstancePage({ params }: { params: { id: string } }) {
   const [instance, setInstance] = useState<any>(null);
   const [datasets, setDatasets] = useState<any[]>([]);
@@ -616,10 +621,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         // Filter by admin_scope if instance has one defined
         const filteredFeatures = await filterFeaturesByAdminScope(features);
+        console.log(`After filtering by admin_scope: ${filteredFeatures.length} features (from ${features.length})`);
         
         setFeatures(filteredFeatures);
         setOverallFeatures(filteredFeatures); // Cache for future use
-        setFeaturesKey(prev => prev + 1); // Force GeoJSON re-render
+        setFeaturesKey(prev => {
+          const newKey = prev + 1;
+          console.log(`Incrementing featuresKey to ${newKey} for map refresh`);
+          return newKey;
+        }); // Force GeoJSON re-render
         setLoadingFeatures(false);
       } else if (selection.type === 'dataset' && selection.datasetId) {
         console.log(`Loading features for dataset: ${selection.datasetId}`);
@@ -1363,6 +1373,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     if (instanceId) {
       // Wait a bit more for views to update
       await new Promise(resolve => setTimeout(resolve, 300));
+      console.log('Reloading features after affected area update, selectedLayer:', selectedLayer);
+      // Force clear features first to ensure map updates
+      setFeatures([]);
+      setFeaturesKey(prev => prev + 1);
       await loadFeaturesForSelection(selectedLayer, undefined);
     }
     
@@ -1695,7 +1709,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               maxZoom={18}
               style={{ height: "100%", width: "100%" }}
               scrollWheelZoom={false}
-              key={`map-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}`}
+              key={`map-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}-${featuresKey}-${features.length}`}
             >
               <TileLayer 
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -1703,8 +1717,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               />
               <MapBoundsController features={features} />
               {features.length > 0 && (
-                <GeoJSON 
-                  key={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}-${featuresKey}`}
+                <UpdatingGeoJSON 
+                  key={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}-${featuresKey}-${features.length}`}
                   data={{
                     type: 'FeatureCollection',
                     features: features
