@@ -1213,9 +1213,91 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   const handleAffectedAreaSaved = async () => {
     setShowAffectedAreaModal(false);
-    await fetchData(); // Refresh data after affected area changes
+    
+    // First, fetch the updated instance to get the new admin_scope
+    const { data: updatedInstance, error: instanceError } = await supabase
+      .from("instances")
+      .select("admin_scope")
+      .eq("id", instanceId)
+      .single();
+    
+    if (instanceError) {
+      console.error("Failed to fetch updated instance:", instanceError);
+    }
+    
+    // If admin_scope was updated, delete scores for areas outside the new scope
+    if (updatedInstance?.admin_scope && Array.isArray(updatedInstance.admin_scope) && updatedInstance.admin_scope.length > 0) {
+      // Get ADM3 codes that are within the new scope
+      const { data: affectedAdm3, error: adm3Error } = await supabase.rpc('get_affected_adm3', {
+        in_scope: updatedInstance.admin_scope,
+      });
+      
+      if (!adm3Error && affectedAdm3 && Array.isArray(affectedAdm3)) {
+        const validAdm3Codes = affectedAdm3.map((row: any) => 
+          typeof row === 'string' ? row : (row.admin_pcode || row.pcode || row.code)
+        ).filter(Boolean);
+        
+        if (validAdm3Codes.length > 0) {
+          // Delete scores for admin_pcodes NOT in the valid list
+          // Note: This deletes from both instance_dataset_scores and instance_category_scores
+          // We'll delete in batches to avoid query size limits
+          const batchSize = 1000;
+          
+          // Get all current scores to find which ones to delete
+          const { data: allScores, error: scoresError } = await supabase
+            .from("instance_dataset_scores")
+            .select("admin_pcode")
+            .eq("instance_id", instanceId);
+          
+          if (!scoresError && allScores) {
+            const scoresToDelete = allScores
+              .map((s: any) => s.admin_pcode)
+              .filter((pcode: string) => !validAdm3Codes.includes(pcode));
+            
+            if (scoresToDelete.length > 0) {
+              // Delete in batches
+              for (let i = 0; i < scoresToDelete.length; i += batchSize) {
+                const batch = scoresToDelete.slice(i, i + batchSize);
+                await supabase
+                  .from("instance_dataset_scores")
+                  .delete()
+                  .eq("instance_id", instanceId)
+                  .in("admin_pcode", batch);
+              }
+            }
+          }
+          
+          // Also delete category scores outside the scope
+          const { data: allCategoryScores, error: catScoresError } = await supabase
+            .from("instance_category_scores")
+            .select("admin_pcode")
+            .eq("instance_id", instanceId);
+          
+          if (!catScoresError && allCategoryScores) {
+            const catScoresToDelete = allCategoryScores
+              .map((s: any) => s.admin_pcode)
+              .filter((pcode: string) => !validAdm3Codes.includes(pcode));
+            
+            if (catScoresToDelete.length > 0) {
+              for (let i = 0; i < catScoresToDelete.length; i += batchSize) {
+                const batch = catScoresToDelete.slice(i, i + batchSize);
+                await supabase
+                  .from("instance_category_scores")
+                  .delete()
+                  .eq("instance_id", instanceId)
+                  .in("admin_pcode", batch);
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Now refresh all data
+    await fetchData();
+    
     // Reload features for current selection
-    if (instance && instanceId) {
+    if (instanceId) {
       await loadFeaturesForSelection(selectedLayer, undefined);
     }
     setMetricsRefreshKey(prev => prev + 1);
