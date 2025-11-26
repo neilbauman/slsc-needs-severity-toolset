@@ -1216,8 +1216,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     await fetchData(); // Refresh data after affected area changes
     // Reload features for current selection
     if (instance && instanceId) {
-      const featuresToUse = selectedLayer.type === 'hazard_event' ? undefined : overallFeatures;
-      await loadFeaturesForSelection(selectedLayer, featuresToUse);
+      await loadFeaturesForSelection(selectedLayer, undefined);
     }
     setMetricsRefreshKey(prev => prev + 1);
   };
