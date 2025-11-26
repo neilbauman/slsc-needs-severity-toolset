@@ -1,236 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import { fetchHazardEventScores } from "@/lib/fetchHazardEventScoresClient";
+import { useEffect, useMemo, useState } from "react";
+
+export type LayerOption = {
+  dataset_id: string;
+  dataset_name: string;
+  type?: string;
+  category?: string;
+  avg_score?: number | null;
+  is_hazard_event?: boolean;
+  hazard_event_id?: string;
+};
 
 export interface ScoreLayerSelectorProps {
   instanceId: string;
+  layers?: LayerOption[];
+  categoryScores?: Record<string, number>;
   onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
   onScoreHazardEvent?: (hazardEventId: string) => void; // Callback to open scoring modal
   visibleHazardEvents?: Set<string>; // Set of visible hazard event IDs
   onToggleHazardEventVisibility?: (hazardEventId: string, visible: boolean) => void; // Callback to toggle visibility
 }
 
-export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazardEvent, visibleHazardEvents, onToggleHazardEventVisibility }: ScoreLayerSelectorProps) {
-  const [datasets, setDatasets] = useState<any[]>([]);
-  const [categoryScores, setCategoryScores] = useState<Record<string, number>>({}); // Average scores per category
+export default function ScoreLayerSelector({ layers = [], categoryScores = {}, onSelect, onScoreHazardEvent, visibleHazardEvents, onToggleHazardEventVisibility }: ScoreLayerSelectorProps) {
   const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
-  const [loading, setLoading] = useState(true);
   // Initialize with all categories expanded by default
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-  const [hazardEvents, setHazardEvents] = useState<any[]>([]);
-  const [hazardEventScores, setHazardEventScores] = useState<Record<string, number>>({});
-
-  // ✅ Load datasets linked to this instance
-  useEffect(() => {
-    const loadDatasets = async () => {
-      setLoading(true);
-      try {
-        // Load instance_datasets with dataset info (including category)
-        const { data: instanceDatasets, error: idError } = await supabase
-          .from("instance_datasets")
-          .select(`
-            dataset_id,
-            datasets (
-              id,
-              name,
-              type,
-              admin_level,
-              category
-            )
-          `)
-          .eq("instance_id", instanceId);
-
-        if (idError) {
-          console.error("Error loading instance datasets:", idError);
-          setDatasets([]);
-          setLoading(false);
-          return;
-        }
-
-        if (!instanceDatasets || instanceDatasets.length === 0) {
-          setDatasets([]);
-          setLoading(false);
-          return;
-        }
-
-        // Get dataset IDs
-        const datasetIds = instanceDatasets
-          .map((id: any) => id.dataset_id)
-          .filter((id: string) => id);
-
-        if (datasetIds.length === 0) {
-          setDatasets([]);
-          setLoading(false);
-          return;
-        }
-
-        // Load configs separately (no direct FK relationship)
-        const { data: configs } = await supabase
-          .from("instance_dataset_config")
-          .select("dataset_id, score_config")
-          .eq("instance_id", instanceId)
-          .in("dataset_id", datasetIds);
-
-        // Create config map
-        const configMap = new Map(
-          (configs || []).map((c: any) => [c.dataset_id, c.score_config])
-        );
-
-        // Get average scores for each dataset
-        let avgScores: Record<string, number> = {};
-        const { data: scoresData } = await supabase
-          .from("instance_dataset_scores")
-          .select("dataset_id, score")
-          .eq("instance_id", instanceId)
-          .in("dataset_id", datasetIds);
-
-        if (scoresData) {
-          // Calculate average score per dataset
-          const scoreMap: Record<string, { sum: number; count: number }> = {};
-          scoresData.forEach((s: any) => {
-            if (!scoreMap[s.dataset_id]) {
-              scoreMap[s.dataset_id] = { sum: 0, count: 0 };
-            }
-            scoreMap[s.dataset_id].sum += Number(s.score);
-            scoreMap[s.dataset_id].count += 1;
-          });
-
-          Object.keys(scoreMap).forEach((datasetId) => {
-            avgScores[datasetId] = scoreMap[datasetId].sum / scoreMap[datasetId].count;
-          });
-          
-          // Calculate average score per category (aggregate of all datasets in category)
-          // Create a map of dataset_id to category
-          const datasetToCategory: Record<string, string> = {};
-          instanceDatasets.forEach((id: any) => {
-            const category = id.datasets?.category;
-            if (category) {
-              datasetToCategory[id.dataset_id] = category;
-            }
-          });
-          
-          const categoryScoreMap: Record<string, { sum: number; count: number }> = {};
-          scoresData.forEach((s: any) => {
-            const category = datasetToCategory[s.dataset_id];
-            if (category) {
-              if (!categoryScoreMap[category]) {
-                categoryScoreMap[category] = { sum: 0, count: 0 };
-              }
-              categoryScoreMap[category].sum += Number(s.score);
-              categoryScoreMap[category].count += 1;
-            }
-          });
-          
-          const categoryAvgs: Record<string, number> = {};
-          Object.keys(categoryScoreMap).forEach((category) => {
-            categoryAvgs[category] = categoryScoreMap[category].sum / categoryScoreMap[category].count;
-          });
-          setCategoryScores(categoryAvgs);
-        }
-
-        // Transform data
-        const transformed = instanceDatasets.map((id: any) => {
-          const dataset = id.datasets;
-          const config: any = configMap.get(id.dataset_id) || {};
-          // Use dataset.category first, then config.category, then default
-          const category = dataset?.category || config?.category || "Uncategorized";
-          
-          return {
-            dataset_id: id.dataset_id,
-            dataset_name: dataset?.name || `Dataset ${id.dataset_id}`,
-            type: dataset?.type || 'numeric',
-            category: category,
-            avg_score: avgScores[id.dataset_id] || null,
-          };
-        });
-
-        // Load hazard events and add them to datasets as "Hazard" category items
-        let hazardEventsData: any[] = [];
-        const { data: rpcData, error: hazardError } = await supabase
-          .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
-
-        if (hazardError) {
-          console.warn('RPC function failed, trying direct query:', hazardError);
-          // Fallback: query table directly
-          const { data: tableData, error: tableError } = await supabase
-            .from('hazard_events')
-            .select('id, name, description, event_type, magnitude_field, metadata, created_at')
-            .eq('instance_id', instanceId)
-            .order('created_at', { ascending: false });
-
-          if (tableError) {
-            console.error('Error loading hazard events:', tableError);
-          } else if (tableData) {
-            hazardEventsData = tableData.map((event: any) => ({
-              ...event,
-              geojson: event.metadata?.original_geojson || null,
-            }));
-          }
-        } else if (rpcData) {
-          hazardEventsData = rpcData;
-        }
-
-        // Get average scores for hazard events
-        let hazardEventAvgScores: Record<string, number> = {};
-        if (hazardEventsData && hazardEventsData.length > 0) {
-          console.log(`Loaded ${hazardEventsData.length} hazard events`);
-          setHazardEvents(hazardEventsData);
-
-          const hazardEventIds = hazardEventsData.map((e: any) => e.id);
-          if (hazardEventIds.length > 0) {
-            try {
-              const scoresData = await fetchHazardEventScores({
-                instanceId,
-                hazardEventIds,
-              });
-
-              if (scoresData && scoresData.length > 0) {
-                const scoreMap: Record<string, { sum: number; count: number }> = {};
-                scoresData.forEach((s: any) => {
-                  if (!scoreMap[s.hazard_event_id]) {
-                    scoreMap[s.hazard_event_id] = { sum: 0, count: 0 };
-                  }
-                  scoreMap[s.hazard_event_id].sum += Number(s.score);
-                  scoreMap[s.hazard_event_id].count += 1;
-                });
-
-                Object.keys(scoreMap).forEach((eventId) => {
-                  hazardEventAvgScores[eventId] =
-                    scoreMap[eventId].sum / scoreMap[eventId].count;
-                });
-                setHazardEventScores(hazardEventAvgScores);
-              }
-            } catch (error) {
-              console.error("Error loading hazard event scores via API:", error);
-            }
-          }
-
-          // Add hazard events to datasets array as "Hazard" category items
-          const hazardEventDatasets = hazardEventsData.map((event: any) => ({
-            dataset_id: `hazard_event_${event.id}`, // Prefix to distinguish from regular datasets
-            dataset_name: event.name,
-            type: 'numeric' as const, // Treat as numeric for display purposes
-            category: 'Hazard' as const,
-            avg_score: hazardEventAvgScores[event.id] || null,
-            is_hazard_event: true, // Flag to identify as hazard event
-            hazard_event_id: event.id, // Store actual hazard event ID
-          }));
-
-          // Merge hazard events into datasets array
-          setDatasets([...transformed, ...hazardEventDatasets]);
-        } else {
-        setDatasets(transformed);
-        }
-      } catch (err) {
-        console.error("Error loading datasets:", err);
-        setDatasets([]);
-      }
-      setLoading(false);
-    };
-    loadDatasets();
-  }, [instanceId]);
 
   // ✅ Handle selection
   const handleSelect = (type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string) => {
@@ -263,28 +58,32 @@ export default function ScoreLayerSelector({ instanceId, onSelect, onScoreHazard
   };
 
   // ✅ Group datasets by category
-  const grouped: Record<string, any[]> = datasets.reduce((acc: Record<string, any[]>, d: any) => {
-    const cat = d.category || "Uncategorized";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(d);
+  const grouped: Record<string, LayerOption[]> = useMemo(() => {
+    const acc: Record<string, LayerOption[]> = {};
+    layers.forEach((d) => {
+      const cat = d.category || "Uncategorized";
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(d);
+    });
     return acc;
-  }, {});
+  }, [layers]);
 
   // ✅ Expand all categories by default when datasets are loaded
+  const categoryKeys = Object.keys(grouped);
   useEffect(() => {
-    if (datasets.length > 0) {
-      const categories = Object.keys(grouped);
-      if (categories.length > 0) {
-        setExpandedCategories(prev => {
-          const newSet = new Set(prev);
-          categories.forEach(cat => newSet.add(cat));
-          return newSet;
-        });
-      }
-    }
-  }, [datasets.length]); // Re-run when datasets change
-
-  if (loading) return <p className="text-xs" style={{ color: 'var(--gsc-gray)' }}>Loading layers...</p>;
+    if (categoryKeys.length === 0) return;
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      categoryKeys.forEach((cat) => {
+        if (!next.has(cat)) {
+          next.add(cat);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [categoryKeys.join("|")]);
 
   return (
     <div className="text-xs" style={{ color: 'var(--gsc-gray)' }}>

@@ -8,11 +8,12 @@ import { supabase } from "@/lib/supabaseClient";
 import { fetchHazardEventScores } from "@/lib/fetchHazardEventScoresClient";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import ScoreLayerSelector from "@/components/ScoreLayerSelector";
+import ScoreLayerSelector, { LayerOption } from "@/components/ScoreLayerSelector";
 import InstanceMetricsPanel from "@/components/InstanceMetricsPanel";
 import VulnerableLocationsPanel from "@/components/VulnerableLocationsPanel";
 import UploadHazardEventModal from "@/components/UploadHazardEventModal";
 import HazardEventScoringModal from "@/components/HazardEventScoringModal";
+import ImportHazardEventModal from "@/components/ImportHazardEventModal";
 
 // Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
@@ -73,6 +74,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set()); // Track which hazard events are visible
   const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string>, geometryTypes?: Set<string> }>>({}); // Feature-level filters per hazard event
   const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
+  const [layerOptions, setLayerOptions] = useState<LayerOption[]>([]);
+  const [categoryScoreMap, setCategoryScoreMap] = useState<Record<string, number>>({});
+  const [showImportHazardModal, setShowImportHazardModal] = useState(false);
 
   // Ensure instanceId exists
   const instanceId = params?.id;
@@ -115,6 +119,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     
     try {
       setError(null);
+      let currentLayerOptions: LayerOption[] = [];
       
       // Fetch instance basic info - always fetch from instances table for name
       let instanceData = null;
@@ -141,7 +146,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .eq("instance_id", instanceId);
 
         if (!dsError && data) {
-          dsData = data;
+          dsData = (data || []).map((row: any) => ({
+            dataset_id: row.dataset_id || row.id || row.datasetId,
+            dataset_name: row.dataset_name || row.name || row.datasets?.name || `Dataset ${row.dataset_id || row.id}`,
+            dataset_type: row.dataset_type || row.type || row.datasets?.type || 'numeric',
+            dataset_category: row.dataset_category || row.category || row.datasets?.category || 'Uncategorized',
+          }));
         } else {
           // Fallback: fetch from instance_datasets with join
           const { data: fallbackData, error: fallbackError } = await supabase
@@ -179,6 +189,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               id: d.id,
               dataset_id: d.dataset_id,
               dataset_name: d.datasets?.name || `Dataset ${d.dataset_id}`,
+              dataset_type: d.datasets?.type || 'numeric',
+              dataset_category: d.datasets?.category || configMap.get(d.dataset_id)?.category || 'Uncategorized',
               score_config: configMap.get(d.dataset_id) || null,
             }));
           }
@@ -188,12 +200,67 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       }
       setDatasets(dsData);
 
+      // Compute dataset averages & category scores for layer selector
+      const datasetCategoryMap = new Map<string, string>();
+      dsData.forEach((d: any) => {
+        if (d.dataset_id) {
+          datasetCategoryMap.set(d.dataset_id, d.dataset_category || 'Uncategorized');
+        }
+      });
+
+      const { data: datasetScoreRows } = await supabase
+        .from("instance_dataset_scores")
+        .select("dataset_id, score")
+        .eq("instance_id", instanceId);
+
+      const datasetTotals = new Map<string, { sum: number; count: number }>();
+      const categoryTotals = new Map<string, { sum: number; count: number }>();
+
+      (datasetScoreRows || []).forEach((row: any) => {
+        if (!row?.dataset_id) return;
+        const score = Number(row.score);
+        if (Number.isNaN(score)) return;
+        const dId = row.dataset_id;
+        const cat = datasetCategoryMap.get(dId) || 'Uncategorized';
+
+        if (!datasetTotals.has(dId)) datasetTotals.set(dId, { sum: 0, count: 0 });
+        const dt = datasetTotals.get(dId)!;
+        dt.sum += score;
+        dt.count += 1;
+
+        if (!categoryTotals.has(cat)) categoryTotals.set(cat, { sum: 0, count: 0 });
+        const ct = categoryTotals.get(cat)!;
+        ct.sum += score;
+        ct.count += 1;
+      });
+
+      const datasetLayers = dsData.map((d: any) => {
+        const stats = datasetTotals.get(d.dataset_id);
+        return {
+          dataset_id: d.dataset_id,
+          dataset_name: d.dataset_name,
+          type: d.dataset_type || 'numeric',
+          category: d.dataset_category || 'Uncategorized',
+          avg_score: stats ? stats.sum / stats.count : null,
+        } as LayerOption;
+      });
+      currentLayerOptions = [...datasetLayers];
+
+      const categoryScoreObj: Record<string, number> = {};
+      categoryTotals.forEach((value, key) => {
+        if (value.count > 0) {
+          categoryScoreObj[key] = value.sum / value.count;
+        }
+      });
+      setCategoryScoreMap(categoryScoreObj);
+
       // Load hazard events for this instance
       const { data: hazardEventsData, error: hazardError } = await supabase
         .rpc('get_hazard_events_for_instance', { in_instance_id: instanceId });
       
       if (!hazardError && hazardEventsData) {
         setHazardEvents(hazardEventsData);
+        setVisibleHazardEvents(new Set(hazardEventsData.map((event: any) => event.id)));
         
         // Convert hazard events to map layers
         const layers: any[] = [];
@@ -209,7 +276,50 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           }
         });
         setHazardEventLayers(layers);
+
+        // Compute hazard event averages for display
+        let hazardEventAvgScores: Record<string, number> = {};
+        const hazardEventIds = hazardEventsData.map((event: any) => event.id);
+        if (hazardEventIds.length > 0) {
+          try {
+            const hazardScoreRows = await fetchHazardEventScores({
+              instanceId,
+              hazardEventIds,
+            });
+            const hazardTotals = new Map<string, { sum: number; count: number }>();
+            hazardScoreRows.forEach((row: any) => {
+              const score = Number(row.score);
+              if (Number.isNaN(score) || !row.hazard_event_id) return;
+              if (!hazardTotals.has(row.hazard_event_id)) {
+                hazardTotals.set(row.hazard_event_id, { sum: 0, count: 0 });
+              }
+              const agg = hazardTotals.get(row.hazard_event_id)!;
+              agg.sum += score;
+              agg.count += 1;
+            });
+            hazardTotals.forEach((value, key) => {
+              if (value.count > 0) {
+                hazardEventAvgScores[key] = value.sum / value.count;
+              }
+            });
+          } catch (error) {
+            console.error("Error loading hazard event scores via API:", error);
+          }
+        }
+
+        const hazardLayerOptions: LayerOption[] = hazardEventsData.map((event: any) => ({
+          dataset_id: `hazard_event_${event.id}`,
+          dataset_name: event.name,
+          type: 'numeric',
+          category: 'Hazard',
+          avg_score: hazardEventAvgScores[event.id] ?? null,
+          is_hazard_event: true,
+          hazard_event_id: event.id,
+        }));
+
+        currentLayerOptions = [...currentLayerOptions, ...hazardLayerOptions];
       }
+      setLayerOptions(currentLayerOptions);
 
       // Load overall instance scores for initial view
       let parsed: any[] = [];
@@ -1369,6 +1479,14 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             >
               Upload Hazard Event
             </button>
+            <button
+              onClick={() => setShowImportHazardModal(true)}
+              className="btn btn-secondary text-xs py-1 px-2"
+              disabled={!instance}
+              title="Import hazard event track from another instance"
+            >
+              Import Hazard Event
+            </button>
             <Link
               href="/instances"
               className="btn btn-secondary text-xs py-1 px-2"
@@ -1529,6 +1647,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             </h3>
             <ScoreLayerSelector
               instanceId={instanceId}
+              layers={layerOptions}
+              categoryScores={categoryScoreMap}
               onSelect={(selection) => {
                 setSelectedLayer(selection);
                 // If a hazard event is selected, load it for potential scoring
@@ -1994,6 +2114,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           onUploaded={async () => {
             await fetchData();
             setShowUploadHazardModal(false);
+          }}
+        />
+      )}
+
+      {/* Import Hazard Event Modal */}
+      {showImportHazardModal && instance && (
+        <ImportHazardEventModal
+          instanceId={instanceId}
+          onClose={() => setShowImportHazardModal(false)}
+          onImported={async () => {
+            await fetchData();
+            setShowImportHazardModal(false);
           }}
         />
       )}
