@@ -21,6 +21,7 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
   const [selectedAdm1, setSelectedAdm1] = useState<string[]>([]);
   const [selectedAdm2, setSelectedAdm2] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [manuallyDeselected, setManuallyDeselected] = useState<Set<string>>(new Set());
 
   // --------------------------------------------------
   // Load ADM1 regions (top level)
@@ -50,6 +51,7 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
       setAdm2Options([]);
       setSelectedAdm2([]);
       setAdm3GeoJSON(null);
+      setManuallyDeselected(new Set());
     }
   }, [selectedAdm1]);
 
@@ -62,9 +64,26 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
 
     if (!error && data) {
       setAdm2Options(data);
-      setSelectedAdm2((prev) =>
-        prev.filter((code) => data.some((opt) => opt.admin_pcode === code))
-      );
+
+      setManuallyDeselected((prev) => {
+        const next = new Set(prev);
+        prev.forEach((code) => {
+          if (!data.some((opt) => opt.admin_pcode === code)) {
+            next.delete(code);
+          }
+        });
+        return next;
+      });
+
+      setSelectedAdm2(() => {
+        const next = new Set<string>();
+        data.forEach((opt) => {
+          if (!manuallyDeselected.has(opt.admin_pcode)) {
+            next.add(opt.admin_pcode);
+          }
+        });
+        return Array.from(next);
+      });
     } else {
       console.error('ADM2 load error:', error);
     }
@@ -208,10 +227,21 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
                     type="checkbox"
                     checked={selectedAdm2.includes(opt.admin_pcode)}
                     onChange={(e) => {
-                      if (e.target.checked)
-                        setSelectedAdm2([...selectedAdm2, opt.admin_pcode]);
-                      else
-                        setSelectedAdm2(selectedAdm2.filter((x) => x !== opt.admin_pcode));
+                      if (e.target.checked) {
+                        setSelectedAdm2((prev) => [...prev, opt.admin_pcode]);
+                        setManuallyDeselected((prev) => {
+                          const next = new Set(prev);
+                          next.delete(opt.admin_pcode);
+                          return next;
+                        });
+                      } else {
+                        setSelectedAdm2((prev) => prev.filter((x) => x !== opt.admin_pcode));
+                        setManuallyDeselected((prev) => {
+                          const next = new Set(prev);
+                          next.add(opt.admin_pcode);
+                          return next;
+                        });
+                      }
                     }}
                   />
                   {opt.name}
