@@ -139,6 +139,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       // Fetch datasets - try view first, then fallback
       let dsData: any[] = [];
+      let datasetMapById = new Map<string, { name: string; category: string }>();
       try {
         const { data, error: dsError } = await supabase
           .from("v_instance_datasets_view")
@@ -146,12 +147,22 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           .eq("instance_id", instanceId);
 
         if (!dsError && data) {
-          dsData = (data || []).map((row: any) => ({
-            dataset_id: row.dataset_id || row.id || row.datasetId,
-            dataset_name: row.dataset_name || row.name || row.datasets?.name || `Dataset ${row.dataset_id || row.id}`,
-            dataset_type: row.dataset_type || row.type || row.datasets?.type || 'numeric',
-            dataset_category: row.dataset_category || row.category || row.datasets?.category || 'Uncategorized',
-          }));
+          dsData = (data || []).map((row: any) => {
+            const datasetId = row.dataset_id || row.id || row.datasetId;
+            const datasetName = row.dataset_name || row.name || row.datasets?.name || `Dataset ${datasetId}`;
+            const datasetCategory = row.dataset_category || row.category || row.datasets?.category || 'Uncategorized';
+
+            if (datasetId) {
+              datasetMapById.set(datasetId, { name: datasetName, category: datasetCategory });
+            }
+
+            return {
+              dataset_id: datasetId,
+              dataset_name: datasetName,
+              dataset_type: row.dataset_type || row.type || row.datasets?.type || 'numeric',
+              dataset_category: datasetCategory,
+            };
+          });
         } else {
           // Fallback: fetch from instance_datasets with join
           const { data: fallbackData, error: fallbackError } = await supabase
@@ -185,14 +196,23 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               );
             }
 
-            dsData = fallbackData.map((d: any) => ({
-              id: d.id,
-              dataset_id: d.dataset_id,
-              dataset_name: d.datasets?.name || `Dataset ${d.dataset_id}`,
-              dataset_type: d.datasets?.type || 'numeric',
-              dataset_category: d.datasets?.category || configMap.get(d.dataset_id)?.category || 'Uncategorized',
-              score_config: configMap.get(d.dataset_id) || null,
-            }));
+            dsData = fallbackData.map((d: any) => {
+              const datasetCategory = d.datasets?.category || configMap.get(d.dataset_id)?.category || 'Uncategorized';
+              const datasetName = d.datasets?.name || `Dataset ${d.dataset_id}`;
+
+              if (d.dataset_id) {
+                datasetMapById.set(d.dataset_id, { name: datasetName, category: datasetCategory });
+              }
+
+              return {
+                id: d.id,
+                dataset_id: d.dataset_id,
+                dataset_name: datasetName,
+                dataset_type: d.datasets?.type || 'numeric',
+                dataset_category: datasetCategory,
+                score_config: configMap.get(d.dataset_id) || null,
+              };
+            });
           }
         }
       } catch (e) {
@@ -204,7 +224,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       const datasetCategoryMap = new Map<string, string>();
       dsData.forEach((d: any) => {
         if (d.dataset_id) {
-          datasetCategoryMap.set(d.dataset_id, d.dataset_category || 'Uncategorized');
+          datasetCategoryMap.set(d.dataset_id, d.dataset_category || datasetMapById.get(d.dataset_id)?.category || 'Uncategorized');
         }
       });
 
@@ -236,11 +256,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       const datasetLayers = dsData.map((d: any) => {
         const stats = datasetTotals.get(d.dataset_id);
+        const info = d.dataset_id ? datasetMapById.get(d.dataset_id) : null;
         return {
           dataset_id: d.dataset_id,
-          dataset_name: d.dataset_name,
+          dataset_name: info?.name || d.dataset_name,
           type: d.dataset_type || 'numeric',
-          category: d.dataset_category || 'Uncategorized',
+          category: info?.category || d.dataset_category || 'Uncategorized',
           avg_score: stats ? stats.sum / stats.count : null,
         } as LayerOption;
       });
