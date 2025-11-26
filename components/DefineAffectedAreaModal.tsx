@@ -2,13 +2,35 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabaseClient';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
 interface Props {
   instance: any;
   onClose: () => void;
   onSaved: () => Promise<void>;
+}
+
+// Component to handle map bounds and auto-zoom
+function MapBoundsController({ features }: { features: any[] }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (features && features.length > 0) {
+      try {
+        const bounds = L.geoJSON(features).getBounds();
+        map.fitBounds(bounds, { 
+          padding: [20, 20],
+          maxZoom: 10
+        });
+      } catch (err) {
+        console.error("Error fitting bounds:", err);
+      }
+    }
+  }, [features, map]);
+
+  return null;
 }
 
 export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: Props) {
@@ -188,8 +210,8 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
   // UI
   // --------------------------------------------------
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
-      <div className="bg-white rounded-lg w-full max-w-4xl p-4 shadow-xl">
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-lg w-full max-w-4xl p-4 shadow-xl my-auto">
         <h2 className="text-lg font-semibold mb-4">Define Affected Area</h2>
 
         {/* Step 1: ADM1 selection */}
@@ -260,11 +282,18 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
               style={{ height: '100%', width: '100%' }}
               center={[10.3157, 123.8854]}
               zoom={8}
+              scrollWheelZoom={false}
+              dragging={false}
+              touchZoom={false}
+              doubleClickZoom={false}
+              boxZoom={false}
+              keyboard={false}
             >
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution="&copy; OpenStreetMap contributors"
               />
+              <MapBoundsController features={adm3GeoJSON.features || []} />
               <GeoJSON data={adm3GeoJSON} style={() => style} />
             </MapContainer>
           ) : (
