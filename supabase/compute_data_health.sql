@@ -7,7 +7,7 @@
 -- - Validation Errors: Count of invalid values
 
 CREATE OR REPLACE FUNCTION compute_data_health(
-  dataset_id UUID
+  p_dataset_id UUID
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -31,7 +31,7 @@ BEGIN
   -- Get dataset metadata
   SELECT type, admin_level INTO v_dataset_type, v_admin_level
   FROM datasets
-  WHERE id = compute_data_health.dataset_id;
+  WHERE id = p_dataset_id;
   
   IF v_dataset_type IS NULL THEN
     RAISE EXCEPTION 'Dataset not found: %', dataset_id;
@@ -47,18 +47,18 @@ BEGIN
     -- Count total raw rows
     SELECT COUNT(*) INTO v_total_rows
     FROM dataset_values_numeric_raw
-    WHERE dataset_id = compute_data_health.dataset_id;
+    WHERE dataset_id = p_dataset_id;
 
     -- Count matched rows (rows that have been cleaned and aligned)
     SELECT COUNT(DISTINCT admin_pcode) INTO v_matched_rows
     FROM dataset_values_numeric
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND admin_pcode IN (SELECT admin_pcode FROM admin_boundaries);
 
     -- Count valid rows (non-null, numeric values)
     SELECT COUNT(*) INTO v_valid_rows
     FROM dataset_values_numeric_raw
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND value_raw IS NOT NULL
       AND value_raw != ''
       AND (value_raw ~ '^[0-9]+\.?[0-9]*$' OR value_raw ~ '^-?[0-9]+\.?[0-9]*$');
@@ -66,13 +66,13 @@ BEGIN
     -- Count unique rows (by pcode)
     SELECT COUNT(DISTINCT COALESCE(admin_pcode_raw, admin_name_raw)) INTO v_unique_rows
     FROM dataset_values_numeric_raw
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND (admin_pcode_raw IS NOT NULL OR admin_name_raw IS NOT NULL);
 
     -- Count validation errors (invalid numeric values)
     SELECT COUNT(*) INTO v_validation_errors
     FROM dataset_values_numeric_raw
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND value_raw IS NOT NULL
       AND value_raw != ''
       AND NOT (value_raw ~ '^[0-9]+\.?[0-9]*$' OR value_raw ~ '^-?[0-9]+\.?[0-9]*$');
@@ -80,7 +80,7 @@ BEGIN
     -- Count covered admin areas
     SELECT COUNT(DISTINCT dvn.admin_pcode) INTO v_covered_count
     FROM dataset_values_numeric dvn
-    WHERE dvn.dataset_id = compute_data_health.dataset_id
+    WHERE dvn.dataset_id = p_dataset_id
       AND EXISTS (
         SELECT 1 FROM admin_boundaries ab
         WHERE ab.admin_pcode = dvn.admin_pcode
@@ -92,37 +92,37 @@ BEGIN
     -- Count total raw rows
     SELECT COUNT(*) INTO v_total_rows
     FROM dataset_values_categorical_raw
-    WHERE dataset_id = compute_data_health.dataset_id;
+    WHERE dataset_id = p_dataset_id;
 
     -- Count matched rows
     SELECT COUNT(DISTINCT admin_pcode) INTO v_matched_rows
     FROM dataset_values_categorical
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND admin_pcode IN (SELECT admin_pcode FROM admin_boundaries);
 
     -- Count valid rows (have pcode or name)
     SELECT COUNT(*) INTO v_valid_rows
     FROM dataset_values_categorical_raw
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND (admin_pcode_raw IS NOT NULL OR admin_name_raw IS NOT NULL);
 
     -- Count unique rows
     SELECT COUNT(DISTINCT COALESCE(admin_pcode_raw, admin_name_raw)) INTO v_unique_rows
     FROM dataset_values_categorical_raw
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND (admin_pcode_raw IS NOT NULL OR admin_name_raw IS NOT NULL);
 
     -- Validation errors for categorical (missing category info)
     SELECT COUNT(*) INTO v_validation_errors
     FROM dataset_values_categorical_raw
-    WHERE dataset_id = compute_data_health.dataset_id
+    WHERE dataset_id = p_dataset_id
       AND (admin_pcode_raw IS NULL OR admin_pcode_raw = '')
       AND (admin_name_raw IS NULL OR admin_name_raw = '');
 
     -- Count covered admin areas
     SELECT COUNT(DISTINCT dvc.admin_pcode) INTO v_covered_count
     FROM dataset_values_categorical dvc
-    WHERE dvc.dataset_id = compute_data_health.dataset_id
+    WHERE dvc.dataset_id = p_dataset_id
       AND EXISTS (
         SELECT 1 FROM admin_boundaries ab
         WHERE ab.admin_pcode = dvc.admin_pcode
@@ -176,7 +176,7 @@ BEGIN
   UPDATE datasets
   SET metadata = COALESCE(metadata, '{}'::JSONB) || jsonb_build_object('data_health', v_result),
       updated_at = NOW()
-  WHERE id = compute_data_health.dataset_id;
+  WHERE id = p_dataset_id;
 
   RETURN v_result;
 END;
