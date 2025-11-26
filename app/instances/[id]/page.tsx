@@ -54,8 +54,8 @@ function MapBoundsController({ features }: { features: any[] }) {
 }
 
 // Wrapper component to force GeoJSON updates when data changes
-function UpdatingGeoJSON({ data, onEachFeature, key }: { data: GeoJSON.FeatureCollection, onEachFeature: (feature: any, layer: any) => void, key: string }) {
-  return <GeoJSON key={key} data={data} onEachFeature={onEachFeature} />;
+function UpdatingGeoJSON({ data, onEachFeature, mapKey }: { data: GeoJSON.FeatureCollection, onEachFeature: (feature: any, layer: any) => void, mapKey: string }) {
+  return <GeoJSON key={mapKey} data={data} onEachFeature={onEachFeature} />;
 }
 
 export default function InstancePage({ params }: { params: { id: string } }) {
@@ -459,23 +459,38 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
   // ✅ Load features for selected layer (overall, dataset, category, category_score, or hazard_event)
   // Helper function to filter features by admin_scope
-  const filterFeaturesByAdminScope = async (features: any[]): Promise<any[]> => {
-    if (!instance?.admin_scope || !Array.isArray(instance.admin_scope) || instance.admin_scope.length === 0) {
+  // Accepts admin_scope as parameter to use fresh data
+  const filterFeaturesByAdminScope = async (features: any[], adminScope?: string[]): Promise<any[]> => {
+    // Use provided adminScope or fall back to instance state
+    const scopeToUse = adminScope || instance?.admin_scope;
+    
+    if (!scopeToUse || !Array.isArray(scopeToUse) || scopeToUse.length === 0) {
+      console.log('No admin_scope defined, returning all features');
       return features; // No filtering if no admin_scope defined
     }
     
+    console.log(`Filtering features by admin_scope: ${scopeToUse.length} ADM2 codes`);
+    
     // Get valid ADM3 codes within the scope
-    const { data: affectedAdm3 } = await supabase.rpc('get_affected_adm3', {
-      in_scope: instance.admin_scope,
+    const { data: affectedAdm3, error: adm3Error } = await supabase.rpc('get_affected_adm3', {
+      in_scope: scopeToUse,
     });
     
+    if (adm3Error) {
+      console.error('Error getting affected ADM3 codes:', adm3Error);
+      return features; // Return all if we can't get valid codes
+    }
+    
     if (!affectedAdm3 || !Array.isArray(affectedAdm3)) {
+      console.warn('No affected ADM3 codes returned');
       return features; // Return all if we can't get valid codes
     }
     
     const validAdm3Codes = new Set(affectedAdm3.map((row: any) => 
       typeof row === 'string' ? row : (row.admin_pcode || row.pcode || row.code)
     ).filter(Boolean));
+    
+    console.log(`Found ${validAdm3Codes.size} valid ADM3 codes within scope`);
     
     const filtered = features.filter((f: any) => 
       validAdm3Codes.has(f.properties?.admin_pcode)
@@ -619,8 +634,9 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Created ${features.length} features with overall scores`);
         
-        // Filter by admin_scope if instance has one defined
-        const filteredFeatures = await filterFeaturesByAdminScope(features);
+        // Filter by admin_scope if instance has one defined - use fresh instance state
+        const currentAdminScope = instance?.admin_scope;
+        const filteredFeatures = await filterFeaturesByAdminScope(features, currentAdminScope);
         console.log(`After filtering by admin_scope: ${filteredFeatures.length} features (from ${features.length})`);
         
         setFeatures(filteredFeatures);
@@ -723,12 +739,17 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Processed ${allFeatures.length} features (${scoreMap.size} with scores, ${allFeatures.length - scoreMap.size} without scores)`);
         
-        // Filter by admin_scope if instance has one defined
-        const filteredFeatures = await filterFeaturesByAdminScope(allFeatures);
+        // Filter by admin_scope if instance has one defined - use fresh instance state
+        const currentAdminScope = instance?.admin_scope;
+        const filteredFeatures = await filterFeaturesByAdminScope(allFeatures, currentAdminScope);
         
         // Force a new array reference to ensure React detects the change
         setFeatures([...filteredFeatures]);
-        setFeaturesKey(prev => prev + 1); // Force GeoJSON re-render
+        setFeaturesKey(prev => {
+          const newKey = prev + 1;
+          console.log(`Incrementing featuresKey to ${newKey} for dataset map refresh`);
+          return newKey;
+        }); // Force GeoJSON re-render
         setLoadingFeatures(false);
       } else if (selection.type === 'category_score' && selection.category) {
         // Load category score - aggregate all dataset scores within this category
@@ -857,11 +878,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Mapped ${categoryFeatures.length} features with category scores`);
         
-        // Filter by admin_scope if instance has one defined
-        const filteredFeatures = await filterFeaturesByAdminScope(categoryFeatures);
+        // Filter by admin_scope if instance has one defined - use fresh instance state
+        const currentAdminScope = instance?.admin_scope;
+        const filteredFeatures = await filterFeaturesByAdminScope(categoryFeatures, currentAdminScope);
         
         setFeatures([...filteredFeatures]);
-        setFeaturesKey(prev => prev + 1); // Force GeoJSON re-render
+        setFeaturesKey(prev => {
+          const newKey = prev + 1;
+          console.log(`Incrementing featuresKey to ${newKey} for category map refresh`);
+          return newKey;
+        }); // Force GeoJSON re-render
         setLoadingFeatures(false);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
@@ -1718,7 +1744,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <MapBoundsController features={features} />
               {features.length > 0 && (
                 <UpdatingGeoJSON 
-                  key={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}-${featuresKey}-${features.length}`}
+                  mapKey={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}-${featuresKey}-${features.length}`}
                   data={{
                     type: 'FeatureCollection',
                     features: features
