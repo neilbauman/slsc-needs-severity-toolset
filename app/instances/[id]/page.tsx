@@ -1411,10 +1411,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   };
 
   const getColor = (score: number) => {
-    if (score <= 1) return "#00FF00"; // green
-    if (score <= 2) return "#CCFF00"; // yellow-green
-    if (score <= 3) return "#FFCC00"; // yellow
-    if (score <= 4) return "#FF6600"; // orange
+    // Consistent color thresholds across all score visualizations:
+    // 1.0-1.5: green
+    // 1.5-2.5: yellow-green
+    // 2.5-3.5: yellow
+    // 3.5-4.5: orange
+    // 4.5+: red
+    if (score < 1.5) return "#00FF00"; // green
+    if (score < 2.5) return "#CCFF00"; // yellow-green
+    if (score < 3.5) return "#FFCC00"; // yellow
+    if (score < 4.5) return "#FF6600"; // orange
     return "#FF0000"; // red
   };
 
