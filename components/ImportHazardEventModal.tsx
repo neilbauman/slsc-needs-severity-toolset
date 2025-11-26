@@ -43,7 +43,13 @@ export default function ImportHazardEventModal({ instanceId, onClose, onImported
           setError(error.message);
           setEvents([]);
         } else {
-          setEvents(data || []);
+          const normalized = (data || []).map((row: any) => ({
+            ...row,
+            instances: Array.isArray(row.instances)
+              ? row.instances[0] ?? null
+              : row.instances ?? null,
+          }));
+          setEvents(normalized);
         }
       } finally {
         setLoading(false);
