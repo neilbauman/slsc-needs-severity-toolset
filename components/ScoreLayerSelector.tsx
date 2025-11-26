@@ -85,6 +85,25 @@ export default function ScoreLayerSelector({ layers = [], categoryScores = {}, o
     });
   }, [categoryKeys.join("|")]);
 
+  const CATEGORY_ORDER = [
+    'SSC Framework - P1',
+    'SSC Framework - P2',
+    'SSC Framework - P3',
+    'Hazard',
+    'Underlying Vulnerability',
+  ];
+
+  const sortCategories = (a: string, b: string) => {
+    const indexA = CATEGORY_ORDER.indexOf(a);
+    const indexB = CATEGORY_ORDER.indexOf(b);
+    if (indexA !== -1 && indexB !== -1) {
+      return indexA - indexB;
+    }
+    if (indexA !== -1) return -1;
+    if (indexB !== -1) return 1;
+    return a.localeCompare(b);
+  };
+
   return (
     <div className="text-xs" style={{ color: 'var(--gsc-gray)' }}>
       {/* Overall Score Option */}
@@ -108,12 +127,7 @@ export default function ScoreLayerSelector({ layers = [], categoryScores = {}, o
       )}
 
       {Object.entries(grouped)
-        // Sort categories: Hazard before Underlying Vulnerability, others maintain order
-        .sort(([catA], [catB]) => {
-          if (catA === 'Hazard' && catB === 'Underlying Vulnerability') return -1;
-          if (catA === 'Underlying Vulnerability' && catB === 'Hazard') return 1;
-          return 0; // Maintain original order for others
-        })
+        .sort(([catA], [catB]) => sortCategories(catA, catB))
         .map(([cat, list]) => (
         <div key={cat} className="mb-1">
           <div className="flex items-center justify-between mb-0.5">
