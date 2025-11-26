@@ -58,6 +58,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [datasets, setDatasets] = useState<any[]>([]);
   const [features, setFeatures] = useState<any[]>([]);
   const [overallFeatures, setOverallFeatures] = useState<any[]>([]); // Store overall features for reuse
+  const [featuresKey, setFeaturesKey] = useState(0); // Key to force GeoJSON re-render
   const [loading, setLoading] = useState(true);
   const [loadingFeatures, setLoadingFeatures] = useState(false); // Track feature loading separately
   const [error, setError] = useState<string | null>(null);
@@ -618,6 +619,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         setFeatures(filteredFeatures);
         setOverallFeatures(filteredFeatures); // Cache for future use
+        setFeaturesKey(prev => prev + 1); // Force GeoJSON re-render
         setLoadingFeatures(false);
       } else if (selection.type === 'dataset' && selection.datasetId) {
         console.log(`Loading features for dataset: ${selection.datasetId}`);
@@ -716,6 +718,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         // Force a new array reference to ensure React detects the change
         setFeatures([...filteredFeatures]);
+        setFeaturesKey(prev => prev + 1); // Force GeoJSON re-render
         setLoadingFeatures(false);
       } else if (selection.type === 'category_score' && selection.category) {
         // Load category score - aggregate all dataset scores within this category
@@ -848,6 +851,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const filteredFeatures = await filterFeaturesByAdminScope(categoryFeatures);
         
         setFeatures([...filteredFeatures]);
+        setFeaturesKey(prev => prev + 1); // Force GeoJSON re-render
         setLoadingFeatures(false);
       } else if (selection.type === 'category' && selection.datasetId && selection.category) {
         // For categorical datasets, if "overall" is selected, show dataset scores
@@ -1258,6 +1262,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     // Clear cached features immediately to prevent stale data
     setOverallFeatures([]);
     setFeatures([]);
+    setFeaturesKey(prev => prev + 1); // Force map refresh
     
     // First, fetch the updated instance to get the new admin_scope
     const { data: updatedInstance, error: instanceError } = await supabase
@@ -1699,7 +1704,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <MapBoundsController features={features} />
               {features.length > 0 && (
                 <GeoJSON 
-                  key={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}`}
+                  key={`geojson-${selectedLayer.type}-${selectedLayer.datasetId || 'overall'}-${selectedLayer.category || ''}-${featuresKey}`}
                   data={{
                     type: 'FeatureCollection',
                     features: features
