@@ -44,8 +44,13 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
   // When ADM1 selection changes → load its ADM2s
   // --------------------------------------------------
   useEffect(() => {
-    if (selectedAdm1.length > 0) loadAdm2();
-    else setAdm2Options([]);
+    if (selectedAdm1.length > 0) {
+      loadAdm2();
+    } else {
+      setAdm2Options([]);
+      setSelectedAdm2([]);
+      setAdm3GeoJSON(null);
+    }
   }, [selectedAdm1]);
 
   const loadAdm2 = async () => {
@@ -55,15 +60,25 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
       .eq('admin_level', 'ADM2')
       .in('parent_pcode', selectedAdm1);
 
-    if (!error && data) setAdm2Options(data);
-    else console.error('ADM2 load error:', error);
+    if (!error && data) {
+      setAdm2Options(data);
+      setSelectedAdm2((prev) =>
+        prev.filter((code) => data.some((opt) => opt.admin_pcode === code))
+      );
+    } else {
+      console.error('ADM2 load error:', error);
+    }
   };
 
   // --------------------------------------------------
   // Load ADM3 polygons for preview
   // --------------------------------------------------
   useEffect(() => {
-    if (selectedAdm2.length > 0) loadAdm3();
+    if (selectedAdm2.length > 0) {
+      loadAdm3();
+    } else {
+      setAdm3GeoJSON(null);
+    }
   }, [selectedAdm2]);
 
   const loadAdm3 = async () => {
@@ -167,12 +182,13 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
                 <input
                   type="checkbox"
                   checked={selectedAdm1.includes(opt.admin_pcode)}
-                  disabled={adm2Options.length > 0}
                   onChange={(e) => {
-                    if (e.target.checked)
-                      setSelectedAdm1([...selectedAdm1, opt.admin_pcode]);
-                    else
-                      setSelectedAdm1(selectedAdm1.filter((x) => x !== opt.admin_pcode));
+                    setSelectedAdm1((prev) => {
+                      if (e.target.checked) {
+                        return [...prev, opt.admin_pcode];
+                      }
+                      return prev.filter((x) => x !== opt.admin_pcode);
+                    });
                   }}
                 />
                 {opt.name}
