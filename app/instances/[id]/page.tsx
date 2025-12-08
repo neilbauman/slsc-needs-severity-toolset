@@ -500,9 +500,13 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       console.log(`Filtered features by admin_scope: ${features.length} -> ${filtered.length}`);
     }
     
-    // Safety: if filtering would drop everything, fall back to the original features
-    if (filtered.length === 0 && features.length > 0) {
-      console.warn('Admin scope filtering removed all features; returning unfiltered features to avoid empty map.');
+    // Safety: if filtering removes all or an unexpectedly large share, fall back
+    const removedAll = filtered.length === 0 && features.length > 0;
+    const removedTooMany = features.length > 50 && filtered.length < features.length * 0.6;
+    if (removedAll || removedTooMany) {
+      console.warn(
+        `Admin scope filtering removed too many features (${features.length} -> ${filtered.length}); returning unfiltered features to avoid gaps.`
+      );
       return features;
     }
     
