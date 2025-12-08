@@ -500,6 +500,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       console.log(`Filtered features by admin_scope: ${features.length} -> ${filtered.length}`);
     }
     
+    // Safety: if filtering would drop everything, fall back to the original features
+    if (filtered.length === 0 && features.length > 0) {
+      console.warn('Admin scope filtering removed all features; returning unfiltered features to avoid empty map.');
+      return features;
+    }
+    
     return filtered;
   };
 
