@@ -18,11 +18,12 @@ export interface ScoreLayerSelectorProps {
   categoryScores?: Record<string, number>;
   onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
   onScoreHazardEvent?: (hazardEventId: string) => void; // Callback to open scoring modal
+  onDeleteHazardEvent?: (hazardEventId: string) => void; // Callback to delete hazard event
   visibleHazardEvents?: Set<string>; // Set of visible hazard event IDs
   onToggleHazardEventVisibility?: (hazardEventId: string, visible: boolean) => void; // Callback to toggle visibility
 }
 
-export default function ScoreLayerSelector({ layers = [], categoryScores = {}, onSelect, onScoreHazardEvent, visibleHazardEvents, onToggleHazardEventVisibility }: ScoreLayerSelectorProps) {
+export default function ScoreLayerSelector({ layers = [], categoryScores = {}, onSelect, onScoreHazardEvent, onDeleteHazardEvent, visibleHazardEvents, onToggleHazardEventVisibility }: ScoreLayerSelectorProps) {
   const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
   // Initialize with all categories expanded by default
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -248,6 +249,20 @@ export default function ScoreLayerSelector({ layers = [], categoryScores = {}, o
                           title="Score this hazard event"
                         >
                           Score
+                        </button>
+                      )}
+                      {isHazardEvent && onDeleteHazardEvent && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (hazardEventId && onDeleteHazardEvent && confirm(`Are you sure you want to delete "${d.dataset_name}"? This will also delete all scores for this hazard event.`)) {
+                              onDeleteHazardEvent(hazardEventId);
+                            }
+                          }}
+                          className="text-xs px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-700"
+                          title="Delete this hazard event"
+                        >
+                          ×
                         </button>
                       )}
                       {d.avg_score !== null && (

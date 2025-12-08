@@ -614,11 +614,25 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         }
         
         console.log(`Loaded ${allScores.length} overall scores for locations with geometry`);
+        
+        // Debug: Check for Cebu-related admin_pcodes
+        const cebuPcodes = adminPcodesWithGeometry.filter(pcode => 
+          pcode.toLowerCase().includes('cebu') || 
+          geoMap.get(pcode)?.properties?.name?.toLowerCase().includes('cebu')
+        );
+        if (cebuPcodes.length > 0) {
+          console.log(`Found ${cebuPcodes.length} Cebu-related admin_pcodes with geometry:`, cebuPcodes);
+          const cebuScores = allScores.filter(s => cebuPcodes.includes(s.admin_pcode));
+          console.log(`Found ${cebuScores.length} Cebu-related scores:`, cebuScores.map(s => ({ pcode: s.admin_pcode, score: s.avg_score })));
+        } else {
+          console.warn('No Cebu-related admin_pcodes found in geometry!');
+        }
 
         // Create score map
         const scoreMap = new Map(allScores.map((s: any) => [s.admin_pcode, Number(s.avg_score)]));
 
-        // Combine scores with geometry
+        // Combine scores with geometry - include ALL features even if they don't have scores
+        // This ensures areas like Cebu appear on the map even if scores are missing
         const features = adminPcodesWithGeometry
           .map((pcode: string) => {
             const geoFeature = geoMap.get(pcode);
@@ -642,12 +656,24 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           })
           .filter((f: any) => f !== null);
         
-        console.log(`Created ${features.length} features with overall scores`);
+        console.log(`Created ${features.length} features with overall scores (${features.filter((f: any) => f.properties.has_score).length} with scores, ${features.filter((f: any) => !f.properties.has_score).length} without scores)`);
         
         // Filter by admin_scope if instance has one defined - use fresh instance state
         const currentAdminScope = instance?.admin_scope;
+        console.log(`Filtering by admin_scope:`, currentAdminScope?.length || 0, 'ADM2 codes');
         const filteredFeatures = await filterFeaturesByAdminScope(features, currentAdminScope);
         console.log(`After filtering by admin_scope: ${filteredFeatures.length} features (from ${features.length})`);
+        
+        // Debug: Check if Cebu features survived filtering
+        const cebuAfterFilter = filteredFeatures.filter((f: any) => 
+          f.properties.admin_pcode?.toLowerCase().includes('cebu') || 
+          f.properties.admin_name?.toLowerCase().includes('cebu')
+        );
+        if (cebuAfterFilter.length > 0) {
+          console.log(`Cebu features after filtering: ${cebuAfterFilter.length}`, cebuAfterFilter.map((f: any) => ({ pcode: f.properties.admin_pcode, name: f.properties.admin_name, has_score: f.properties.has_score })));
+        } else if (cebuPcodes.length > 0) {
+          console.error('Cebu features were filtered out! This suggests an admin_scope mismatch.');
+        }
         
         setFeatures(filteredFeatures);
         setOverallFeatures(filteredFeatures); // Cache for future use
@@ -1854,6 +1880,45 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 if (event) {
                   setSelectedHazardEvent(event);
                   setShowHazardScoringModal(true);
+                }
+              }}
+              onDeleteHazardEvent={async (hazardEventId) => {
+                if (!confirm('Are you sure you want to delete this hazard event? This will also delete all scores for this hazard event.')) {
+                  return;
+                }
+                try {
+                  const { error } = await supabase
+                    .from('hazard_events')
+                    .delete()
+                    .eq('id', hazardEventId)
+                    .eq('instance_id', instanceId);
+                  
+                  if (error) {
+                    console.error('Error deleting hazard event:', error);
+                    alert('Failed to delete hazard event: ' + error.message);
+                    return;
+                  }
+                  
+                  // Remove from local state
+                  setHazardEvents(prev => prev.filter(e => e.id !== hazardEventId));
+                  setVisibleHazardEvents(prev => {
+                    const newSet = new Set(prev);
+                    newSet.delete(hazardEventId);
+                    return newSet;
+                  });
+                  setLayerOptions(prev => prev.filter(l => l.hazard_event_id !== hazardEventId));
+                  
+                  // If this was the selected hazard, clear selection
+                  if (selectedHazardEvent?.id === hazardEventId) {
+                    setSelectedHazardEvent(null);
+                    setSelectedLayer({ type: 'overall' });
+                  }
+                  
+                  // Refresh data to update scores
+                  await fetchData();
+                } catch (err: any) {
+                  console.error('Error deleting hazard event:', err);
+                  alert('Failed to delete hazard event: ' + (err.message || 'Unknown error'));
                 }
               }}
               visibleHazardEvents={visibleHazardEvents}
