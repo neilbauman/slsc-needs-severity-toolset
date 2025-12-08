@@ -960,39 +960,72 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const adminPcodes = Array.from(scoreMap.keys());
         console.log(`Loaded ${scores.length} scores for hazard event ${selection.hazardEventId} across ${adminPcodes.length} admin areas`);
         
-        // Get geometry for all admin_pcodes that have scores using get_admin_boundaries_geojson
-        // Based on error message, function signature uses 'level' not 'in_level'
-        // Since function may not support filtering by admin_pcodes, we'll query all ADM3 and filter client-side
+        // Helper to fetch GeoJSON for a given admin level, trying both parameter names
+        const fetchGeoForLevel = async (level: 'ADM2' | 'ADM3') => {
+          const paramsList = [{ level }, { in_level: level }];
+          for (const params of paramsList) {
+            const res = await supabase.rpc('get_admin_boundaries_geojson', params as any);
+            if (!res.error && res.data) {
+              return res.data;
+            }
+          }
+          return null;
+        };
+
+        // Attempt to match geometry with the admin codes that have scores.
+        // First try ADM3 (usual), then fallback to ADM2 if ADM3 yields no matches.
+        const adminPcodeSet = new Set(adminPcodes);
         let geoData: any = null;
-        let geoError: any = null;
-        
-        // Query all ADM3 boundaries (function doesn't support filtering by admin_pcodes)
-        // Try both parameter names to handle different function signatures
-        let allGeoData: any = null;
-        let geoJsonRpcError: any = null;
-        
-        // First try with 'level' (as suggested by error message)
-        const result1 = await supabase.rpc('get_admin_boundaries_geojson', {
-          level: 'ADM3'
-        });
-        
-        if (result1.error) {
-          // Fallback to 'in_level' (as used in AffectedAreaModal)
-          const result2 = await supabase.rpc('get_admin_boundaries_geojson', {
-            in_level: 'ADM3'
-          });
-          if (result2.error) {
-            geoJsonRpcError = result2.error;
+
+        const tryFilter = (geo: any) => {
+          if (!geo) return [];
+          if (Array.isArray(geo)) {
+            return geo.filter((feature: any) => adminPcodeSet.has(feature?.properties?.admin_pcode));
+          }
+          if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
+            const filtered = geo.features.filter((feature: any) =>
+              adminPcodeSet.has(feature?.properties?.admin_pcode)
+            );
+            return { ...geo, features: filtered };
+          }
+          if (geo.type === 'Feature' && adminPcodeSet.has(geo.properties?.admin_pcode)) {
+            return [geo];
+          }
+          return [];
+        };
+
+        // Try ADM3
+        const geoAdm3 = await fetchGeoForLevel('ADM3');
+        let filteredGeo: any = tryFilter(geoAdm3);
+
+        // If no matches, try ADM2 (handles hazards scored at ADM2)
+        if (
+          (Array.isArray(filteredGeo) && filteredGeo.length === 0) ||
+          (filteredGeo?.features && filteredGeo.features.length === 0)
+        ) {
+          console.warn('No ADM3 geometry matched hazard scores; trying ADM2 fallback');
+          const geoAdm2 = await fetchGeoForLevel('ADM2');
+          const filteredGeo2 = tryFilter(geoAdm2);
+          filteredGeo = filteredGeo2;
+          // If ADM2 has matches, use it
+          if (
+            (Array.isArray(filteredGeo2) && filteredGeo2.length > 0) ||
+            (filteredGeo2?.features && filteredGeo2.features.length > 0)
+          ) {
+            geoData = geoAdm2;
           } else {
-            allGeoData = result2.data;
+            geoData = geoAdm3;
           }
         } else {
-          allGeoData = result1.data;
+          geoData = geoAdm3;
         }
-        
-        if (geoJsonRpcError) {
-          console.warn("Error fetching GeoJSON via RPC, trying direct view:", geoJsonRpcError);
-          // Fallback: try to get from view
+
+        // If still no matches, fallback to view by admin_pcode
+        if (
+          (!Array.isArray(filteredGeo) || filteredGeo.length === 0) &&
+          !(filteredGeo?.features && filteredGeo.features.length > 0)
+        ) {
+          console.warn("RPC geo fetch yielded no matches; falling back to view by admin_pcode");
           const { data: geoRows, error: geoViewError } = await supabase
             .from("v_instance_admin_scores_geojson")
             .select("admin_pcode, geojson")
@@ -1001,81 +1034,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           
           if (geoViewError) {
             console.error("Error fetching GeoJSON from view:", geoViewError);
-            geoError = geoViewError;
           } else if (geoRows && geoRows.length > 0) {
             geoData = { 
               type: 'FeatureCollection', 
               features: geoRows.map((r: any) => (typeof r.geojson === 'string' ? JSON.parse(r.geojson) : r.geojson))
             };
           }
-        } else {
-          // Filter to only admin_pcodes we need
-          const adminPcodeSet = new Set(adminPcodes);
-          if (allGeoData) {
-            if (Array.isArray(allGeoData)) {
-              geoData = allGeoData.filter((feature: any) => 
-                adminPcodeSet.has(feature.properties?.admin_pcode)
-              );
-            } else if (allGeoData.type === 'FeatureCollection' && allGeoData.features) {
-              geoData = {
-                ...allGeoData,
-                features: allGeoData.features.filter((feature: any) =>
-                  adminPcodeSet.has(feature.properties?.admin_pcode)
-                )
-              };
-            } else {
-              geoData = allGeoData;
-            }
-          }
-        }
-        
-        if (geoError) {
-          console.error("Error fetching GeoJSON:", geoError);
-          // Fallback: try to get from view
-          const { data: geoRows } = await supabase
-            .from("v_instance_admin_scores_geojson")
-            .select("admin_pcode, geojson")
-            .eq("instance_id", instanceId)
-            .in("admin_pcode", adminPcodes);
-          
-          if (geoRows && geoRows.length > 0) {
-            const hazardFeatures = geoRows
-              .map((row: any) => {
-                try {
-                  const feature = typeof row.geojson === 'string' 
-                    ? JSON.parse(row.geojson) 
-                    : row.geojson;
-                  
-                  const hazardScore = scoreMap.get(row.admin_pcode);
-                  const magnitudeValue = magnitudeMap.get(row.admin_pcode);
-                  
-                  return {
-                    ...feature,
-                    properties: {
-                      ...feature.properties,
-                      admin_pcode: row.admin_pcode,
-                      admin_name: feature.properties?.admin_name || feature.properties?.name,
-                      score: hazardScore,
-                      magnitude_value: magnitudeValue,
-                      has_score: hazardScore !== undefined,
-                    }
-                  };
-                } catch (e) {
-                  console.warn("Error parsing GeoJSON feature:", e, row);
-                  return null;
-                }
-              })
-              .filter((f: any) => f !== null);
-            
-            console.log(`Mapped ${hazardFeatures.length} features with hazard event scores (fallback)`);
-            setFeatures([...hazardFeatures]);
-            setLoadingFeatures(false);
-            return;
-          }
-          
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
         }
         
         // Parse GeoJSON response (should be a FeatureCollection)
