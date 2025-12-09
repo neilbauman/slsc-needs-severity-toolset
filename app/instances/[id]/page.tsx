@@ -650,6 +650,16 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Loaded ${allScores.length} ${scoreCategory.toLowerCase()} scores for locations with geometry`);
         
+        // Debug: Log priority scores if they exist
+        if (selection.type === 'priority') {
+          if (allScores.length === 0) {
+            console.warn('⚠️ No priority scores found! Make sure you have computed priority ranking first.');
+            console.warn('💡 Go to "Adjust Scoring" → Click "Compute Priority Ranking" button');
+          } else {
+            console.log(`✅ Found ${allScores.length} priority scores. Sample:`, allScores.slice(0, 5).map((s: any) => ({ pcode: s.admin_pcode, score: s.avg_score })));
+          }
+        }
+        
         // Debug: Check for Cebu-related admin_pcodes (only for overall, not priority)
         if (selection.type === 'overall') {
           const cebuPcodes = adminPcodesWithGeometry.filter(pcode => {
@@ -728,7 +738,15 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           })
           .filter((f: any) => f !== null);
         
-        console.log(`Created ${features.length} features with ${scoreCategory.toLowerCase()} scores (${features.filter((f: any) => f.properties.has_score).length} with scores, ${features.filter((f: any) => !f.properties.has_score).length} without scores)`);
+        const featuresWithScores = features.filter((f: any) => f.properties.has_score).length;
+        const featuresWithoutScores = features.filter((f: any) => !f.properties.has_score).length;
+        console.log(`Created ${features.length} features with ${scoreCategory.toLowerCase()} scores (${featuresWithScores} with scores, ${featuresWithoutScores} without scores)`);
+        
+        // Warn if no scores found for priority
+        if (selection.type === 'priority' && featuresWithScores === 0) {
+          console.error('❌ No priority scores found in features! This means priority ranking has not been computed yet.');
+          console.error('💡 SOLUTION: Go to "Adjust Scoring" → Click "Compute Priority Ranking" button');
+        }
         
         // Filter by admin_scope if instance has one defined - use fresh instance state
         const currentAdminScope = instance?.admin_scope;
@@ -1815,6 +1833,21 @@ export default function InstancePage({ params }: { params: { id: string } }) {
               <div className="text-center">
                 <p className="mb-2">Loading map data...</p>
                 <p className="text-sm">Switching to selected dataset...</p>
+              </div>
+            </div>
+          ) : selectedLayer.type === 'priority' && features.length > 0 && features.filter((f: any) => f.properties.has_score).length === 0 ? (
+            <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
+              <div className="text-center p-4 border rounded-lg" style={{ backgroundColor: 'rgba(147, 51, 234, 0.05)', borderColor: 'rgba(147, 51, 234, 0.3)' }}>
+                <p className="mb-2 font-semibold" style={{ color: 'var(--gsc-purple, #9333ea)' }}>Priority Ranking Not Computed</p>
+                <p className="text-sm mb-3">Priority scores have not been computed yet for this instance.</p>
+                <p className="text-xs mb-4">To compute priority ranking:</p>
+                <ol className="text-xs text-left list-decimal list-inside space-y-1 mb-4">
+                  <li>Click "Adjust Scoring" button</li>
+                  <li>Click "Compute Priority Ranking" button (purple button)</li>
+                  <li>Wait for the computation to complete</li>
+                  <li>Return here to view the priority ranking</li>
+                </ol>
+                <p className="text-xs italic">Note: Priority ranking creates relative scores (1-5) from absolute severity scores.</p>
               </div>
             </div>
           ) : (
