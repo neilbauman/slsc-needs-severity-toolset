@@ -8,15 +8,18 @@ export default function InstanceRecomputePanel({ instanceId }:{ instanceId:strin
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string|null>(null);
 
-  const run = async (fn: 'framework'|'final') => {
+  const run = async (fn: 'framework'|'final'|'priority') => {
     setBusy(true); setMsg(null);
     try{
       // call Postgres functions via RPC (assuming you created http callables or use SQL over pg net)
       // Here we hit a simple REST endpoint you can wire later, for now we trigger SQL via Supabase SQL RPC
-      const fnName = fn === 'framework' ? 'score_framework_aggregate' : 'score_final_aggregate';
+      const fnName = fn === 'framework' ? 'score_framework_aggregate' 
+                    : fn === 'final' ? 'score_final_aggregate'
+                    : 'score_priority_ranking';
       const { data, error } = await supabase.rpc(fnName, { in_instance_id: instanceId });
       if (error) throw error;
-      setMsg(`${fn === 'framework' ? 'Framework' : 'Final'} recompute OK`);
+      const fnLabel = fn === 'framework' ? 'Framework' : fn === 'final' ? 'Final' : 'Priority Ranking';
+      setMsg(`${fnLabel} recompute OK`);
     }catch(e:any){
       console.error(e);
       setMsg(e.message || 'Error');
@@ -35,6 +38,7 @@ export default function InstanceRecomputePanel({ instanceId }:{ instanceId:strin
         <div className="flex gap-2">
           <button className="btn btn-secondary" disabled={busy} onClick={()=>run('framework')}>Recompute Framework</button>
           <button className="btn btn-primary" disabled={busy} onClick={()=>run('final')}>Recompute Final</button>
+          <button className="btn" style={{ backgroundColor: 'var(--gsc-purple, #9333ea)', color: '#fff' }} disabled={busy} onClick={()=>run('priority')}>Compute Priority</button>
         </div>
       </div>
       {msg && <div className="text-xs mt-2">{msg}</div>}

@@ -406,8 +406,9 @@ export default function HazardEventScoringModal({
     console.log('Scoring applied successfully:', data);
     
     // Check if scores were actually created
+    let scoredLocations = 0;
     if (data && typeof data === 'object') {
-      const scoredLocations = data.scored_locations || data.scored_count || 0;
+      scoredLocations = data.scored_locations || data.scored_count || 0;
       const totalAdminAreas = data.total_admin_areas || 0;
       const skippedNoGeom = data.skipped_no_geometry || 0;
       const skippedNoMagnitude = data.skipped_no_magnitude || 0;
@@ -434,19 +435,46 @@ export default function HazardEventScoringModal({
         setLoading(false);
         return;
       }
-      setMessage(`✅ Scoring complete! ${scoredLocations} locations scored with average score of ${(data.average_score || 0).toFixed(2)}.`);
-    } else {
-      setMessage("✅ Scoring complete! Scores calculated for all locations.");
     }
 
     // Save config after successful scoring
     await handleSaveConfig();
 
+    // Automatically aggregate hazard scores into category and overall scores
+    setMessage("✅ Scoring complete! Aggregating into category and overall scores...");
+    
+    try {
+      // Step 1: Aggregate into Hazard category score
+      const { error: frameworkError } = await supabase.rpc('score_framework_aggregate', {
+        in_instance_id: instance.id,
+      });
+      
+      if (frameworkError) {
+        console.warn('Warning: Failed to aggregate framework scores:', frameworkError);
+        setMessage(`✅ Scoring complete! ${scoredLocations} locations scored. ⚠️ Could not auto-aggregate category scores. Please use "Adjust Scoring" → "Compute Framework Rollup" manually.`);
+      } else {
+        // Step 2: Aggregate into Overall score
+        const { error: finalError } = await supabase.rpc('score_final_aggregate', {
+          in_instance_id: instance.id,
+        });
+        
+        if (finalError) {
+          console.warn('Warning: Failed to aggregate final scores:', finalError);
+          setMessage(`✅ Scoring complete! ${scoredLocations} locations scored. Category scores aggregated, but could not aggregate overall scores. Please use "Adjust Scoring" → "Compute Final Rollup" manually.`);
+        } else {
+          setMessage(`✅ Scoring complete! ${scoredLocations} locations scored. Category and overall scores have been automatically updated.`);
+        }
+      }
+    } catch (aggError: any) {
+      console.warn('Warning: Error during automatic aggregation:', aggError);
+      setMessage(`✅ Scoring complete! ${scoredLocations} locations scored. ⚠️ Could not auto-aggregate scores. Please use "Adjust Scoring" to compute rollups manually.`);
+    }
+
     // Close and refresh parent
     if (onSaved) await onSaved();
     setTimeout(() => {
       onClose();
-    }, 1500);
+    }, 2000);
     setLoading(false);
   };
 

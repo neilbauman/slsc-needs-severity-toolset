@@ -94,7 +94,7 @@ BEGIN
     FROM instance_scoring_weights
     WHERE instance_id = v_instance_id;
 
-    -- Build config with weighted_mean method and loaded weights
+    -- Build config with weighted_normalized_sum method and loaded weights
     -- For Hazard category, automatically use compounding_hazards if multiple hazard events exist
     DECLARE
       v_hazard_event_count INTEGER;
@@ -104,19 +104,19 @@ BEGIN
       FROM hazard_events
       WHERE instance_id = v_instance_id;
       
-      -- Use compounding_hazards if multiple hazard events, otherwise weighted_mean
+      -- Use compounding_hazards if multiple hazard events, otherwise weighted_normalized_sum
       v_hazard_method := CASE 
         WHEN v_hazard_event_count > 1 THEN 'compounding_hazards'
-        ELSE 'weighted_mean'
+        ELSE 'weighted_normalized_sum'
       END;
       
       v_config := jsonb_build_object(
         'categories', jsonb_build_array(
-          jsonb_build_object('key', 'SSC Framework - P1', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-          jsonb_build_object('key', 'SSC Framework - P2', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-          jsonb_build_object('key', 'SSC Framework - P3', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'SSC Framework - P1', 'method', 'weighted_normalized_sum', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'SSC Framework - P2', 'method', 'weighted_normalized_sum', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
+          jsonb_build_object('key', 'SSC Framework - P3', 'method', 'weighted_normalized_sum', 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
           jsonb_build_object('key', 'Hazard', 'method', v_hazard_method, 'weights', COALESCE(v_weights_map, '{}'::jsonb)),
-          jsonb_build_object('key', 'Underlying Vulnerability', 'method', 'weighted_mean', 'weights', COALESCE(v_weights_map, '{}'::jsonb))
+          jsonb_build_object('key', 'Underlying Vulnerability', 'method', 'weighted_normalized_sum', 'weights', COALESCE(v_weights_map, '{}'::jsonb))
         )
       );
     END;
@@ -142,6 +142,20 @@ BEGIN
         WHEN v_method = 'weighted_mean' OR v_method = 'custom_weighted' THEN
           CASE 
             WHEN SUM(weight) > 0 THEN SUM(score * weight) / SUM(weight)
+            ELSE NULL
+          END
+        WHEN v_method = 'weighted_normalized_sum' THEN
+          -- Weighted sum of normalized scores with renormalization
+          -- Formula:
+          --   1. Normalize each score: (score - 1) / 4 (maps 1→0, 5→1)
+          --   2. Apply weights: normalized_score * weight
+          --   3. Sum weighted normalized scores: SUM(normalized * weight)
+          --   4. Renormalize to 1-5: (sum / total_weight) * 4 + 1
+          CASE 
+            WHEN SUM(weight) > 0 THEN
+              LEAST(5.0, GREATEST(1.0,
+                (SUM((score - 1.0) / 4.0 * weight) / NULLIF(SUM(weight), 0)) * 4.0 + 1.0
+              ))
             ELSE NULL
           END
         WHEN v_method = 'compounding_hazards' THEN
@@ -184,7 +198,7 @@ BEGIN
         ids.admin_pcode,
         ids.score,
         CASE 
-          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean' OR v_method = 'compounding_hazards') AND v_weights ? ids.dataset_id::TEXT 
+          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean' OR v_method = 'weighted_normalized_sum' OR v_method = 'compounding_hazards') AND v_weights ? ids.dataset_id::TEXT 
           THEN (v_weights->ids.dataset_id::TEXT)::NUMERIC
           ELSE 1.0
         END AS weight
@@ -202,7 +216,7 @@ BEGIN
         hes.admin_pcode,
         hes.score,
         CASE 
-          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean' OR v_method = 'compounding_hazards') AND v_weights ? ('hazard_event_' || hes.hazard_event_id::TEXT)
+          WHEN (v_method = 'custom_weighted' OR v_method = 'weighted_mean' OR v_method = 'weighted_normalized_sum' OR v_method = 'compounding_hazards') AND v_weights ? ('hazard_event_' || hes.hazard_event_id::TEXT)
           THEN (v_weights->('hazard_event_' || hes.hazard_event_id::TEXT))::NUMERIC
           ELSE 1.0
         END AS weight

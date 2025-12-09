@@ -2,7 +2,8 @@
 -- CREATE OR REPLACE v_instance_admin_scores VIEW
 -- ==============================
 -- This view provides overall scores for each admin area in an instance
--- It reads from instance_category_scores with category = 'Overall'
+-- It reads from instance_category_scores with category = 'Overall' (absolute severity)
+-- Note: Use 'Overall' for PIN calculations, 'Priority' for relative ranking
 
 DROP VIEW IF EXISTS public.v_instance_admin_scores;
 
@@ -21,5 +22,4 @@ WHERE ics.category = 'Overall';
 GRANT SELECT ON public.v_instance_admin_scores TO anon, authenticated;
 
 -- Comments
-COMMENT ON VIEW public.v_instance_admin_scores IS 'Provides overall vulnerability scores for each admin area, reading from instance_category_scores with category = Overall';
-
+COMMENT ON VIEW public.v_instance_admin_scores IS 'Provides overall vulnerability scores (absolute severity) for each admin area, reading from instance_category_scores with category = Overall. Use for PIN calculations. For relative prioritization, use category = Priority.';

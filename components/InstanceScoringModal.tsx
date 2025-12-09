@@ -817,6 +817,22 @@ export default function InstanceScoringModal({
           // Continue anyway - weights are saved
         } else {
           console.log('Final scores recomputed successfully');
+          
+          // Automatically compute priority ranking after final scores
+          try {
+            const { error: priorityError } = await supabase.rpc('score_priority_ranking', {
+              in_instance_id: instance.id,
+            });
+            if (priorityError) {
+              console.warn('Warning: Could not compute priority ranking:', priorityError);
+              // Don't fail the whole operation if priority ranking fails
+            } else {
+              console.log('Priority ranking computed successfully');
+            }
+          } catch (priorityErr: any) {
+            console.warn('Warning: Exception computing priority ranking:', priorityErr);
+            // Don't fail the whole operation if priority ranking fails
+          }
         }
       } catch (err: any) {
         console.error('Exception computing final scores:', err);

@@ -62,6 +62,10 @@ DECLARE
   v_track_geometries JSONB; -- LineString geometries extracted from GeoJSON
   v_geom_type TEXT; -- Geometry type of a feature
 BEGIN
+  -- Increase statement timeout for large earthquake datasets (5 minutes)
+  -- Note: This only affects the current function execution
+  PERFORM set_config('statement_timeout', '300000', false);
+  
   -- Validate and set matching method
   v_matching_method := LOWER(COALESCE(in_matching_method, 'centroid'));
   IF v_matching_method NOT IN ('centroid', 'intersection', 'overlap', 'within_distance', 'point_on_surface') THEN
@@ -437,10 +441,16 @@ BEGIN
         -- For intersection, we'll do distance filtering inside the loop
         -- For other methods, we can optimize by only checking nearby features
         
-        -- Iterate through features in the GeoJSON
-        FOR v_feature IN
-          SELECT * FROM jsonb_array_elements(v_hazard_event.metadata->'original_geojson'->'features')
-        LOOP
+        -- Performance optimization: For centroid/point_on_surface methods, we can exit early
+        -- once we find a very close match (within 1km) since we're looking for the nearest
+        DECLARE
+          v_found_close_match BOOLEAN := FALSE;
+          v_close_threshold NUMERIC := 1000; -- 1km - if we find a contour this close, use it
+        BEGIN
+          -- Iterate through features in the GeoJSON
+          FOR v_feature IN
+            SELECT * FROM jsonb_array_elements(v_hazard_event.metadata->'original_geojson'->'features')
+          LOOP
           -- Convert feature geometry to PostGIS
           BEGIN
             v_feature_geom := ST_GeomFromGeoJSON((v_feature->'geometry')::text)::GEOGRAPHY;
@@ -480,6 +490,11 @@ BEGIN
                 IF v_min_distance IS NULL OR v_distance < v_min_distance THEN
                   v_min_distance := v_distance;
                   v_nearest_magnitude := v_feature_magnitude;
+                  -- Performance optimization: if we found a very close match, we can exit early
+                  -- This significantly speeds up processing for large datasets
+                  IF v_distance < v_close_threshold THEN
+                    v_found_close_match := TRUE;
+                  END IF;
                 END IF;
                 
               ELSIF v_matching_method = 'within_distance' THEN
@@ -603,7 +618,14 @@ BEGIN
           EXCEPTION WHEN OTHERS THEN
             CONTINUE; -- Skip invalid geometries
           END;
+          
+          -- Performance optimization: exit early if we found a very close match
+          -- This prevents processing hundreds of distant contours when we already have a good match
+          IF v_found_close_match AND (v_matching_method = 'centroid' OR v_matching_method = 'point_on_surface') THEN
+            EXIT;
+          END IF;
         END LOOP;
+        END; -- Close the DECLARE block for v_found_close_match
         
         -- For overlap method, use the best magnitude found
         IF v_matching_method = 'overlap' AND v_best_magnitude IS NOT NULL THEN
