@@ -820,18 +820,30 @@ export default function InstanceScoringModal({
           
           // Automatically compute priority ranking after final scores
           try {
-            const { error: priorityError } = await supabase.rpc('score_priority_ranking', {
+            const { data: priorityData, error: priorityError } = await supabase.rpc('score_priority_ranking', {
               in_instance_id: instance.id,
             });
             if (priorityError) {
               console.warn('Warning: Could not compute priority ranking:', priorityError);
-              // Don't fail the whole operation if priority ranking fails
+              // Add a note to the error message but don't fail the whole operation
+              const priorityWarning = `\n\nNote: Priority ranking could not be computed automatically: ${priorityError.message}. You can compute it manually using the "Compute Priority Ranking" button.`;
+              if (error) {
+                setError(error + priorityWarning);
+              } else {
+                setError(priorityWarning.trim());
+              }
             } else {
-              console.log('Priority ranking computed successfully');
+              console.log('Priority ranking computed successfully', priorityData);
+              // Show success in console, but don't interrupt the user flow
             }
           } catch (priorityErr: any) {
             console.warn('Warning: Exception computing priority ranking:', priorityErr);
-            // Don't fail the whole operation if priority ranking fails
+            const priorityWarning = `\n\nNote: Priority ranking could not be computed automatically: ${priorityErr.message}. You can compute it manually using the "Compute Priority Ranking" button.`;
+            if (error) {
+              setError(error + priorityWarning);
+            } else {
+              setError(priorityWarning.trim());
+            }
           }
         }
       } catch (err: any) {
@@ -1361,6 +1373,46 @@ export default function InstanceScoringModal({
             <div className="whitespace-pre-wrap">{error}</div>
           </div>
         )}
+
+        {/* Priority Ranking Button */}
+        <div className="mb-3 p-2 rounded border" style={{ backgroundColor: 'rgba(147, 51, 234, 0.05)', borderColor: 'rgba(147, 51, 234, 0.3)' }}>
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <div className="text-xs font-semibold mb-1" style={{ color: 'var(--gsc-gray)' }}>Priority Ranking</div>
+              <div className="text-xs" style={{ color: 'var(--gsc-gray)' }}>
+                Creates relative prioritization (1-5) from absolute severity scores. Highest severity → Priority 5, Lowest → Priority 1.
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                  const { data, error: priorityError } = await supabase.rpc('score_priority_ranking', {
+                    in_instance_id: instance.id,
+                  });
+                  if (priorityError) {
+                    throw priorityError;
+                  }
+                  // Show success message
+                  const message = data?.message || `Priority ranking computed successfully. ${data?.upserted_rows || 0} locations ranked.`;
+                  alert(`✅ ${message}`);
+                  if (onSaved) await onSaved();
+                } catch (err: any) {
+                  console.error('Error computing priority ranking:', err);
+                  setError(`Failed to compute priority ranking: ${err.message || 'Unknown error'}`);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+              className="px-3 py-1.5 rounded text-xs font-medium text-white hover:opacity-90 disabled:opacity-50 transition ml-3"
+              style={{ backgroundColor: 'var(--gsc-purple, #9333ea)' }}
+            >
+              {loading ? 'Computing…' : 'Compute Priority Ranking'}
+            </button>
+          </div>
+        </div>
 
         <div className="flex justify-end gap-2 mt-3 pt-3 border-t" style={{ borderColor: 'var(--gsc-light-gray)' }}>
           <button
