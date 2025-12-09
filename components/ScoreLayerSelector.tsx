@@ -16,7 +16,7 @@ export interface ScoreLayerSelectorProps {
   instanceId: string;
   layers?: LayerOption[];
   categoryScores?: Record<string, number>;
-  onSelect?: (selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
+  onSelect?: (selection: { type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }) => void;
   onScoreHazardEvent?: (hazardEventId: string) => void; // Callback to open scoring modal
   onDeleteHazardEvent?: (hazardEventId: string) => void; // Callback to delete hazard event
   visibleHazardEvents?: Set<string>; // Set of visible hazard event IDs
@@ -24,12 +24,12 @@ export interface ScoreLayerSelectorProps {
 }
 
 export default function ScoreLayerSelector({ layers = [], categoryScores = {}, onSelect, onScoreHazardEvent, onDeleteHazardEvent, visibleHazardEvents, onToggleHazardEventVisibility }: ScoreLayerSelectorProps) {
-  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
+  const [activeSelection, setActiveSelection] = useState<{ type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, hazardEventId?: string }>({ type: 'overall' });
   // Initialize with all categories expanded by default
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   // ✅ Handle selection
-  const handleSelect = (type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string) => {
+  const handleSelect = (type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string) => {
     // If datasetId starts with 'hazard_event_', extract the actual hazard event ID
     if (datasetId && datasetId.startsWith('hazard_event_')) {
       const actualHazardEventId = datasetId.replace('hazard_event_', '');
@@ -120,6 +120,23 @@ export default function ScoreLayerSelector({ layers = [], categoryScores = {}, o
           }}
         >
           Overall Score
+        </button>
+      </div>
+      
+      {/* Priority Ranking Option */}
+      <div className="mb-1">
+        <button
+          onClick={() => handleSelect('priority')}
+          className="block w-full text-left px-1.5 py-1 rounded font-semibold text-xs transition-colors"
+          style={{
+            backgroundColor: activeSelection.type === 'priority' 
+              ? 'var(--gsc-purple, #9333ea)' 
+              : 'var(--gsc-light-gray)',
+            color: activeSelection.type === 'priority' ? '#fff' : 'var(--gsc-gray)'
+          }}
+          title="Relative priority ranking (1-5). Highest severity → Priority 5, Lowest → Priority 1"
+        >
+          Priority Ranking
         </button>
       </div>
 

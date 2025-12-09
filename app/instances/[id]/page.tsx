@@ -79,7 +79,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [hazardEventLayers, setHazardEventLayers] = useState<any[]>([]);
   const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set()); // Track which hazard events are visible
   const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string>, geometryTypes?: Set<string> }>>({}); // Feature-level filters per hazard event
-  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
+  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
   const [layerOptions, setLayerOptions] = useState<LayerOption[]>([]);
   const [categoryScoreMap, setCategoryScoreMap] = useState<Record<string, number>>({});
   const [showImportHazardModal, setShowImportHazardModal] = useState(false);
@@ -514,7 +514,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   };
 
   const loadFeaturesForSelection = async (
-    selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
+    selection: { type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
     overallFeatures?: any[]
   ) => {
     try {
@@ -529,16 +529,18 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         category: selection.category
       });
       
-      if (selection.type === 'overall') {
-        // Use overall instance scores
-        if (overallFeatures) {
+      if (selection.type === 'overall' || selection.type === 'priority') {
+        // Use overall or priority instance scores
+        const scoreCategory = selection.type === 'priority' ? 'Priority' : 'Overall';
+        
+        if (selection.type === 'overall' && overallFeatures) {
           console.log("Using cached overall features:", overallFeatures.length);
           setFeatures(overallFeatures);
           setLoadingFeatures(false);
           return;
         }
         
-        console.log("Loading overall scores from v_instance_admin_scores");
+        console.log(`Loading ${scoreCategory.toLowerCase()} scores from instance_category_scores`);
         
         // First, get all available admin_pcodes with geometry from geojson view
         const { data: geoRows, error: geoError } = await supabase
@@ -597,70 +599,105 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         let allScores: any[] = [];
         for (const chunk of chunks) {
-          const { data: scores, error: scoresError } = await supabase
-            .from("v_instance_admin_scores")
-            .select("admin_pcode, name, avg_score")
-            .eq("instance_id", instanceId)
-            .in("admin_pcode", chunk);
-          
-          if (scoresError) {
-            console.error("Error fetching overall scores:", scoresError);
-            setFeatures([]);
-            setLoadingFeatures(false);
-            return;
-          } else if (scores) {
-            allScores = [...allScores, ...scores];
+          // For Priority, query instance_category_scores directly
+          // For Overall, use the view (which is faster)
+          if (selection.type === 'priority') {
+            const { data: scores, error: scoresError } = await supabase
+              .from("instance_category_scores")
+              .select("admin_pcode, score")
+              .eq("instance_id", instanceId)
+              .eq("category", "Priority")
+              .in("admin_pcode", chunk);
+            
+            if (scoresError) {
+              console.error("Error fetching priority scores:", scoresError);
+              setFeatures([]);
+              setLoadingFeatures(false);
+              return;
+            } else if (scores) {
+              // Get names from admin_boundaries
+              const pcodes = scores.map((s: any) => s.admin_pcode);
+              const { data: boundaries } = await supabase
+                .from("admin_boundaries")
+                .select("admin_pcode, name")
+                .eq("admin_level", "ADM3")
+                .in("admin_pcode", pcodes);
+              
+              const nameMap = new Map((boundaries || []).map((b: any) => [b.admin_pcode, b.name]));
+              allScores = [...allScores, ...scores.map((s: any) => ({
+                admin_pcode: s.admin_pcode,
+                name: nameMap.get(s.admin_pcode) || s.admin_pcode,
+                avg_score: s.score
+              }))];
+            }
+          } else {
+            const { data: scores, error: scoresError } = await supabase
+              .from("v_instance_admin_scores")
+              .select("admin_pcode, name, avg_score")
+              .eq("instance_id", instanceId)
+              .in("admin_pcode", chunk);
+            
+            if (scoresError) {
+              console.error("Error fetching overall scores:", scoresError);
+              setFeatures([]);
+              setLoadingFeatures(false);
+              return;
+            } else if (scores) {
+              allScores = [...allScores, ...scores];
+            }
           }
         }
         
-        console.log(`Loaded ${allScores.length} overall scores for locations with geometry`);
+        console.log(`Loaded ${allScores.length} ${scoreCategory.toLowerCase()} scores for locations with geometry`);
         
-        // Debug: Check for Cebu-related admin_pcodes
-        const cebuPcodes = adminPcodesWithGeometry.filter(pcode => {
-          const feature = geoMap.get(pcode);
-          const name = feature?.properties?.name?.toLowerCase() || '';
-          return pcode.toLowerCase().includes('cebu') || name.includes('cebu');
-        });
-        if (cebuPcodes.length > 0) {
-          console.log(`🔍 Found ${cebuPcodes.length} Cebu-related admin_pcodes with geometry:`, cebuPcodes);
-          const cebuScores = allScores.filter(s => cebuPcodes.includes(s.admin_pcode));
-          console.log(`🔍 Found ${cebuScores.length} Cebu-related overall scores:`, cebuScores.map(s => ({ pcode: s.admin_pcode, score: s.avg_score })));
-          
-          // Check if Cebu has hazard scores
-          if (cebuPcodes.length > 0) {
-            const { data: cebuHazardScores } = await supabase
-              .from('hazard_event_scores')
-              .select('admin_pcode, score, hazard_event_id')
-              .eq('instance_id', instanceId)
-              .in('admin_pcode', cebuPcodes);
-            console.log(`🔍 Found ${cebuHazardScores?.length || 0} Cebu-related hazard event scores:`, cebuHazardScores);
-            
-            // Check if Cebu has Hazard category scores
-            const { data: cebuCategoryScores } = await supabase
-              .from('instance_category_scores')
-              .select('admin_pcode, score, category')
-              .eq('instance_id', instanceId)
-              .in('admin_pcode', cebuPcodes)
-              .in('category', ['Hazard', 'Overall']);
-            console.log(`🔍 Found ${cebuCategoryScores?.length || 0} Cebu-related category scores:`, cebuCategoryScores);
-            
-            // Diagnostic: If hazard scores exist but no overall scores, suggest recomputing
-            if (cebuHazardScores && cebuHazardScores.length > 0 && cebuScores.length === 0) {
-              console.warn('⚠️ DIAGNOSIS: Cebu has hazard event scores but no overall scores!');
-              console.warn('💡 SOLUTION: Go to "Adjust Scoring" → "Compute Framework Rollup" → "Compute Final Rollup" to aggregate hazard scores into overall scores.');
-            } else if (cebuScores.length === 0 && cebuPcodes.length > 0) {
-              console.warn('⚠️ DIAGNOSIS: Cebu areas found but no scores at all!');
-              console.warn('💡 SOLUTION: Make sure the hazard event is scored, then recompute overall scores via "Adjust Scoring".');
-            }
-          }
-        } else {
-          console.warn('⚠️ No Cebu-related admin_pcodes found in geometry! Checking all admin_pcodes...');
-          // Check if any admin_pcodes contain 'cebu' in the name
-          const allCebuNames = Array.from(geoMap.entries()).filter(([pcode, feature]) => {
+        // Debug: Check for Cebu-related admin_pcodes (only for overall, not priority)
+        if (selection.type === 'overall') {
+          const cebuPcodes = adminPcodesWithGeometry.filter(pcode => {
+            const feature = geoMap.get(pcode);
             const name = feature?.properties?.name?.toLowerCase() || '';
-            return name.includes('cebu');
+            return pcode.toLowerCase().includes('cebu') || name.includes('cebu');
           });
-          console.log(`🔍 Found ${allCebuNames.length} features with 'cebu' in name:`, allCebuNames.map(([pcode, f]) => ({ pcode, name: f.properties?.name })));
+          if (cebuPcodes.length > 0) {
+            console.log(`🔍 Found ${cebuPcodes.length} Cebu-related admin_pcodes with geometry:`, cebuPcodes);
+            const cebuScores = allScores.filter(s => cebuPcodes.includes(s.admin_pcode));
+            console.log(`🔍 Found ${cebuScores.length} Cebu-related overall scores:`, cebuScores.map(s => ({ pcode: s.admin_pcode, score: s.avg_score })));
+            
+            // Check if Cebu has hazard scores
+            if (cebuPcodes.length > 0) {
+              const { data: cebuHazardScores } = await supabase
+                .from('hazard_event_scores')
+                .select('admin_pcode, score, hazard_event_id')
+                .eq('instance_id', instanceId)
+                .in('admin_pcode', cebuPcodes);
+              console.log(`🔍 Found ${cebuHazardScores?.length || 0} Cebu-related hazard event scores:`, cebuHazardScores);
+              
+              // Check if Cebu has Hazard category scores
+              const { data: cebuCategoryScores } = await supabase
+                .from('instance_category_scores')
+                .select('admin_pcode, score, category')
+                .eq('instance_id', instanceId)
+                .in('admin_pcode', cebuPcodes)
+                .in('category', ['Hazard', 'Overall']);
+              console.log(`🔍 Found ${cebuCategoryScores?.length || 0} Cebu-related category scores:`, cebuCategoryScores);
+              
+              // Diagnostic: If hazard scores exist but no overall scores, suggest recomputing
+              if (cebuHazardScores && cebuHazardScores.length > 0 && cebuScores.length === 0) {
+                console.warn('⚠️ DIAGNOSIS: Cebu has hazard event scores but no overall scores!');
+                console.warn('💡 SOLUTION: Go to "Adjust Scoring" → "Compute Framework Rollup" → "Compute Final Rollup" to aggregate hazard scores into overall scores.');
+              } else if (cebuScores.length === 0 && cebuPcodes.length > 0) {
+                console.warn('⚠️ DIAGNOSIS: Cebu areas found but no scores at all!');
+                console.warn('💡 SOLUTION: Make sure the hazard event is scored, then recompute overall scores via "Adjust Scoring".');
+              }
+            }
+          } else {
+            console.warn('⚠️ No Cebu-related admin_pcodes found in geometry! Checking all admin_pcodes...');
+            // Check if any admin_pcodes contain 'cebu' in the name
+            const allCebuNames = Array.from(geoMap.entries()).filter(([pcode, feature]) => {
+              const name = feature?.properties?.name?.toLowerCase() || '';
+              return name.includes('cebu');
+            });
+            console.log(`🔍 Found ${allCebuNames.length} features with 'cebu' in name:`, allCebuNames.map(([pcode, f]) => ({ pcode, name: f.properties?.name })));
+          }
         }
 
         // Create score map
@@ -691,7 +728,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           })
           .filter((f: any) => f !== null);
         
-        console.log(`Created ${features.length} features with overall scores (${features.filter((f: any) => f.properties.has_score).length} with scores, ${features.filter((f: any) => !f.properties.has_score).length} without scores)`);
+        console.log(`Created ${features.length} features with ${scoreCategory.toLowerCase()} scores (${features.filter((f: any) => f.properties.has_score).length} with scores, ${features.filter((f: any) => !f.properties.has_score).length} without scores)`);
         
         // Filter by admin_scope if instance has one defined - use fresh instance state
         const currentAdminScope = instance?.admin_scope;
@@ -699,22 +736,34 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const filteredFeatures = await filterFeaturesByAdminScope(features, currentAdminScope);
         console.log(`After filtering by admin_scope: ${filteredFeatures.length} features (from ${features.length})`);
         
-        // Debug: Check if Cebu features survived filtering
-        const cebuAfterFilter = filteredFeatures.filter((f: any) => 
-          f.properties.admin_pcode?.toLowerCase().includes('cebu') || 
-          f.properties.admin_name?.toLowerCase().includes('cebu')
-        );
-        if (cebuAfterFilter.length > 0) {
-          console.log(`Cebu features after filtering: ${cebuAfterFilter.length}`, cebuAfterFilter.map((f: any) => ({ pcode: f.properties.admin_pcode, name: f.properties.admin_name, has_score: f.properties.has_score })));
-        } else if (cebuPcodes.length > 0) {
-          console.error('Cebu features were filtered out! This suggests an admin_scope mismatch.');
+        // Debug: Check if Cebu features survived filtering (only for overall, not priority)
+        if (selection.type === 'overall') {
+          const cebuAfterFilter = filteredFeatures.filter((f: any) => 
+            f.properties.admin_pcode?.toLowerCase().includes('cebu') || 
+            f.properties.admin_name?.toLowerCase().includes('cebu')
+          );
+          if (cebuAfterFilter.length > 0) {
+            console.log(`Cebu features after filtering: ${cebuAfterFilter.length}`, cebuAfterFilter.map((f: any) => ({ pcode: f.properties.admin_pcode, name: f.properties.admin_name, has_score: f.properties.has_score })));
+          } else {
+            // Check if there were any Cebu features before filtering
+            const cebuBeforeFilter = features.filter((f: any) => 
+              f.properties.admin_pcode?.toLowerCase().includes('cebu') || 
+              f.properties.admin_name?.toLowerCase().includes('cebu')
+            );
+            if (cebuBeforeFilter.length > 0) {
+              console.error('Cebu features were filtered out! This suggests an admin_scope mismatch.');
+            }
+          }
         }
         
         setFeatures(filteredFeatures);
-        setOverallFeatures(filteredFeatures); // Cache for future use
+        // Only cache overall features, not priority (priority can change when overall changes)
+        if (selection.type === 'overall') {
+          setOverallFeatures(filteredFeatures); // Cache for future use
+        }
         setFeaturesKey(prev => {
           const newKey = prev + 1;
-          console.log(`Incrementing featuresKey to ${newKey} for map refresh`);
+          console.log(`Incrementing featuresKey to ${newKey} for ${scoreCategory.toLowerCase()} map refresh`);
           return newKey;
         }); // Force GeoJSON re-render
         setLoadingFeatures(false);
@@ -1465,7 +1514,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     const score = feature.properties?.score !== undefined ? Number(feature.properties.score) : null;
     const rawValue = feature.properties?.raw_value !== undefined ? Number(feature.properties.raw_value) : null;
     
-      let layerName = 'Overall Score';
+      let layerName = selectedLayer.type === 'priority' ? 'Priority Ranking' : 'Overall Score';
       if (selectedLayer.type === 'dataset') {
         layerName = selectedLayer.datasetName || 'Dataset Score';
       } else if (selectedLayer.type === 'category_score') {
