@@ -616,16 +616,51 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         console.log(`Loaded ${allScores.length} overall scores for locations with geometry`);
         
         // Debug: Check for Cebu-related admin_pcodes
-        const cebuPcodes = adminPcodesWithGeometry.filter(pcode => 
-          pcode.toLowerCase().includes('cebu') || 
-          geoMap.get(pcode)?.properties?.name?.toLowerCase().includes('cebu')
-        );
+        const cebuPcodes = adminPcodesWithGeometry.filter(pcode => {
+          const feature = geoMap.get(pcode);
+          const name = feature?.properties?.name?.toLowerCase() || '';
+          return pcode.toLowerCase().includes('cebu') || name.includes('cebu');
+        });
         if (cebuPcodes.length > 0) {
-          console.log(`Found ${cebuPcodes.length} Cebu-related admin_pcodes with geometry:`, cebuPcodes);
+          console.log(`🔍 Found ${cebuPcodes.length} Cebu-related admin_pcodes with geometry:`, cebuPcodes);
           const cebuScores = allScores.filter(s => cebuPcodes.includes(s.admin_pcode));
-          console.log(`Found ${cebuScores.length} Cebu-related scores:`, cebuScores.map(s => ({ pcode: s.admin_pcode, score: s.avg_score })));
+          console.log(`🔍 Found ${cebuScores.length} Cebu-related overall scores:`, cebuScores.map(s => ({ pcode: s.admin_pcode, score: s.avg_score })));
+          
+          // Check if Cebu has hazard scores
+          if (cebuPcodes.length > 0) {
+            const { data: cebuHazardScores } = await supabase
+              .from('hazard_event_scores')
+              .select('admin_pcode, score, hazard_event_id')
+              .eq('instance_id', instanceId)
+              .in('admin_pcode', cebuPcodes);
+            console.log(`🔍 Found ${cebuHazardScores?.length || 0} Cebu-related hazard event scores:`, cebuHazardScores);
+            
+            // Check if Cebu has Hazard category scores
+            const { data: cebuCategoryScores } = await supabase
+              .from('instance_category_scores')
+              .select('admin_pcode, score, category')
+              .eq('instance_id', instanceId)
+              .in('admin_pcode', cebuPcodes)
+              .in('category', ['Hazard', 'Overall']);
+            console.log(`🔍 Found ${cebuCategoryScores?.length || 0} Cebu-related category scores:`, cebuCategoryScores);
+            
+            // Diagnostic: If hazard scores exist but no overall scores, suggest recomputing
+            if (cebuHazardScores && cebuHazardScores.length > 0 && cebuScores.length === 0) {
+              console.warn('⚠️ DIAGNOSIS: Cebu has hazard event scores but no overall scores!');
+              console.warn('💡 SOLUTION: Go to "Adjust Scoring" → "Compute Framework Rollup" → "Compute Final Rollup" to aggregate hazard scores into overall scores.');
+            } else if (cebuScores.length === 0 && cebuPcodes.length > 0) {
+              console.warn('⚠️ DIAGNOSIS: Cebu areas found but no scores at all!');
+              console.warn('💡 SOLUTION: Make sure the hazard event is scored, then recompute overall scores via "Adjust Scoring".');
+            }
+          }
         } else {
-          console.warn('No Cebu-related admin_pcodes found in geometry!');
+          console.warn('⚠️ No Cebu-related admin_pcodes found in geometry! Checking all admin_pcodes...');
+          // Check if any admin_pcodes contain 'cebu' in the name
+          const allCebuNames = Array.from(geoMap.entries()).filter(([pcode, feature]) => {
+            const name = feature?.properties?.name?.toLowerCase() || '';
+            return name.includes('cebu');
+          });
+          console.log(`🔍 Found ${allCebuNames.length} features with 'cebu' in name:`, allCebuNames.map(([pcode, f]) => ({ pcode, name: f.properties?.name })));
         }
 
         // Create score map
