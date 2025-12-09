@@ -44,7 +44,7 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
   const [hazardEventLayers, setHazardEventLayers] = useState<any[]>([]);
   const [visibleHazardEvents, setVisibleHazardEvents] = useState<Set<string>>(new Set());
   const [hazardEventFilters, setHazardEventFilters] = useState<Record<string, { minMagnitude?: number, maxMagnitude?: number, visibleFeatureIds?: Set<string>, geometryTypes?: Set<string> }>>({});
-  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
+  const [selectedLayer, setSelectedLayer] = useState<{ type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, datasetName?: string, categoryName?: string, hazardEventId?: string }>({ type: 'overall' });
   const [showCopySuccess, setShowCopySuccess] = useState(false);
 
   const instanceId = params?.id;
@@ -279,14 +279,21 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
 
   // Load features for selected layer (full implementation)
   const loadFeaturesForSelection = async (
-    selection: { type: 'overall' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
+    selection: { type: 'overall' | 'priority' | 'dataset' | 'category' | 'category_score' | 'hazard_event', datasetId?: string, category?: string, categoryName?: string, hazardEventId?: string },
     overallFeatures?: any[]
   ) => {
     try {
       setFeatures([]);
       setLoadingFeatures(true);
       
-      if (selection.type === 'overall') {
+      if (selection.type === 'overall' || selection.type === 'priority') {
+        const scoreCategory = selection.type === 'priority' ? 'Priority' : 'Overall';
+        
+        if (selection.type === 'overall' && overallFeatures) {
+          setFeatures(overallFeatures);
+          setLoadingFeatures(false);
+          return;
+        }
         if (overallFeatures) {
           setFeatures(overallFeatures);
           setLoadingFeatures(false);
@@ -332,14 +339,42 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
         
         let allScores: any[] = [];
         for (const chunk of chunks) {
-          const { data: scores, error: scoresError } = await supabase
-            .from("v_instance_admin_scores")
-            .select("admin_pcode, name, avg_score")
-            .eq("instance_id", instanceId)
-            .in("admin_pcode", chunk);
-          
-          if (!scoresError && scores) {
-            allScores = [...allScores, ...scores];
+          // For Priority, query instance_category_scores directly
+          // For Overall, use the view (which is faster)
+          if (selection.type === 'priority') {
+            const { data: scores, error: scoresError } = await supabase
+              .from("instance_category_scores")
+              .select("admin_pcode, score")
+              .eq("instance_id", instanceId)
+              .eq("category", "Priority")
+              .in("admin_pcode", chunk);
+            
+            if (!scoresError && scores) {
+              // Get names from admin_boundaries
+              const pcodes = scores.map((s: any) => s.admin_pcode);
+              const { data: boundaries } = await supabase
+                .from("admin_boundaries")
+                .select("admin_pcode, name")
+                .eq("admin_level", "ADM3")
+                .in("admin_pcode", pcodes);
+              
+              const nameMap = new Map((boundaries || []).map((b: any) => [b.admin_pcode, b.name]));
+              allScores = [...allScores, ...scores.map((s: any) => ({
+                admin_pcode: s.admin_pcode,
+                name: nameMap.get(s.admin_pcode) || s.admin_pcode,
+                avg_score: s.score
+              }))];
+            }
+          } else {
+            const { data: scores, error: scoresError } = await supabase
+              .from("v_instance_admin_scores")
+              .select("admin_pcode, name, avg_score")
+              .eq("instance_id", instanceId)
+              .in("admin_pcode", chunk);
+            
+            if (!scoresError && scores) {
+              allScores = [...allScores, ...scores];
+            }
           }
         }
         
@@ -366,7 +401,10 @@ export default function InstanceViewPage({ params }: { params: { id: string } })
           .filter((f: any) => f !== null);
         
         setFeatures(features);
-        setOverallFeatures(features);
+        // Only cache overall features, not priority (priority can change when overall changes)
+        if (selection.type === 'overall') {
+          setOverallFeatures(features);
+        }
         setLoadingFeatures(false);
       } else if (selection.type === 'dataset' && selection.datasetId) {
         // Load scores for specific dataset
