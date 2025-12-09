@@ -106,8 +106,8 @@ BEGIN
     'min_severity', v_min_score,
     'max_severity', v_max_score,
     'priority_range', '1.0 to 5.0',
-    'message', format('Priority ranking complete: %s locations ranked from %.2f (priority 1.0) to %.2f (priority 5.0)', 
-      v_location_count, v_min_score, v_max_score)
+    'message', format('Priority ranking complete: %s locations ranked from %s (priority 1.0) to %s (priority 5.0)', 
+      v_location_count, to_char(v_min_score, 'FM999999990.00'), to_char(v_max_score, 'FM999999990.00'))
   );
 END;
 $$;
