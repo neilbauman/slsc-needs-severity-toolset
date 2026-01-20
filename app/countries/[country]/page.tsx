@@ -251,7 +251,7 @@ const numberFormatter = new Intl.NumberFormat('en-PH');
 export default function CountryDashboardPage() {
   const params = useParams();
   const router = useRouter();
-  const { currentCountry, availableCountries, setCurrentCountry } = useCountry();
+  const { currentCountry, availableCountries, setCurrentCountry, adminLevels } = useCountry();
   const countryCode = (params.country as string)?.toUpperCase();
   
   const [datasets, setDatasets] = useState<Dataset[]>([]);
