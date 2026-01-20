@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
 import { createClient } from '@/lib/supabaseClient';
-import { Plus, Trash2, Edit2, X, Check, AlertTriangle, Globe, Shield } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Check, AlertTriangle, Globe, Shield, Users } from 'lucide-react';
 import Link from 'next/link';
 
 interface Country {
@@ -275,12 +275,21 @@ export default function AdminPage() {
               </h1>
               <p className="text-gray-600 mt-2">Add, edit, or remove countries from the system</p>
             </div>
-            <Link
-              href="/"
-              className="text-gray-600 hover:text-gray-900"
-            >
-              ← Back to Home
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/admin/users"
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Users size={16} />
+                Manage Users
+              </Link>
+              <Link
+                href="/"
+                className="text-gray-600 hover:text-gray-900"
+              >
+                ← Back to Home
+              </Link>
+            </div>
           </div>
         </div>
 
