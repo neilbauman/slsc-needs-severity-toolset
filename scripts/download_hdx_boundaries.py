@@ -14,9 +14,14 @@ Usage:
 import json
 import os
 import zipfile
+import re
 from pathlib import Path
 import geopandas as gpd
+import pandas as pd
 from typing import Dict, List, Optional
+
+# HDX CKAN API base URL (always available)
+HDX_API_BASE = "https://data.humdata.org/api/3/action"
 
 try:
     from hdx.api.configuration import Configuration
@@ -26,7 +31,6 @@ except ImportError:
     HDX_API_AVAILABLE = False
     print("Warning: hdx-python-api not installed. Install with: pip install hdx-python-api")
     import requests
-    HDX_API_BASE = "https://data.humdata.org/api/3/action"
 
 # Country-specific HDX dataset identifiers
 # These are the COD-AB (Common Operational Dataset - Administrative Boundaries) datasets
@@ -60,31 +64,37 @@ HDX_DATASETS = {
 
 def get_hdx_dataset_info(dataset_id: str) -> Optional[Dict]:
     """Get dataset information from HDX API."""
+    # Try direct CKAN API first (more reliable)
+    url = f"{HDX_API_BASE}/package_show"
+    params = {"id": dataset_id}
+    
+    try:
+        import requests
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("success"):
+            result = data.get("result")
+            print(f"Found dataset: {result.get('title', dataset_id)}")
+            print(f"Resources: {len(result.get('resources', []))}")
+            return result
+        else:
+            print(f"Error: {data.get('error', {}).get('message', 'Unknown error')}")
+            return None
+    except Exception as e:
+        print(f"Error fetching dataset {dataset_id} via CKAN API: {e}")
+    
+    # Fallback to HDX Python API
     if HDX_API_AVAILABLE:
         try:
             dataset = Dataset.read_from_hdx(dataset_id)
             return dataset.data
         except Exception as e:
-            print(f"Error fetching dataset {dataset_id}: {e}")
+            print(f"Error fetching dataset {dataset_id} via HDX API: {e}")
             return None
-    else:
-        # Fallback to direct API call
-        url = f"{HDX_API_BASE}/package_show"
-        params = {"id": dataset_id}
-        
-        try:
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get("success"):
-                return data.get("result")
-            else:
-                print(f"Error: {data.get('error', {}).get('message', 'Unknown error')}")
-                return None
-        except Exception as e:
-            print(f"Error fetching dataset {dataset_id}: {e}")
-            return None
+    
+    return None
 
 def find_shapefile_resource(dataset_info: Dict) -> Optional[Dict]:
     """Find the best shapefile resource in the dataset."""
@@ -161,84 +171,145 @@ def process_boundaries(shapefile_path: Path, country_iso: str, output_dir: Path)
         elif gdf.crs.to_string() != "EPSG:4326":
             gdf = gdf.to_crs("EPSG:4326")
         
-        # Find admin level column (common names: ADM0, ADM1, ADM2, etc. or admin_level, level)
+        # Find admin level column (COD-AB format uses admin_leve or adm_level)
         admin_level_col = None
-        for col in ["ADM_LEVEL", "ADMLEVEL", "admin_level", "level", "ADM0", "ADM1"]:
+        for col in ["admin_leve", "adm_level", "ADM_LEVEL", "ADMLEVEL", "admin_level", "level"]:
             if col in gdf.columns:
                 admin_level_col = col
                 break
         
-        if not admin_level_col:
-            print(f"Warning: Could not find admin level column. Available columns: {gdf.columns.tolist()}")
-            # Try to infer from column names
-            for col in gdf.columns:
-                if "ADM" in col.upper() or "LEVEL" in col.upper():
-                    admin_level_col = col
-                    break
-        
-        # Find pcode column
-        pcode_col = None
-        for col in ["ADM0_PCODE", "ADM1_PCODE", "ADM2_PCODE", "ADM3_PCODE", "ADM4_PCODE", 
-                    "PCODE", "pcode", "admin_pcode", "ADMIN_PCODE"]:
-            if col in gdf.columns:
-                pcode_col = col
-                break
-        
-        # Find name column
-        name_col = None
-        for col in ["ADM0_EN", "ADM1_EN", "ADM2_EN", "ADM3_EN", "ADM4_EN",
-                    "NAME", "name", "NAME_EN", "NAME_ENGLISH"]:
-            if col in gdf.columns:
-                name_col = col
-                break
-        
-        # Find parent pcode column
-        parent_pcode_col = None
-        for col in ["PARENT_PCODE", "parent_pcode", "PARENT"]:
-            if col in gdf.columns:
-                parent_pcode_col = col
-                break
-        
-        print(f"Using columns: admin_level={admin_level_col}, pcode={pcode_col}, name={name_col}, parent={parent_pcode_col}")
-        
-        # Process each admin level
+        # COD-AB format: Each row has columns like adm1_pcode, adm2_pcode, etc.
+        # We need to extract rows by level and use the appropriate pcode/name columns
         output_files = {}
         
         if admin_level_col:
-            for level in gdf[admin_level_col].unique():
-                level_gdf = gdf[gdf[admin_level_col] == level].copy()
-                
-                # Standardize column names
-                level_gdf = level_gdf.rename(columns={
-                    pcode_col: "admin_pcode",
-                    name_col: "name",
-                    parent_pcode_col: "parent_pcode" if parent_pcode_col else None
-                })
-                
-                # Ensure required columns exist
-                if "admin_pcode" not in level_gdf.columns:
-                    print(f"Warning: No pcode column found for level {level}")
+            # Process each unique admin level value
+            for level_val in gdf[admin_level_col].unique():
+                if pd.isna(level_val):
                     continue
                 
-                # Set admin_level
-                level_gdf["admin_level"] = level
+                # Convert level value to integer
+                try:
+                    level_num = int(float(level_val))
+                except (ValueError, TypeError):
+                    # If not numeric, try to extract from string
+                    match = re.search(r'(\d+)', str(level_val))
+                    if match:
+                        level_num = int(match.group(1))
+                    else:
+                        print(f"Warning: Could not parse level value: {level_val}")
+                        continue
                 
-                # Select and reorder columns
-                cols_to_keep = ["admin_pcode", "admin_level", "name", "parent_pcode", "geometry"]
-                cols_to_keep = [c for c in cols_to_keep if c in level_gdf.columns]
-                level_gdf = level_gdf[cols_to_keep]
+                # Skip non-standard level values (Palestine uses 84, 85, 88, 99)
+                if level_num not in [0, 1, 2, 3, 4, 5]:
+                    continue
+                
+                # Filter rows for this level
+                level_gdf = gdf[gdf[admin_level_col] == level_val].copy()
+                
+                # Find pcode and name columns for this level
+                # Try both formats: adm1_pcode and ADM1_PCODE
+                pcode_col = None
+                name_col = None
+                parent_pcode_col = None
+                
+                # Try level-specific columns first (COD-AB format)
+                for col in gdf.columns:
+                    col_lower = col.lower()
+                    if f"adm{level_num}_pcode" in col_lower or f"adm{level_num}_pcode" == col_lower:
+                        pcode_col = col
+                    if f"adm{level_num}_name" in col_lower and not name_col:
+                        name_col = col
+                
+                # Fallback to generic columns
+                if not pcode_col:
+                    for col in ["PCODE", "pcode", "admin_pcode", "ADMIN_PCODE"]:
+                        if col in gdf.columns:
+                            pcode_col = col
+                            break
+                
+                if not name_col:
+                    for col in ["NAME", "name", "NAME_EN", "name_en"]:
+                        if col in gdf.columns:
+                            name_col = col
+                            break
+                
+                # Find parent pcode (one level up)
+                if level_num > 0:
+                    parent_level = level_num - 1
+                    for col in gdf.columns:
+                        col_lower = col.lower()
+                        if f"adm{parent_level}_pcode" in col_lower:
+                            parent_pcode_col = col
+                            break
+                
+                if not pcode_col:
+                    print(f"Warning: No pcode column found for level {level_num}")
+                    continue
+                
+                # Create standardized dataframe
+                result_gdf = gpd.GeoDataFrame({
+                    "admin_pcode": level_gdf[pcode_col].astype(str),
+                    "admin_level": f"ADM{level_num}",
+                    "name": level_gdf[name_col].astype(str) if name_col else None,
+                    "parent_pcode": level_gdf[parent_pcode_col].astype(str) if parent_pcode_col else None,
+                    "geometry": level_gdf.geometry
+                }, crs=gdf.crs)
+                
+                # Remove duplicates and null pcodes
+                result_gdf = result_gdf[result_gdf["admin_pcode"].notna()]
+                result_gdf = result_gdf[result_gdf["admin_pcode"] != "None"]
+                result_gdf = result_gdf[result_gdf["admin_pcode"] != ""]
+                result_gdf = result_gdf.drop_duplicates(subset=["admin_pcode"])
+                
+                if len(result_gdf) == 0:
+                    print(f"Warning: No valid features for level {level_num}")
+                    continue
                 
                 # Save as GeoJSON
-                output_file = output_dir / f"{country_iso}_{level}.geojson"
-                level_gdf.to_file(output_file, driver="GeoJSON")
-                output_files[level] = output_file
-                print(f"Saved {len(level_gdf)} features for {level} to {output_file}")
+                output_file = output_dir / f"{country_iso}_ADM{level_num}.geojson"
+                result_gdf.to_file(output_file, driver="GeoJSON")
+                output_files[f"ADM{level_num}"] = output_file
+                print(f"Saved {len(result_gdf)} features for ADM{level_num} to {output_file}")
         else:
-            # No admin level column - save entire dataset
-            output_file = output_dir / f"{country_iso}_all.geojson"
-            gdf.to_file(output_file, driver="GeoJSON")
-            output_files["ALL"] = output_file
-            print(f"Saved {len(gdf)} features to {output_file}")
+            # No admin level column - try to infer from pcode columns
+            print("No admin level column found. Attempting to infer from pcode columns...")
+            
+            # Find all pcode columns
+            pcode_cols = [col for col in gdf.columns if "pcode" in col.lower() and "adm" in col.lower()]
+            
+            for pcode_col in pcode_cols:
+                # Extract level number from column name (e.g., adm1_pcode -> 1)
+                import re
+                match = re.search(r'adm(\d+)_pcode', pcode_col.lower())
+                if match:
+                    level_num = int(match.group(1))
+                    
+                    # Find corresponding name column
+                    name_col = None
+                    for col in gdf.columns:
+                        if f"adm{level_num}_name" in col.lower():
+                            name_col = col
+                            break
+                    
+                    # Create dataframe for this level
+                    level_gdf = gdf[gdf[pcode_col].notna()].copy()
+                    if len(level_gdf) == 0:
+                        continue
+                    
+                    result_gdf = gpd.GeoDataFrame({
+                        "admin_pcode": level_gdf[pcode_col].astype(str),
+                        "admin_level": f"ADM{level_num}",
+                        "name": level_gdf[name_col].astype(str) if name_col else None,
+                        "geometry": level_gdf.geometry
+                    }, crs=gdf.crs)
+                    
+                    result_gdf = result_gdf.drop_duplicates(subset=["admin_pcode"])
+                    
+                    output_file = output_dir / f"{country_iso}_ADM{level_num}.geojson"
+                    result_gdf.to_file(output_file, driver="GeoJSON")
+                    output_files[f"ADM{level_num}"] = output_file
+                    print(f"Saved {len(result_gdf)} features for ADM{level_num} to {output_file}")
         
         return output_files
         
@@ -342,8 +413,10 @@ def main():
     print("HDX Administrative Boundaries Downloader")
     print("=" * 60)
     
-    # Process all countries
-    for country_iso in HDX_DATASETS.keys():
+    # Process all countries (skip Philippines - already completed)
+    countries_to_process = [iso for iso in HDX_DATASETS.keys() if iso != "PHL"]
+    
+    for country_iso in countries_to_process:
         try:
             process_country(country_iso, output_dir)
         except Exception as e:
