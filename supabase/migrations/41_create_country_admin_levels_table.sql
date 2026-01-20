@@ -32,6 +32,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS country_admin_levels_updated_at ON public.country_admin_levels;
 CREATE TRIGGER country_admin_levels_updated_at
   BEFORE UPDATE ON public.country_admin_levels
   FOR EACH ROW
@@ -73,43 +74,7 @@ $$;
 
 COMMENT ON FUNCTION public.get_country_admin_levels(UUID) IS 'Returns custom admin level names for a country. Returns empty if not configured (fallback to ADM1-ADM4).';
 
--- RPC Function: Get admin level name for a specific level
-CREATE OR REPLACE FUNCTION public.get_admin_level_name(
-  in_country_id UUID,
-  in_level_number INTEGER,
-  in_plural BOOLEAN DEFAULT false
-)
-RETURNS TEXT
-LANGUAGE plpgsql
-STABLE
-AS $$
-DECLARE
-  v_name TEXT;
-BEGIN
-  IF in_plural THEN
-    SELECT COALESCE(plural_name, name || 's') INTO v_name
-    FROM public.country_admin_levels
-    WHERE country_id = in_country_id
-      AND level_number = in_level_number
-    LIMIT 1;
-  ELSE
-    SELECT name INTO v_name
-    FROM public.country_admin_levels
-    WHERE country_id = in_country_id
-      AND level_number = in_level_number
-    LIMIT 1;
-  END IF;
-  
-  -- Fallback to generic ADM format if not configured
-  IF v_name IS NULL THEN
-    RETURN 'ADM' || in_level_number::TEXT;
-  END IF;
-  
-  RETURN v_name;
-END;
-$$;
-
--- Update function to support level 5
+-- RPC Function: Get admin level name for a specific level (supports ADM1-ADM5)
 DROP FUNCTION IF EXISTS public.get_admin_level_name(UUID, INTEGER, BOOLEAN);
 CREATE OR REPLACE FUNCTION public.get_admin_level_name(
   in_country_id UUID,
