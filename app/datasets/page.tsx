@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Info, Filter } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import DatasetDetailDrawer from '@/components/DatasetDetailDrawer';
+import { useCountry } from '@/lib/countryContext';
 
 type CategoryKey = 'CORE' | 'SSC_P1' | 'SSC_P2' | 'SSC_P3' | 'HAZARD' | 'UNDERLYING' | 'OTHER';
 
@@ -151,12 +152,22 @@ function DatasetsPageContent() {
   const [focusFilter, setFocusFilter] = useState<string | null>(focusParam);
   const [scopeFilter, setScopeFilter] = useState<string>('all');
 
+  const { currentCountry } = useCountry();
+
   const loadDatasets = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    
+    // Build query with country filter if country is selected
+    let query = supabase
       .from('datasets')
-      .select('*')
-      .order('name', { ascending: true });
+      .select('*');
+    
+    // Filter by country if one is selected
+    if (currentCountry) {
+      query = query.eq('country_id', currentCountry.id);
+    }
+    
+    const { data, error } = await query.order('name', { ascending: true });
 
     if (error) {
       console.error('Error loading datasets:', error);
@@ -168,7 +179,7 @@ function DatasetsPageContent() {
 
   useEffect(() => {
     loadDatasets();
-  }, []);
+  }, [currentCountry]);
 
   useEffect(() => {
     const mappedCategory = mapQueryParamToCategoryKey(pillarParam);
