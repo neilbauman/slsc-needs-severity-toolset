@@ -1,6 +1,8 @@
 # Vercel Deployment Guide
 
-This guide will help you deploy the SLSC Needs Severity Toolset to Vercel for external access.
+This guide will help you deploy the **SLSC Needs Severity Toolset** (multi-country version) to Vercel for external access.
+
+**Note:** This is the new multi-country version, not the original Philippines-only toolset.
 
 ## Prerequisites
 

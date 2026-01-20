@@ -1,6 +1,8 @@
-# 🇵🇭 Philippines Shelter Severity Toolset (Rapid Response Build)
+# 🌍 SLSC Needs Severity Toolset
 
-A lightweight, field-ready web tool for uploading, tagging, and managing numeric and categorical vulnerability datasets linked to admin boundaries.
+A multi-country web tool for uploading, tagging, and managing numeric and categorical vulnerability datasets linked to admin boundaries. Supports multiple countries with country-specific data isolation.
+
+**Note:** This is the new multi-country version, evolved from the original Philippines-only toolset.
 
 Built with **Next.js 14 + Supabase + TailwindCSS**  
 Deployed via **Vercel**
