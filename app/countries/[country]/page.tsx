@@ -616,7 +616,7 @@ export default function CountryDashboardPage() {
           <ReferenceCard
             title="Admin boundaries"
             subtitle="Reference layers"
-            stat={`${numberFormatter.format(boundaryCounts.ADM3)} ${getAdminLevelName(adminLevels, 3, true)} • ${numberFormatter.format(boundaryCounts.ADM4)} ${getAdminLevelName(adminLevels, 4, true)}`}
+            stat={`${numberFormatter.format(boundaryCounts.ADM3)} ${getAdminLevelName(adminLevels, 3, true)} • ${numberFormatter.format(boundaryCounts.ADM4)} ${getAdminLevelName(adminLevels, 4, true)}${boundaryCounts.ADM5 > 0 ? ` • ${numberFormatter.format(boundaryCounts.ADM5)} ${getAdminLevelName(adminLevels, 5, true)}` : ''}`}
             detail={`${getAdminLevelName(adminLevels, 1, true)} ${numberFormatter.format(boundaryCounts.ADM1)} • ${getAdminLevelName(adminLevels, 2, true)} ${numberFormatter.format(boundaryCounts.ADM2)}`}
             icon={MapPinned}
             href="/datasets?focus=admin_boundaries"
