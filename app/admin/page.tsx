@@ -277,6 +277,12 @@ export default function AdminPage() {
             </div>
             <div className="flex items-center gap-4">
               <Link
+                href="/admin/admin-levels"
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
+              >
+                Configure Admin Levels
+              </Link>
+              <Link
                 href="/admin/users"
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
               >

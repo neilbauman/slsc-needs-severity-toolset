@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabaseClient';
+import { useCountry } from '@/lib/countryContext';
+import { getAdminLevelName } from '@/lib/adminLevelNames';
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -35,6 +37,7 @@ function MapBoundsController({ features }: { features: any[] }) {
 
 export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: Props) {
   const supabase = createClient();
+  const { adminLevels } = useCountry();
 
   const [adm1Options, setAdm1Options] = useState<any[]>([]);
   const [adm2Options, setAdm2Options] = useState<any[]>([]);
@@ -359,7 +362,9 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
 
         {/* Step 1: ADM1 selection */}
         <div className="mb-4">
-          <div className="font-medium mb-2">Step 1: Select ADM1 Regions</div>
+          <div className="font-medium mb-2">
+            Step 1: Select {getAdminLevelName(adminLevels, 1, true)} (Level 1)
+          </div>
           <div className="grid grid-cols-3 gap-1 text-sm">
             {adm1Options.map((opt) => (
               <label key={opt.admin_pcode} className="flex items-center gap-2">
@@ -384,7 +389,9 @@ export default function DefineAffectedAreaModal({ instance, onClose, onSaved }: 
         {/* Step 2: ADM2 refinement - organized by ADM1 */}
         {adm2Options.length > 0 && (
           <div className="mb-4">
-            <div className="font-medium mb-2">Step 2: Select ADM2 Areas</div>
+            <div className="font-medium mb-2">
+              Step 2: Select {getAdminLevelName(adminLevels, 2, true)} (Level 2)
+            </div>
             <div className="border rounded p-3 max-h-96 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
               {(() => {
                 // Group ADM2s by their parent ADM1

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Papa from 'papaparse';
 import { supabase } from '@/lib/supabaseClient';
+import { useCountry } from '@/lib/countryContext';
+import { getAdminLevelOptions } from '@/lib/adminLevelNames';
 
 interface UploadDatasetModalProps {
   onClose: () => void;
@@ -163,6 +165,7 @@ export default function UploadDatasetModal({
   onClose,
   onUploaded,
 }: UploadDatasetModalProps) {
+  const { adminLevels } = useCountry();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<any[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
@@ -566,10 +569,11 @@ export default function UploadDatasetModal({
                     className="border rounded px-2 py-1 w-full"
                     disabled={loading}
                   >
-                    <option value="ADM1">ADM1</option>
-                    <option value="ADM2">ADM2</option>
-                    <option value="ADM3">ADM3</option>
-                    <option value="ADM4">ADM4</option>
+                    {getAdminLevelOptions(adminLevels).map((option) => (
+                      <option key={option.levelNumber} value={`ADM${option.levelNumber}`}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

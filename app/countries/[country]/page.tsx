@@ -8,6 +8,7 @@ import supabase from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
 import type { GeoJSON } from 'geojson';
 import { useCountry } from '@/lib/countryContext';
+import { getAdminLevelName, getAdminLevelNamesMap } from '@/lib/adminLevelNames';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
@@ -613,8 +614,8 @@ export default function CountryDashboardPage() {
           <ReferenceCard
             title="Admin boundaries"
             subtitle="Reference layers"
-            stat={`${numberFormatter.format(boundaryCounts.ADM3)} ADM3 • ${numberFormatter.format(boundaryCounts.ADM4)} ADM4`}
-            detail={`ADM1 ${numberFormatter.format(boundaryCounts.ADM1)} • ADM2 ${numberFormatter.format(boundaryCounts.ADM2)}`}
+            stat={`${numberFormatter.format(boundaryCounts.ADM3)} ${getAdminLevelName(adminLevels, 3, true)} • ${numberFormatter.format(boundaryCounts.ADM4)} ${getAdminLevelName(adminLevels, 4, true)}`}
+            detail={`${getAdminLevelName(adminLevels, 1, true)} ${numberFormatter.format(boundaryCounts.ADM1)} • ${getAdminLevelName(adminLevels, 2, true)} ${numberFormatter.format(boundaryCounts.ADM2)}`}
             icon={MapPinned}
             href="/datasets?focus=admin_boundaries"
             linkLabel="View guidance"
@@ -669,7 +670,7 @@ export default function CountryDashboardPage() {
           <DashboardMap
             featureCollection={adminBoundaryGeo}
             headline="National footprint"
-            description="ADM1 boundaries shown as the base canvas for layering SSC instances."
+            description={`${getAdminLevelName(adminLevels, 1, true)} boundaries shown as the base canvas for layering SSC instances.`}
           />
         </section>
         {supportingPillars.length > 0 && (

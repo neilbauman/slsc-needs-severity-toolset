@@ -17,11 +17,20 @@ interface UserCountry {
   country: Country;
 }
 
+interface AdminLevelConfig {
+  level_number: number;
+  name: string;
+  plural_name: string;
+  code_prefix: string | null;
+  order_index: number;
+}
+
 interface CountryContextType {
   currentCountry: Country | null;
   setCurrentCountry: (country: Country | null) => void;
   userCountries: UserCountry[];
   availableCountries: Country[];
+  adminLevels: AdminLevelConfig[] | null;
   loading: boolean;
   isSiteAdmin: boolean;
   refreshUserCountries: () => Promise<void>;
@@ -33,6 +42,7 @@ export function CountryProvider({ children }: { children: React.ReactNode }) {
   const [currentCountry, setCurrentCountryState] = useState<Country | null>(null);
   const [userCountries, setUserCountries] = useState<UserCountry[]>([]);
   const [availableCountries, setAvailableCountries] = useState<Country[]>([]);
+  const [adminLevels, setAdminLevels] = useState<AdminLevelConfig[] | null>(null);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
   const supabase = createClient();
@@ -114,6 +124,43 @@ export function CountryProvider({ children }: { children: React.ReactNode }) {
     }
   }, [loading, availableCountries, currentCountry]);
 
+  // Load admin levels for current country
+  const loadAdminLevels = useCallback(async (countryId: string | null) => {
+    if (!countryId) {
+      setAdminLevels(null);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .rpc('get_country_admin_levels', { in_country_id: countryId });
+
+      if (error) {
+        console.warn('Error loading admin levels (using defaults):', error);
+        setAdminLevels(null);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setAdminLevels(data as AdminLevelConfig[]);
+      } else {
+        setAdminLevels(null); // No custom levels configured, use defaults
+      }
+    } catch (error) {
+      console.error('Error loading admin levels:', error);
+      setAdminLevels(null);
+    }
+  }, [supabase]);
+
+  // Load admin levels when country changes
+  useEffect(() => {
+    if (currentCountry) {
+      loadAdminLevels(currentCountry.id);
+    } else {
+      setAdminLevels(null);
+    }
+  }, [currentCountry, loadAdminLevels]);
+
   // Save current country to localStorage when it changes
   const setCurrentCountry = useCallback((country: Country | null) => {
     setCurrentCountryState(country);
@@ -129,6 +176,7 @@ export function CountryProvider({ children }: { children: React.ReactNode }) {
     setCurrentCountry,
     userCountries,
     availableCountries,
+    adminLevels,
     loading,
     isSiteAdmin,
     refreshUserCountries,
@@ -146,6 +194,7 @@ export function useCountry() {
       setCurrentCountry: () => {},
       userCountries: [],
       availableCountries: [],
+      adminLevels: null,
       loading: false,
       isSiteAdmin: false,
       refreshUserCountries: async () => {},

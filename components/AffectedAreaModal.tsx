@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabaseClient';
+import { useCountry } from '@/lib/countryContext';
+import { getAdminLevelName } from '@/lib/adminLevelNames';
 
 const MapContainer: any = dynamic(
   () => import('react-leaflet').then((m) => m.MapContainer),
@@ -32,6 +34,7 @@ type Adm1PolyRow = { admin_pcode: string; name: string; geom: any };
 
 export default function AffectedAreaModal({ instance, onClose, onSaved }: Props) {
   const supabase = createClient();
+  const { adminLevels } = useCountry();
   const [list, setList] = useState<Adm1ListRow[]>([]);
   const [polys, setPolys] = useState<Adm1PolyRow[]>([]);
   const [filter, setFilter] = useState('');
@@ -95,7 +98,7 @@ export default function AffectedAreaModal({ instance, onClose, onSaved }: Props)
       <div className="bg-white rounded-lg shadow-xl w-[1100px] max-w-[95vw]">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div className="font-semibold">
-            Define Affected Area — {instance.name} (ADM1)
+            Define Affected Area — {instance.name} ({getAdminLevelName(adminLevels, 1, true)})
           </div>
           <button
             onClick={onClose}
@@ -220,7 +223,7 @@ export default function AffectedAreaModal({ instance, onClose, onSaved }: Props)
               )}
             </MapContainer>
             <div className="px-3 py-2 text-xs text-gray-500">
-              Click regions (ADM1) to include/exclude. Selected areas are shown in green.
+              Click {getAdminLevelName(adminLevels, 1, true).toLowerCase()} to include/exclude. Selected areas are shown in green.
             </div>
           </div>
         </div>
