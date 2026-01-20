@@ -43,9 +43,13 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showCreateUserForm, setShowCreateUserForm] = useState(false);
   const [assigningUser, setAssigningUser] = useState<UserWithAccess | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string>('');
   const [selectedRole, setSelectedRole] = useState<'admin' | 'user'>('user');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [sendInvite, setSendInvite] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -213,6 +217,61 @@ export default function UserManagementPage() {
     }
   };
 
+  // Create new user
+  const handleCreateUser = async () => {
+    if (!newUserEmail || !newUserEmail.includes('@')) {
+      setFormError('Valid email is required');
+      return;
+    }
+
+    if (!sendInvite && !newUserPassword) {
+      setFormError('Password is required if not sending invitation email');
+      return;
+    }
+
+    setSaving(true);
+    setFormError(null);
+
+    try {
+      // Get current user's session token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: newUserEmail,
+          password: newUserPassword || undefined,
+          sendInvite,
+          currentUserId: session.user.id,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create user');
+      }
+
+      // Reset form and reload
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setSendInvite(true);
+      setShowCreateUserForm(false);
+      await loadData();
+    } catch (err: any) {
+      console.error('Error creating user:', err);
+      setFormError(err.message || 'Failed to create user');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Remove country access
   const handleRemoveAccess = async (userCountryId: string) => {
     if (!confirm('Are you sure you want to remove this access?')) return;
@@ -304,6 +363,119 @@ export default function UserManagementPage() {
             </div>
           </div>
         </div>
+
+        {/* Create User Form */}
+        {showCreateUserForm && (
+          <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Create New User Account
+              </h2>
+              <button
+                onClick={() => {
+                  setShowCreateUserForm(false);
+                  setNewUserEmail('');
+                  setNewUserPassword('');
+                  setSendInvite(true);
+                  setFormError(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            {formError && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800">{formError}</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email Address *
+                </label>
+                <input
+                  type="email"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="user@example.com"
+                  disabled={saving}
+                  required
+                />
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="sendInvite"
+                  checked={sendInvite}
+                  onChange={(e) => setSendInvite(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  disabled={saving}
+                />
+                <label htmlFor="sendInvite" className="ml-2 block text-sm text-gray-700">
+                  Send invitation email (user will set their own password)
+                </label>
+              </div>
+
+              {!sendInvite && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Password *
+                  </label>
+                  <input
+                    type="password"
+                    value={newUserPassword}
+                    onChange={(e) => setNewUserPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter password"
+                    disabled={saving}
+                    required
+                  />
+                  <p className="mt-1 text-xs text-gray-500">
+                    User will need to change this password on first login
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleCreateUser}
+                  disabled={saving || !newUserEmail}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Check size={16} />
+                      Create User
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowCreateUserForm(false);
+                    setNewUserEmail('');
+                    setNewUserPassword('');
+                    setSendInvite(true);
+                    setFormError(null);
+                  }}
+                  disabled={saving}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Assign Access Form */}
         {assigningUser && (
@@ -412,6 +584,19 @@ export default function UserManagementPage() {
             <h2 className="text-lg font-semibold text-gray-900">
               Users ({users.length})
             </h2>
+            {!showCreateUserForm && (
+              <button
+                onClick={() => {
+                  setShowCreateUserForm(true);
+                  setAssigningUser(null);
+                  setFormError(null);
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 flex items-center gap-2"
+              >
+                <Plus size={16} />
+                Create User
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -504,18 +689,18 @@ export default function UserManagementPage() {
           )}
         </div>
 
-        {/* Note about finding users */}
+        {/* Note about user management */}
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="text-blue-600 mt-0.5" size={20} />
             <div className="text-sm text-blue-800">
-              <p className="font-semibold mb-1">How to Assign Access to New Users:</p>
+              <p className="font-semibold mb-1">User Management Guide:</p>
               <ol className="list-decimal list-inside space-y-1 ml-2">
-                <li>Have the user sign up or sign in to create their account</li>
-                <li>Once they're registered, they'll appear in this list</li>
-                <li>Click "Add Access" next to their name to assign country access</li>
-                <li>Select "Admin" role to grant site administrator privileges (access to all countries)</li>
-                <li>Select "User" role to grant access to specific countries only</li>
+                <li><strong>Create User:</strong> Click "Create User" to create a new account. You can send an invitation email (user sets their own password) or set a password manually.</li>
+                <li><strong>Assign Access:</strong> Click "Add Access" next to any user to assign country access</li>
+                <li><strong>Admin Role:</strong> Select "Admin" role to grant site administrator privileges (access to all countries and admin functions)</li>
+                <li><strong>User Role:</strong> Select "User" role to grant access to specific countries only</li>
+                <li><strong>Remove Access:</strong> Click the X icon on any country assignment to remove access</li>
               </ol>
             </div>
           </div>
