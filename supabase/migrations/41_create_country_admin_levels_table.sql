@@ -10,7 +10,7 @@
 CREATE TABLE IF NOT EXISTS public.country_admin_levels (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   country_id UUID NOT NULL REFERENCES public.countries(id) ON DELETE CASCADE,
-  level_number INTEGER NOT NULL CHECK (level_number BETWEEN 1 AND 4),
+  level_number INTEGER NOT NULL CHECK (level_number BETWEEN 1 AND 5),
   name TEXT NOT NULL, -- Singular: "Province", "District"
   plural_name TEXT, -- Plural: "Provinces", "Districts" (optional, defaults to name + 's')
   code_prefix TEXT, -- Optional: "PROV", "DIST" (for generating codes)
@@ -38,7 +38,7 @@ CREATE TRIGGER country_admin_levels_updated_at
   EXECUTE FUNCTION update_country_admin_levels_updated_at();
 
 COMMENT ON TABLE public.country_admin_levels IS 'Stores custom names for administrative levels per country. Allows countries to use their own terminology instead of generic ADM1-ADM4.';
-COMMENT ON COLUMN public.country_admin_levels.level_number IS 'Administrative level number: 1 (highest, e.g., Region/Province), 2, 3, 4 (lowest, e.g., Barangay/Village)';
+COMMENT ON COLUMN public.country_admin_levels.level_number IS 'Administrative level number: 1 (highest, e.g., Region/Province), 2, 3, 4, 5 (lowest, e.g., Barangay/Village). Most countries use 3-4 levels.';
 COMMENT ON COLUMN public.country_admin_levels.name IS 'Singular name for this level (e.g., "Province", "District", "Municipality")';
 COMMENT ON COLUMN public.country_admin_levels.plural_name IS 'Plural name (e.g., "Provinces", "Districts"). If NULL, defaults to name + "s"';
 COMMENT ON COLUMN public.country_admin_levels.code_prefix IS 'Optional prefix for admin codes (e.g., "PROV" for Province codes)';
@@ -86,6 +86,48 @@ AS $$
 DECLARE
   v_name TEXT;
 BEGIN
+  IF in_plural THEN
+    SELECT COALESCE(plural_name, name || 's') INTO v_name
+    FROM public.country_admin_levels
+    WHERE country_id = in_country_id
+      AND level_number = in_level_number
+    LIMIT 1;
+  ELSE
+    SELECT name INTO v_name
+    FROM public.country_admin_levels
+    WHERE country_id = in_country_id
+      AND level_number = in_level_number
+    LIMIT 1;
+  END IF;
+  
+  -- Fallback to generic ADM format if not configured
+  IF v_name IS NULL THEN
+    RETURN 'ADM' || in_level_number::TEXT;
+  END IF;
+  
+  RETURN v_name;
+END;
+$$;
+
+-- Update function to support level 5
+DROP FUNCTION IF EXISTS public.get_admin_level_name(UUID, INTEGER, BOOLEAN);
+CREATE OR REPLACE FUNCTION public.get_admin_level_name(
+  in_country_id UUID,
+  in_level_number INTEGER,
+  in_plural BOOLEAN DEFAULT false
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+  v_name TEXT;
+BEGIN
+  -- Validate level number
+  IF in_level_number < 1 OR in_level_number > 5 THEN
+    RETURN 'ADM' || in_level_number::TEXT;
+  END IF;
+  
   IF in_plural THEN
     SELECT COALESCE(plural_name, name || 's') INTO v_name
     FROM public.country_admin_levels

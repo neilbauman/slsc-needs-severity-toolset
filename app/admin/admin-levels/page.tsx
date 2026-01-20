@@ -1,16 +1,18 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
 import CountryAdminLevelsConfig from '@/components/CountryAdminLevelsConfig';
-import { Shield } from 'lucide-react';
+import { Shield, Globe } from 'lucide-react';
 import Link from 'next/link';
 
 export default function AdminLevelsPage() {
   const { user, loading: authLoading } = useAuth();
-  const { isSiteAdmin, loading: countryLoading } = useCountry();
+  const { isSiteAdmin, loading: countryLoading, availableCountries } = useCountry();
   const router = useRouter();
+  const [selectedCountryId, setSelectedCountryId] = useState<string>('');
 
   // Redirect if not site admin
   if (!authLoading && !countryLoading && (!user || !isSiteAdmin)) {
@@ -55,7 +57,39 @@ export default function AdminLevelsPage() {
             ← Back to Admin
           </Link>
         </div>
-        <CountryAdminLevelsConfig />
+
+        {/* Country Selector */}
+        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            <Globe className="inline mr-2" size={16} />
+            Select Country to Configure
+          </label>
+          <select
+            value={selectedCountryId}
+            onChange={(e) => setSelectedCountryId(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Select a country...</option>
+            {availableCountries.map((country) => (
+              <option key={country.id} value={country.id}>
+                {country.name} ({country.iso_code})
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-gray-500">
+            Each country has its own admin level configuration. Select a country to configure its administrative level names (e.g., "Province", "District", "Municipality").
+          </p>
+        </div>
+
+        {/* Configuration Component */}
+        {selectedCountryId ? (
+          <CountryAdminLevelsConfig countryId={selectedCountryId} />
+        ) : (
+          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">
+            <Globe className="mx-auto text-gray-400 mb-4" size={48} />
+            <p>Please select a country above to configure its admin level names.</p>
+          </div>
+        )}
       </div>
     </div>
   );

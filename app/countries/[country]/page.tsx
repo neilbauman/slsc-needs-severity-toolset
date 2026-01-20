@@ -109,7 +109,7 @@ const PILLAR_FILTER_PARAM: Record<PillarKey, string> = {
   'Underlying Vulnerability': 'underlying',
   Other: 'other',
 };
-const ADMIN_LEVELS: Array<'ADM1' | 'ADM2' | 'ADM3' | 'ADM4'> = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
+const ADMIN_LEVELS: Array<'ADM1' | 'ADM2' | 'ADM3' | 'ADM4' | 'ADM5'> = ['ADM1', 'ADM2', 'ADM3', 'ADM4', 'ADM5'];
 
 const formatDate = (value?: string | null) => {
   if (!value) return '—';
@@ -265,6 +265,7 @@ export default function CountryDashboardPage() {
     ADM2: 0,
     ADM3: 0,
     ADM4: 0,
+    ADM5: 0,
   });
 
   // Set current country based on URL
@@ -371,6 +372,7 @@ export default function CountryDashboardPage() {
         ADM2: 0,
         ADM3: 0,
         ADM4: 0,
+        ADM5: 0,
       };
       levelCounts.forEach((result, idx) => {
         const level = ADMIN_LEVELS[idx];

@@ -42,7 +42,7 @@ export function getAdminLevelNamesMap(
 
   if (!levels || levels.length === 0) {
     // Default fallback
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 5; i++) {
       map.set(i, { name: `ADM${i}`, plural: `ADM${i}` });
     }
     return map;
@@ -81,6 +81,7 @@ export function getAdminLevelOptions(
       { value: 'ADM2', label: 'ADM2', levelNumber: 2 },
       { value: 'ADM3', label: 'ADM3', levelNumber: 3 },
       { value: 'ADM4', label: 'ADM4', levelNumber: 4 },
+      { value: 'ADM5', label: 'ADM5', levelNumber: 5 },
     ];
   }
 

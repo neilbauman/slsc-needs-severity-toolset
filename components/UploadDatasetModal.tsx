@@ -23,7 +23,7 @@ interface MetaState {
   name: string;
   description: string;
   category: string;
-  admin_level: 'ADM1' | 'ADM2' | 'ADM3' | 'ADM4';
+  admin_level: 'ADM1' | 'ADM2' | 'ADM3' | 'ADM4' | 'ADM5';
   type: DatasetType;
 }
 

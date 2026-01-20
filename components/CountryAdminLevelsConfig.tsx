@@ -14,9 +14,18 @@ interface AdminLevel {
   code_prefix: string;
 }
 
-export default function CountryAdminLevelsConfig() {
-  const { currentCountry, isSiteAdmin } = useCountry();
+interface CountryAdminLevelsConfigProps {
+  countryId?: string; // Optional: if provided, configure this specific country (for admin page)
+}
+
+export default function CountryAdminLevelsConfig({ countryId }: CountryAdminLevelsConfigProps = {}) {
+  const { currentCountry, isSiteAdmin, availableCountries } = useCountry();
   const supabase = createClient();
+  
+  // Use provided countryId or fall back to currentCountry
+  const targetCountry = countryId 
+    ? availableCountries.find(c => c.id === countryId) || null
+    : currentCountry;
   
   const [levels, setLevels] = useState<AdminLevel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,18 +33,19 @@ export default function CountryAdminLevelsConfig() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  // Initialize with default 4 levels
+  // Initialize with default 5 levels (most countries use 3-4, but support up to 5)
   const initializeLevels = () => {
     return [
       { level_number: 1, name: '', plural_name: '', code_prefix: '' },
       { level_number: 2, name: '', plural_name: '', code_prefix: '' },
       { level_number: 3, name: '', plural_name: '', code_prefix: '' },
       { level_number: 4, name: '', plural_name: '', code_prefix: '' },
+      { level_number: 5, name: '', plural_name: '', code_prefix: '' },
     ];
   };
 
   const loadLevels = async () => {
-    if (!currentCountry) {
+    if (!targetCountry) {
       setLevels(initializeLevels());
       setLoading(false);
       return;
@@ -48,7 +58,7 @@ export default function CountryAdminLevelsConfig() {
       const { data, error: fetchError } = await supabase
         .from('country_admin_levels')
         .select('*')
-        .eq('country_id', currentCountry.id)
+        .eq('country_id', targetCountry.id)
         .order('level_number', { ascending: true });
 
       if (fetchError) throw fetchError;
@@ -78,7 +88,7 @@ export default function CountryAdminLevelsConfig() {
 
   useEffect(() => {
     loadLevels();
-  }, [currentCountry]);
+  }, [targetCountry]);
 
   const handleLevelChange = (index: number, field: keyof AdminLevel, value: string) => {
     const updated = [...levels];
@@ -94,7 +104,7 @@ export default function CountryAdminLevelsConfig() {
   };
 
   const handleSave = async () => {
-    if (!currentCountry) {
+    if (!targetCountry) {
       setError('No country selected');
       return;
     }
@@ -121,7 +131,7 @@ export default function CountryAdminLevelsConfig() {
       const { error: deleteError } = await supabase
         .from('country_admin_levels')
         .delete()
-        .eq('country_id', currentCountry.id);
+        .eq('country_id', targetCountry.id);
 
       if (deleteError) throw deleteError;
 
@@ -129,7 +139,7 @@ export default function CountryAdminLevelsConfig() {
       const levelsToInsert = levels
         .filter((l) => l.name.trim())
         .map((l) => ({
-          country_id: currentCountry.id,
+          country_id: targetCountry.id,
           level_number: l.level_number,
           name: l.name.trim(),
           plural_name: l.plural_name.trim() || l.name.trim() + 's',
@@ -167,23 +177,20 @@ export default function CountryAdminLevelsConfig() {
     );
   }
 
-  if (!currentCountry) {
-    return (
-      <div className="p-6 text-center text-gray-500">
-        <p>Please select a country to configure admin levels.</p>
-      </div>
-    );
+  if (!targetCountry) {
+    return null; // Let parent component handle the "no country selected" message
   }
 
   return (
     <div className="p-6 bg-white rounded-lg border border-gray-200">
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-2">
-          Configure Admin Level Names for {currentCountry.name}
+          Configure Admin Level Names for {targetCountry.name}
         </h2>
         <p className="text-sm text-gray-600">
           Define custom names for your administrative levels (e.g., "Province", "District", "Municipality").
-          These names will replace the generic ADM1, ADM2, ADM3, ADM4 throughout the application.
+          You can configure up to 5 levels (ADM1 through ADM5), though most countries use 3-4 levels.
+          Leave levels empty if your country doesn't use them. These names will replace the generic ADM1-ADM5 throughout the application.
         </p>
       </div>
 
@@ -257,7 +264,7 @@ export default function CountryAdminLevelsConfig() {
 
       <div className="flex items-center justify-between pt-4 border-t border-gray-200">
         <p className="text-xs text-gray-500">
-          * Required fields. Leave levels empty if your country doesn't use all 4 levels.
+          * Required fields. Configure only the levels your country uses (most countries use 3-4 levels). Leave unused levels empty.
         </p>
         <button
           onClick={handleSave}
