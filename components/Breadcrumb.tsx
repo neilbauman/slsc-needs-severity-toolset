@@ -44,6 +44,9 @@ export default function Breadcrumb() {
   // Check if we're on the country dashboard page
   const isCountryDashboard = segments.length === 2 && segments[0] === 'countries'
   
+  // Check if we're on an admin page (global, not country-specific)
+  const isAdminPage = segments.length > 0 && segments[0] === 'admin'
+  
   // Filter out 'countries' segment and ISO code - we show country name separately
   const displaySegments = segments.filter((seg, idx) => {
     // Skip 'countries' segment and its ISO code child
@@ -58,8 +61,8 @@ export default function Breadcrumb() {
       <Link href="/" className="hover:text-blue-600 transition-colors">
         Home
       </Link>
-      {/* Include country in breadcrumb if available and not on home page */}
-      {currentCountry && segments.length > 0 && (
+      {/* Include country in breadcrumb if available and not on home page or admin page */}
+      {currentCountry && segments.length > 0 && !isAdminPage && (
         <>
           <span className="mx-1 text-gray-400">›</span>
           {isCountryDashboard ? (
