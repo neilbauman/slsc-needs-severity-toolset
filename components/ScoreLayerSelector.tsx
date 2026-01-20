@@ -255,32 +255,32 @@ export default function ScoreLayerSelector({ layers = [], categoryScores = {}, o
                     </div>
                     <div className="flex items-center gap-1">
                       {isHazardEvent && onScoreHazardEvent && (
-                        <button
+                        <span
                           onClick={(e) => {
                             e.stopPropagation();
                             if (hazardEventId && onScoreHazardEvent) {
                               onScoreHazardEvent(hazardEventId);
                             }
                           }}
-                          className="text-xs px-1.5 py-0.5 rounded bg-green-600 text-white hover:bg-green-700"
+                          className="text-xs px-1.5 py-0.5 rounded bg-green-600 text-white hover:bg-green-700 cursor-pointer"
                           title="Score this hazard event"
                         >
                           Score
-                        </button>
+                        </span>
                       )}
                       {isHazardEvent && onDeleteHazardEvent && (
-                        <button
+                        <span
                           onClick={(e) => {
                             e.stopPropagation();
                             if (hazardEventId && onDeleteHazardEvent && confirm(`Are you sure you want to delete "${d.dataset_name}"? This will also delete all scores for this hazard event.`)) {
                               onDeleteHazardEvent(hazardEventId);
                             }
                           }}
-                          className="text-xs px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-700"
+                          className="text-xs px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-700 cursor-pointer"
                           title="Delete this hazard event"
                         >
                           ×
-                        </button>
+                        </span>
                       )}
                       {d.avg_score !== null && (
                         <span className="text-xs opacity-75">

@@ -111,7 +111,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
       setError(null);
       const { data, error } = await supabase
         .from('instance_datasets')
-        .select(`dataset_id:id, datasets!inner(id, name, category, type)`)
+        .select(`dataset_id:id, datasets!inner(id, name, metadata, type)`)
         .eq('instance_id', instance.id);
 
       if (error) {
@@ -149,7 +149,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
       const mapped: UiDataset[] = (data || []).map((r: any) => ({
         dataset_id: r.dataset_id,
         dataset_name: r.datasets.name,
-        category: r.datasets.category,
+        category: r.datasets.metadata?.category || 'Uncategorized',
         type: r.datasets.type,
         avg_score: avgScores[r.dataset_id] || null,
       }));

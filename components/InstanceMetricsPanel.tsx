@@ -66,14 +66,54 @@ export default function InstanceMetricsPanel({ instanceId, refreshKey }: Props) 
             .single();
 
           if (instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0) {
-            // Get affected ADM3 codes using the RPC function
-            const { data: affectedCodes, error: affectedError } = await supabase.rpc('get_affected_adm3', {
-              in_scope: instanceData.admin_scope
-            });
+            // Get affected ADM3 codes using the RPC function with pagination
+            const CHUNK_SIZE = 2000;
+            let allAdm3Codes: any[] = [];
+            let offset = 0;
+            let totalCount: number | null = null;
+            let hasMore = true;
 
-            if (!affectedError && affectedCodes && Array.isArray(affectedCodes)) {
+            while (hasMore) {
+              const { data: affectedCodes, error: affectedError } = await supabase.rpc('get_affected_adm3', {
+                in_scope: instanceData.admin_scope,
+                in_limit: CHUNK_SIZE,
+                in_offset: offset,
+              });
+
+              if (affectedError) {
+                console.error('Error getting affected ADM3 codes for metrics:', affectedError);
+                break;
+              }
+
+              if (!affectedCodes || affectedCodes.length === 0) {
+                hasMore = false;
+                break;
+              }
+
+              // Get total count from first response
+              if (totalCount === null && affectedCodes.length > 0) {
+                totalCount = affectedCodes[0].total_count || affectedCodes.length;
+              }
+
+              allAdm3Codes = allAdm3Codes.concat(affectedCodes);
+
+              // Check if we've fetched all data
+              if (totalCount !== null && allAdm3Codes.length >= totalCount) {
+                hasMore = false;
+              } else if (affectedCodes.length === 0) {
+                hasMore = false;
+              } else if (totalCount !== null && allAdm3Codes.length < totalCount) {
+                offset += affectedCodes.length;
+              } else if (affectedCodes.length >= CHUNK_SIZE) {
+                offset += affectedCodes.length;
+              } else {
+                hasMore = false;
+              }
+            }
+
+            if (allAdm3Codes.length > 0) {
               // Extract admin_pcode from the result (could be objects or strings)
-              const adm3Codes = affectedCodes.map((item: any) => 
+              const adm3Codes = allAdm3Codes.map((item: any) => 
                 typeof item === 'string' ? item : (item.admin_pcode || item.pcode || item.code)
               ).filter(Boolean);
               

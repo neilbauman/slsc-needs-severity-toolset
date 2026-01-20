@@ -272,7 +272,7 @@ export default function InstanceScoringModal({
     const load = async () => {
       const { data: datasets, error: dsErr } = await supabase
         .from('instance_datasets')
-        .select('dataset_id, datasets (id, name, category)')
+        .select('dataset_id, datasets (id, name, metadata)')
         .eq('instance_id', instance.id);
 
       if (dsErr) {
@@ -283,7 +283,7 @@ export default function InstanceScoringModal({
       const flat = (datasets || []).map((d: any) => ({
         id: d.datasets.id,
         name: d.datasets.name,
-        category: d.datasets.category || 'Uncategorized',
+        category: d.datasets.metadata?.category || 'Uncategorized',
         is_hazard_event: false,
       }));
 

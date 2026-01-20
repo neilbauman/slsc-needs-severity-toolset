@@ -32,16 +32,30 @@ export default function InstanceDatasetConfigModal({
     const loadData = async () => {
       setLoading(true);
 
-      const { data: all, error: allErr } = await supabase
+      // Filter datasets by the instance's country_id to ensure country isolation
+      const query = supabase
         .from("datasets")
-        .select("id, name, category, type, admin_level, is_derived")
-        .order("category, name");
-
+        .select("id, name, metadata, type, admin_level, is_derived");
+      
+      if (instance?.country_id) {
+        query.eq("country_id", instance.country_id);
+      }
+      
+      const { data: all, error: allErr } = await query;
+      
       if (allErr) {
         console.error("Dataset load error:", allErr.message);
         setLoading(false);
         return;
       }
+      
+      // Sort by category (from metadata) then name
+      const sorted = (all || []).sort((a: any, b: any) => {
+        const catA = a.metadata?.category || 'Uncategorized';
+        const catB = b.metadata?.category || 'Uncategorized';
+        if (catA !== catB) return catA.localeCompare(catB);
+        return (a.name || '').localeCompare(b.name || '');
+      });
 
       const { data: links, error: linkErr } = await supabase
         .from("instance_datasets")
@@ -56,7 +70,7 @@ export default function InstanceDatasetConfigModal({
 
       const linked = new Set((links || []).map((r) => r.dataset_id));
       setLinkedIds(linked);
-      setDatasets(all || []);
+      setDatasets(sorted || []);
       setLoading(false);
     };
 
@@ -134,7 +148,7 @@ export default function InstanceDatasetConfigModal({
                       />
                     </td>
                     <td className="p-2 font-medium text-gray-800">{d.name}</td>
-                    <td className="p-2 text-gray-600">{d.category}</td>
+                    <td className="p-2 text-gray-600">{d.metadata?.category || 'Uncategorized'}</td>
                     <td className="p-2 text-gray-600 capitalize">{d.type}</td>
                     <td className="p-2 text-center">
                       {checked && (

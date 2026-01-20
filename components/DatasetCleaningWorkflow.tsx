@@ -284,7 +284,17 @@ export default function DatasetCleaningWorkflow({ dataset, onClose, onCleaned }:
 
           {!loading && currentStep === 'assessment' && (
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900">Data Health Assessment</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-gray-900">Data Health Assessment</h3>
+                <button
+                  onClick={loadHealthMetrics}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Loader2 className={loading ? 'animate-spin' : ''} size={14} />
+                  Refresh
+                </button>
+              </div>
               {healthMetrics ? (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="rounded-lg border border-gray-200 p-4">

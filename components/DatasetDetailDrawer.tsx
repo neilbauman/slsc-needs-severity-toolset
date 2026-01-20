@@ -142,13 +142,31 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
 
   useEffect(() => {
     if (!dataset) return;
+    
+    // Determine category from metadata.pillar, metadata.category, or dataset.category
+    const meta = dataset.metadata || {};
+    const categoryFromMeta = meta.pillar || meta.category || dataset.category || 'Uncategorized';
+    
+    // Map pillar values back to category options
+    const pillarToCategory: Record<string, string> = {
+      'Core': 'Core',
+      'SSC Framework - P1': 'SSC P1',
+      'SSC Framework - P2': 'SSC P2',
+      'SSC Framework - P3': 'SSC P3',
+      'Hazard': 'Hazard',
+      'Underlying Vulnerability': 'Underlying Vulnerability',
+      'Other': 'Uncategorized',
+    };
+    
+    const mappedCategory = pillarToCategory[categoryFromMeta] || categoryFromMeta || 'Uncategorized';
+    
     setFormValues({
       name: dataset.name || '',
       description: dataset.description || '',
       type: dataset.type || 'numeric',
       admin_level: dataset.admin_level || '',
       value_type: dataset.value_type || 'absolute',
-      category: dataset.category || 'Uncategorized',
+      category: mappedCategory,
     });
     setEditing(mode === 'edit');
   }, [dataset, mode]);
@@ -227,23 +245,63 @@ export default function DatasetDetailDrawer({ dataset, mode = 'view', onClose, o
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Validate admin_level (required, non-empty)
+      if (!formValues.admin_level || formValues.admin_level.trim() === '') {
+        alert('Admin level is required and cannot be empty.');
+        setSaving(false);
+        return;
+      }
+      
+      // Map category to metadata.pillar for proper categorization
+      const categoryToPillar: Record<string, string> = {
+        'Core': 'Core',
+        'SSC P1': 'SSC Framework - P1',
+        'SSC P2': 'SSC Framework - P2',
+        'SSC P3': 'SSC Framework - P3',
+        'Hazard': 'Hazard',
+        'Underlying Vulnerability': 'Underlying Vulnerability',
+        'Uncategorized': 'Other',
+      };
+      
+      const pillarValue = categoryToPillar[formValues.category] || formValues.category;
+      
+      // Update metadata with category and value_type (these are stored in metadata, not as columns)
+      const metadata = {
+        ...(dataset.metadata || {}),
+        pillar: pillarValue,
+        category: formValues.category,
+        value_type: formValues.value_type,
+      };
+      
+      // Only update columns that actually exist in the database
+      const updateData: any = {
+        name: formValues.name,
+        description: formValues.description || null,
+        type: formValues.type,
+        admin_level: formValues.admin_level.trim(),
+        metadata: metadata,
+      };
+      
+      // Only include updated_at if the column exists (will be set by trigger if present)
+      // The trigger will automatically set updated_at, but we can also set it explicitly
+      // if the column exists
+      
       const { error } = await supabase
         .from('datasets')
-        .update({
-          name: formValues.name,
-          description: formValues.description,
-          type: formValues.type,
-          admin_level: formValues.admin_level,
-          value_type: formValues.value_type,
-          category: formValues.category,
-        })
+        .update(updateData)
         .eq('id', dataset.id);
-      if (error) throw error;
+        
+      if (error) {
+        console.error('Supabase error:', error);
+        throw error;
+      }
+      
       onSaved();
       setEditing(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save dataset:', err);
-      alert('Failed to save dataset changes.');
+      const errorMessage = err?.message || 'Failed to save dataset changes.';
+      alert(`Failed to save dataset changes: ${errorMessage}`);
     } finally {
       setSaving(false);
     }

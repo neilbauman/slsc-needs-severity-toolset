@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
+import { useCountry } from '@/lib/countryContext';
 import dynamic from 'next/dynamic';
 
 // 👇 dynamically import modal (Leaflet is client-only)
@@ -23,6 +24,7 @@ type Instance = {
 
 export default function InstancesPage() {
   const supabase = createClient();
+  const { currentCountry, loading: countryLoading } = useCountry();
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -31,10 +33,17 @@ export default function InstancesPage() {
   const [areaModalFor, setAreaModalFor] = useState<Instance | null>(null);
 
   const load = async () => {
+    if (!currentCountry) {
+      setInstances([]);
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
     const { data, error } = await supabase
       .from('instances')
       .select('id,name,description,created_at,admin_scope,active,type')
+      .eq('country_id', currentCountry.id)
       .order('created_at', { ascending: false });
     if (error) {
       console.error(error);
@@ -45,11 +54,15 @@ export default function InstancesPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [currentCountry]);
 
   const createInstance = async () => {
     if (!newName.trim()) {
       alert('Instance name is required');
+      return;
+    }
+    if (!currentCountry) {
+      alert('Please select a country first');
       return;
     }
     setCreating(true);
@@ -61,6 +74,7 @@ export default function InstancesPage() {
         type: 'baseline',
         active: true,
         admin_scope: null,
+        country_id: currentCountry.id,
       })
       .select()
       .single();
@@ -124,8 +138,12 @@ export default function InstancesPage() {
           <div className="text-xs text-gray-500">{instances.length} total</div>
         </div>
 
-        {loading && <div className="text-sm">Loading…</div>}
-        {!loading && instances.length === 0 && (
+        {countryLoading && <div className="text-sm">Loading country...</div>}
+        {!countryLoading && !currentCountry && (
+          <div className="text-sm text-gray-600">Please select a country to view instances.</div>
+        )}
+        {!countryLoading && currentCountry && loading && <div className="text-sm">Loading…</div>}
+        {!countryLoading && currentCountry && !loading && instances.length === 0 && (
           <div className="text-sm text-gray-600">No instances yet. Create one above.</div>
         )}
 

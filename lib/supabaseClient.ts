@@ -18,3 +18,60 @@ export const supabase = createClient();
 
 /** Default export — do not re-export createClient to avoid duplicate bindings */
 export default supabase;
+
+/**
+ * Helper function to get datasets filtered by country
+ * @param countryId - UUID of the country
+ * @param additionalFilters - Optional additional Supabase query filters
+ */
+export async function getDatasets(countryId: string, additionalFilters?: any) {
+  const client = createClient();
+  let query = client
+    .from('datasets')
+    .select('*')
+    .eq('country_id', countryId);
+  
+  if (additionalFilters) {
+    query = additionalFilters(query);
+  }
+  
+  return query;
+}
+
+/**
+ * Helper function to get instances filtered by country
+ * @param countryId - UUID of the country
+ * @param additionalFilters - Optional additional Supabase query filters
+ */
+export async function getInstances(countryId: string, additionalFilters?: any) {
+  const client = createClient();
+  let query = client
+    .from('instances')
+    .select('*')
+    .eq('country_id', countryId);
+  
+  if (additionalFilters) {
+    query = additionalFilters(query);
+  }
+  
+  return query;
+}
+
+/**
+ * Helper function to get admin boundaries filtered by country
+ * @param countryId - UUID of the country
+ * @param additionalFilters - Optional additional Supabase query filters
+ */
+export async function getAdminBoundaries(countryId: string, additionalFilters?: any) {
+  const client = createClient();
+  let query = client
+    .from('admin_boundaries')
+    .select('*')
+    .eq('country_id', countryId);
+  
+  if (additionalFilters) {
+    query = additionalFilters(query);
+  }
+  
+  return query;
+}

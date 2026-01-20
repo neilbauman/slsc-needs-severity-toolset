@@ -72,6 +72,8 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [showScoringModal, setShowScoringModal] = useState(false);
   const [showDatasetConfigModal, setShowDatasetConfigModal] = useState(false);
   const [showAffectedAreaModal, setShowAffectedAreaModal] = useState(false);
+  const [overallScoresMissing, setOverallScoresMissing] = useState(false);
+  const [hasDatasetScores, setHasDatasetScores] = useState(false);
   const [showUploadHazardModal, setShowUploadHazardModal] = useState(false);
   const [showHazardScoringModal, setShowHazardScoringModal] = useState(false);
   const [selectedHazardEvent, setSelectedHazardEvent] = useState<any>(null);
@@ -83,6 +85,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
   const [layerOptions, setLayerOptions] = useState<LayerOption[]>([]);
   const [categoryScoreMap, setCategoryScoreMap] = useState<Record<string, number>>({});
   const [showImportHazardModal, setShowImportHazardModal] = useState(false);
+  const [mapDataDiagnostics, setMapDataDiagnostics] = useState<{ issue?: string, hasAdminScope?: boolean, hasGeometry?: boolean } | null>(null);
 
   // Ensure instanceId exists
   const instanceId = params?.id;
@@ -138,6 +141,10 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       if (!directError && directData) {
         instanceData = directData;
       } else {
+        console.error("❌ Error fetching instance data:", directError);
+        if (directError) {
+          setError(`Failed to load instance: ${directError.message || 'Unknown error'}`);
+        }
         // Last resort: create minimal instance object with just the ID
         instanceData = { id: instanceId, name: `Instance ${instanceId}` };
       }
@@ -353,18 +360,156 @@ export default function InstancePage({ params }: { params: { id: string } }) {
       try {
         console.log("Loading overall scores for initial view");
         
-        // First, get all available admin_pcodes with geometry from geojson view
-        const { data: geoRows, error: geoError } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode, geojson")
-          .eq("instance_id", instanceId);
+        // First, get all available admin_pcodes with geometry from geojson view (with pagination)
+        // Use 1000 as chunk size to match Supabase's default limit
+        const CHUNK_SIZE = 1000;
+        let geoRows: any[] = [];
+        let offset = 0;
+        let hasMore = true;
+        let consecutiveEmptyChunks = 0;
+        let viewErrorOccurred = false;
 
-        if (geoError) {
-          console.warn("Error loading GeoJSON:", geoError);
-        } else if (!geoRows || geoRows.length === 0) {
+        while (hasMore) {
+          try {
+            const { data: chunk, error: geoError } = await supabase
+              .from("v_instance_admin_scores_geojson")
+              .select("admin_pcode, geojson")
+              .eq("instance_id", instanceId)
+              .range(offset, offset + CHUNK_SIZE - 1);
+
+            if (geoError) {
+              console.error("❌ Error loading GeoJSON chunk:", geoError);
+              console.error("Error details:", {
+                message: geoError.message,
+                details: geoError.details,
+                hint: geoError.hint,
+                code: geoError.code,
+                instanceId: instanceId,
+                offset: offset
+              });
+              
+              // If it's a view/table error, try to diagnose
+              if (geoError.code === '42P01' || geoError.message?.includes('does not exist')) {
+                console.error("⚠️ The v_instance_admin_scores_geojson view may not exist or may have an error");
+              }
+              
+              // If this is the first error, try fallback approach
+              if (!viewErrorOccurred && offset === 0) {
+                viewErrorOccurred = true;
+                console.warn("⚠️ View query failed, will try fallback approach after diagnostics");
+              }
+              
+              setError(`Failed to load map data: ${geoError.message || 'Unknown error'}`);
+              hasMore = false;
+              break;
+            }
+
+          if (!chunk || chunk.length === 0) {
+            consecutiveEmptyChunks++;
+            // Stop if we get 2 consecutive empty chunks (safety check)
+            if (consecutiveEmptyChunks >= 2) {
+              console.log("Got consecutive empty chunks, stopping pagination");
+              hasMore = false;
+              break;
+            }
+            // Still increment offset to continue searching
+            offset += CHUNK_SIZE;
+            continue;
+          }
+
+            consecutiveEmptyChunks = 0; // Reset counter on successful fetch
+            geoRows = geoRows.concat(chunk);
+            console.log(`Fetched GeoJSON chunk: ${chunk.length} rows (offset: ${offset}, total so far: ${geoRows.length})`);
+
+            // Continue if we got a full chunk (might be more data)
+            // Stop if we got fewer rows than requested (we've reached the end)
+            if (chunk.length < CHUNK_SIZE) {
+              console.log(`Got ${chunk.length} rows (less than ${CHUNK_SIZE}), stopping pagination`);
+              hasMore = false;
+            } else {
+              offset += chunk.length; // Use actual length to handle edge cases
+              console.log(`Got full chunk, continuing to offset ${offset}`);
+            }
+          } catch (queryError: any) {
+            console.error("❌ Exception during GeoJSON query:", queryError);
+            setError(`Failed to load map data: ${queryError.message || 'Query error'}`);
+            hasMore = false;
+            break;
+          }
+        }
+
+        if (geoRows.length === 0) {
           console.warn("No geometry found for instance");
+          
+          // Run diagnostics to understand why
+          try {
+            const { data: diagnostics, error: diagError } = await supabase.rpc('diagnose_map_data', {
+              in_instance_id: instanceId
+            });
+            
+            if (!diagError && diagnostics && Array.isArray(diagnostics)) {
+              const diagMap = new Map(diagnostics.map((d: any) => [d.check_type, d]));
+              
+              // Log all diagnostic results for debugging
+              console.group("🔍 Map Data Diagnostics");
+              diagnostics.forEach((d: any) => {
+                console.log(`${d.check_type}: ${d.count_value} - ${d.message}`);
+              });
+              console.groupEnd();
+              
+              const hasAdminScope = instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0;
+              const affectedCount = diagMap.get('Affected ADM3 Areas')?.count_value || 0;
+              const geometryCount = diagMap.get('Areas with Geometry')?.count_value || 0;
+              const viewRows = diagMap.get('GeoJSON View Rows')?.count_value || 0;
+              
+              let issue = '';
+              if (!hasAdminScope) {
+                issue = 'no_admin_scope';
+                console.warn("❌ Issue: Instance has no admin_scope (affected area) defined");
+              } else if (affectedCount === 0) {
+                issue = 'no_affected_areas';
+                console.warn("❌ Issue: No ADM3 areas found matching the admin_scope");
+              } else if (geometryCount === 0) {
+                issue = 'no_geometry';
+                console.warn("❌ Issue: Affected areas exist but have no geometry data in admin_boundaries");
+              } else if (viewRows === 0) {
+                issue = 'view_issue';
+                console.warn("❌ Issue: Geometry exists but view returns no rows (possible view/join issue)");
+              } else {
+                issue = 'unknown';
+                console.warn("⚠️ Issue: Unknown - geometry and view exist but map still not showing");
+              }
+              
+              setMapDataDiagnostics({
+                issue,
+                hasAdminScope: hasAdminScope || false,
+                hasGeometry: geometryCount > 0
+              });
+              
+              console.warn("📊 Summary:", {
+                hasAdminScope,
+                affectedCount,
+                geometryCount,
+                viewRows,
+                issue
+              });
+            } else if (diagError) {
+              console.error("❌ Diagnostic function error:", diagError);
+            }
+          } catch (diagErr) {
+            console.error("Error running diagnostics:", diagErr);
+            // Fallback: check basic conditions
+            const hasAdminScope = instanceData?.admin_scope && Array.isArray(instanceData.admin_scope) && instanceData.admin_scope.length > 0;
+            setMapDataDiagnostics({
+              issue: hasAdminScope ? 'unknown' : 'no_admin_scope',
+              hasAdminScope: hasAdminScope || false,
+              hasGeometry: undefined
+            });
+          }
         } else {
-          console.log(`Found ${geoRows.length} locations with geometry`);
+          // Clear diagnostics if we have data
+          setMapDataDiagnostics(null);
+          console.log(`Found ${geoRows.length} locations with geometry (loaded via pagination)`);
           
           // Group by admin_pcode to get unique geometry
           const geoMap = new Map<string, any>();
@@ -410,6 +555,45 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             }
             
             console.log(`Loaded ${allScores.length} overall scores for locations with geometry`);
+            
+            // Diagnostic: Check if Overall scores exist at all for this instance
+            if (allScores.length === 0 && adminPcodesWithGeometry.length > 0) {
+              const { data: overallCheck, error: checkError } = await supabase
+                .from("instance_category_scores")
+                .select("admin_pcode, score")
+                .eq("instance_id", instanceId)
+                .eq("category", "Overall")
+                .limit(5);
+              
+              if (checkError) {
+                console.error("Error checking for Overall scores:", checkError);
+              } else if (!overallCheck || overallCheck.length === 0) {
+                setOverallScoresMissing(true);
+                console.warn("⚠️ No Overall scores found in instance_category_scores for this instance.");
+                console.warn("💡 SOLUTION: Go to 'Adjust Scoring' → Click 'Compute Final Rollup' to generate Overall scores.");
+                
+                // Also check if dataset scores exist
+                const { data: datasetScoresCheck } = await supabase
+                  .from("instance_dataset_scores")
+                  .select("admin_pcode")
+                  .eq("instance_id", instanceId)
+                  .limit(1);
+                
+                if (datasetScoresCheck && datasetScoresCheck.length > 0) {
+                  setHasDatasetScores(true);
+                  console.warn("✓ Dataset scores exist, but Overall scores are missing. Run 'Compute Final Rollup'.");
+                } else {
+                  setHasDatasetScores(false);
+                  console.warn("⚠️ No dataset scores found either. Apply scoring to datasets first, then compute rollups.");
+                }
+              } else {
+                setOverallScoresMissing(false);
+                console.warn(`Found ${overallCheck.length} Overall scores in database, but they don't match the ${adminPcodesWithGeometry.length} locations with geometry.`);
+                console.warn("This might indicate an admin_pcode mismatch or scope issue.");
+              }
+            } else {
+              setOverallScoresMissing(false);
+            }
 
             // Create score map
             const scoreMap = new Map(allScores.map((s: any) => [s.admin_pcode, Number(s.avg_score)]));
@@ -471,26 +655,68 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     
     console.log(`Filtering features by admin_scope: ${scopeToUse.length} ADM2 codes`);
     
-    // Get valid ADM3 codes within the scope
-    const { data: affectedAdm3, error: adm3Error } = await supabase.rpc('get_affected_adm3', {
-      in_scope: scopeToUse,
-    });
-    
-    if (adm3Error) {
-      console.error('Error getting affected ADM3 codes:', adm3Error);
+    // Get valid ADM3 codes within the scope using pagination
+    const CHUNK_SIZE = 2000;
+    let allAdm3Codes: any[] = [];
+    let offset = 0;
+    let totalCount: number | null = null;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: affectedAdm3, error: adm3Error } = await supabase.rpc('get_affected_adm3', {
+        in_scope: scopeToUse,
+        in_limit: CHUNK_SIZE,
+        in_offset: offset,
+      });
+
+      if (adm3Error) {
+        console.error('Error getting affected ADM3 codes:', adm3Error);
+        return features; // Return all if we can't get valid codes
+      }
+
+      if (!affectedAdm3 || affectedAdm3.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      // Get total count from first response
+      if (totalCount === null && affectedAdm3.length > 0) {
+        totalCount = affectedAdm3[0].total_count || affectedAdm3.length;
+        console.log(`Total ADM3 codes available: ${totalCount}`);
+      }
+
+      allAdm3Codes = allAdm3Codes.concat(affectedAdm3);
+      console.log(`Fetched chunk: ${affectedAdm3.length} ADM3 codes (offset: ${offset}, total so far: ${allAdm3Codes.length})`);
+
+      // Check if we've fetched all data
+      if (totalCount !== null && allAdm3Codes.length >= totalCount) {
+        console.log(`✓ Reached total count: ${allAdm3Codes.length} >= ${totalCount}`);
+        hasMore = false;
+      } else if (affectedAdm3.length === 0) {
+        console.log(`✓ Got 0 rows, stopping`);
+        hasMore = false;
+      } else if (totalCount !== null && allAdm3Codes.length < totalCount) {
+        offset += affectedAdm3.length;
+        console.log(`→ Continuing: ${allAdm3Codes.length} < ${totalCount}, next offset=${offset}`);
+      } else if (affectedAdm3.length >= CHUNK_SIZE) {
+        offset += affectedAdm3.length;
+        console.log(`→ Got full chunk (${affectedAdm3.length}), continuing, next offset=${offset}`);
+      } else {
+        console.log(`✓ Got fewer rows than requested (${affectedAdm3.length} < ${CHUNK_SIZE}) and no totalCount, stopping`);
+        hasMore = false;
+      }
+    }
+
+    if (allAdm3Codes.length === 0) {
+      console.warn('No affected ADM3 codes returned after pagination');
       return features; // Return all if we can't get valid codes
     }
-    
-    if (!affectedAdm3 || !Array.isArray(affectedAdm3)) {
-      console.warn('No affected ADM3 codes returned');
-      return features; // Return all if we can't get valid codes
-    }
-    
-    const validAdm3Codes = new Set(affectedAdm3.map((row: any) => 
+
+    const validAdm3Codes = new Set(allAdm3Codes.map((row: any) => 
       typeof row === 'string' ? row : (row.admin_pcode || row.pcode || row.code)
     ).filter(Boolean));
     
-    console.log(`Found ${validAdm3Codes.size} valid ADM3 codes within scope`);
+    console.log(`Found ${validAdm3Codes.size} valid ADM3 codes within scope (loaded via pagination)`);
     
     const filtered = features.filter((f: any) => 
       validAdm3Codes.has(f.properties?.admin_pcode)
@@ -542,27 +768,60 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Loading ${scoreCategory.toLowerCase()} scores from instance_category_scores`);
         
-        // First, get all available admin_pcodes with geometry from geojson view
-        const { data: geoRows, error: geoError } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode, geojson")
-          .eq("instance_id", instanceId);
+        // First, get all available admin_pcodes with geometry from geojson view (with pagination)
+        // Use 1000 as chunk size to match Supabase's default limit
+        const CHUNK_SIZE = 1000;
+        let geoRows: any[] = [];
+        let offset = 0;
+        let hasMore = true;
+        let consecutiveEmptyChunks = 0;
 
-        if (geoError) {
-          console.error("Error fetching GeoJSON:", geoError);
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
+        while (hasMore) {
+          const { data: chunk, error: geoError } = await supabase
+            .from("v_instance_admin_scores_geojson")
+            .select("admin_pcode, geojson")
+            .eq("instance_id", instanceId)
+            .range(offset, offset + CHUNK_SIZE - 1);
+
+          if (geoError) {
+            console.error("Error fetching GeoJSON chunk:", geoError);
+            setFeatures([]);
+            setLoadingFeatures(false);
+            return;
+          }
+
+          if (!chunk || chunk.length === 0) {
+            consecutiveEmptyChunks++;
+            if (consecutiveEmptyChunks >= 2) {
+              console.log("Got consecutive empty chunks, stopping pagination");
+              hasMore = false;
+              break;
+            }
+            offset += CHUNK_SIZE;
+            continue;
+          }
+
+          consecutiveEmptyChunks = 0;
+          geoRows = geoRows.concat(chunk);
+          console.log(`Fetched GeoJSON chunk: ${chunk.length} rows (offset: ${offset}, total so far: ${geoRows.length})`);
+
+          if (chunk.length < CHUNK_SIZE) {
+            console.log(`Got ${chunk.length} rows (less than ${CHUNK_SIZE}), stopping pagination`);
+            hasMore = false;
+          } else {
+            offset += chunk.length;
+            console.log(`Got full chunk, continuing to offset ${offset}`);
+          }
         }
 
-        if (!geoRows || geoRows.length === 0) {
+        if (geoRows.length === 0) {
           console.log("No geometry found for instance");
           setFeatures([]);
           setLoadingFeatures(false);
           return;
         }
 
-        console.log(`Found ${geoRows.length} locations with geometry`);
+        console.log(`Found ${geoRows.length} locations with geometry (loaded via pagination)`);
 
         // Group by admin_pcode to get unique geometry
         const geoMap = new Map<string, any>();
@@ -820,27 +1079,60 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const rawValueMap = new Map(rawValues?.map((v: any) => [v.admin_pcode, Number(v.value)]) || []);
         console.log(`Loaded ${rawValues?.length || 0} raw values for dataset ${selection.datasetId}`);
 
-        // Get geometry from view - each row is a single Feature (not FeatureCollection)
-        const { data: geoRows, error: geoError } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode, geojson")
-          .eq("instance_id", instanceId);
-        
-        if (geoError) {
-          console.error("Error fetching GeoJSON:", geoError);
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
+        // Get geometry from view - each row is a single Feature (not FeatureCollection) (with pagination)
+        // Use 1000 as chunk size to match Supabase's default limit
+        const CHUNK_SIZE = 1000;
+        let geoRows: any[] = [];
+        let offset = 0;
+        let hasMore = true;
+        let consecutiveEmptyChunks = 0;
+
+        while (hasMore) {
+          const { data: chunk, error: geoError } = await supabase
+            .from("v_instance_admin_scores_geojson")
+            .select("admin_pcode, geojson")
+            .eq("instance_id", instanceId)
+            .range(offset, offset + CHUNK_SIZE - 1);
+
+          if (geoError) {
+            console.error("Error fetching GeoJSON chunk:", geoError);
+            setFeatures([]);
+            setLoadingFeatures(false);
+            return;
+          }
+
+          if (!chunk || chunk.length === 0) {
+            consecutiveEmptyChunks++;
+            if (consecutiveEmptyChunks >= 2) {
+              console.log("Got consecutive empty chunks, stopping pagination");
+              hasMore = false;
+              break;
+            }
+            offset += CHUNK_SIZE;
+            continue;
+          }
+
+          consecutiveEmptyChunks = 0;
+          geoRows = geoRows.concat(chunk);
+          console.log(`Fetched GeoJSON chunk: ${chunk.length} rows (offset: ${offset}, total so far: ${geoRows.length})`);
+
+          if (chunk.length < CHUNK_SIZE) {
+            console.log(`Got ${chunk.length} rows (less than ${CHUNK_SIZE}), stopping pagination`);
+            hasMore = false;
+          } else {
+            offset += chunk.length;
+            console.log(`Got full chunk, continuing to offset ${offset}`);
+          }
         }
-        
-        if (!geoRows || geoRows.length === 0) {
+
+        if (geoRows.length === 0) {
           console.log("No GeoJSON features found for instance");
           setFeatures([]);
           setLoadingFeatures(false);
           return;
         }
         
-        console.log(`Loaded ${geoRows.length} GeoJSON features from view`);
+        console.log(`Loaded ${geoRows.length} GeoJSON features from view (loaded via pagination)`);
         
         // Parse ALL features (not just those with scores) - show locations without data in grey
         const allFeatures = geoRows
@@ -966,20 +1258,53 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         
         console.log(`Computed category scores for ${avgCategoryScores.size} locations`);
         
-        // Get geometry from view
-        const { data: geoRows, error: geoError } = await supabase
-          .from("v_instance_admin_scores_geojson")
-          .select("admin_pcode, geojson")
-          .eq("instance_id", instanceId);
-        
-        if (geoError) {
-          console.error("Error fetching GeoJSON:", geoError);
-          setFeatures([]);
-          setLoadingFeatures(false);
-          return;
+        // Get geometry from view (with pagination)
+        // Use 1000 as chunk size to match Supabase's default limit
+        const CHUNK_SIZE = 1000;
+        let geoRows: any[] = [];
+        let offset = 0;
+        let hasMore = true;
+        let consecutiveEmptyChunks = 0;
+
+        while (hasMore) {
+          const { data: chunk, error: geoError } = await supabase
+            .from("v_instance_admin_scores_geojson")
+            .select("admin_pcode, geojson")
+            .eq("instance_id", instanceId)
+            .range(offset, offset + CHUNK_SIZE - 1);
+
+          if (geoError) {
+            console.error("Error fetching GeoJSON chunk:", geoError);
+            setFeatures([]);
+            setLoadingFeatures(false);
+            return;
+          }
+
+          if (!chunk || chunk.length === 0) {
+            consecutiveEmptyChunks++;
+            if (consecutiveEmptyChunks >= 2) {
+              console.log("Got consecutive empty chunks, stopping pagination");
+              hasMore = false;
+              break;
+            }
+            offset += CHUNK_SIZE;
+            continue;
+          }
+
+          consecutiveEmptyChunks = 0;
+          geoRows = geoRows.concat(chunk);
+          console.log(`Fetched GeoJSON chunk: ${chunk.length} rows (offset: ${offset}, total so far: ${geoRows.length})`);
+
+          if (chunk.length < CHUNK_SIZE) {
+            console.log(`Got ${chunk.length} rows (less than ${CHUNK_SIZE}), stopping pagination`);
+            hasMore = false;
+          } else {
+            offset += chunk.length;
+            console.log(`Got full chunk, continuing to offset ${offset}`);
+          }
         }
-        
-        if (!geoRows || geoRows.length === 0) {
+
+        if (geoRows.length === 0) {
           console.log("No GeoJSON features found for instance");
           setFeatures([]);
           setLoadingFeatures(false);
@@ -1088,105 +1413,114 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         const adminPcodes = Array.from(scoreMap.keys());
         console.log(`Loaded ${scores.length} scores for hazard event ${selection.hazardEventId} across ${adminPcodes.length} admin areas`);
         
-        // Helper to fetch GeoJSON for a given admin level, trying both parameter names
-        const fetchGeoForLevel = async (level: 'ADM2' | 'ADM3') => {
-          const paramsList = [{ level }, { in_level: level }];
-          for (const params of paramsList) {
-            const res = await supabase.rpc('get_admin_boundaries_geojson', params as any);
-            if (!res.error && res.data) {
-              return res.data;
-            }
-          }
-          return null;
-        };
-
-        // Attempt to match geometry with the admin codes that have scores.
-        // First try ADM3 (usual), then fallback to ADM2 if ADM3 yields no matches.
-        const adminPcodeSet = new Set(adminPcodes);
+        // Fetch geometry using RPC function that returns GeoJSON with admin_pcode in properties
+        // Try ADM3 first, then ADM2 if needed
         let geoData: any = null;
-
-        const tryFilter = (geo: any) => {
-          if (!geo) return [];
-          if (Array.isArray(geo)) {
-            return geo.filter((feature: any) => adminPcodeSet.has(feature?.properties?.admin_pcode));
-          }
-          if (geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
-            const filtered = geo.features.filter((feature: any) =>
-              adminPcodeSet.has(feature?.properties?.admin_pcode)
-            );
-            return { ...geo, features: filtered };
-          }
-          if (geo.type === 'Feature' && adminPcodeSet.has(geo.properties?.admin_pcode)) {
-            return [geo];
-          }
-          return [];
-        };
-
-        // Try ADM3
-        const geoAdm3 = await fetchGeoForLevel('ADM3');
-        let filteredGeo: any = tryFilter(geoAdm3);
-
-        // If no matches, try ADM2 (handles hazards scored at ADM2)
-        if (
-          (Array.isArray(filteredGeo) && filteredGeo.length === 0) ||
-          (filteredGeo?.features && filteredGeo.features.length === 0)
-        ) {
-          console.warn('No ADM3 geometry matched hazard scores; trying ADM2 fallback');
-          const geoAdm2 = await fetchGeoForLevel('ADM2');
-          const filteredGeo2 = tryFilter(geoAdm2);
-          filteredGeo = filteredGeo2;
-          // If ADM2 has matches, use it
-          if (
-            (Array.isArray(filteredGeo2) && filteredGeo2.length > 0) ||
-            (filteredGeo2?.features && filteredGeo2.features.length > 0)
-          ) {
-            geoData = geoAdm2;
+        let geoFeatures: any[] = [];
+        
+        // Get country_id from instance for filtering
+        const countryId = instance?.country_id;
+        
+        // Try ADM3 first
+        const { data: adm3Geo, error: adm3Error } = await supabase.rpc('get_admin_boundaries_geojson', {
+          admin_pcodes: adminPcodes,
+          admin_level: 'ADM3',
+          country_id: countryId,
+        });
+        
+        if (!adm3Error && adm3Geo) {
+          if (typeof adm3Geo === 'string') {
+            geoData = JSON.parse(adm3Geo);
           } else {
-            geoData = geoAdm3;
+            geoData = adm3Geo;
           }
-        } else {
-          geoData = geoAdm3;
-        }
-
-        // If still no matches, fallback to view by admin_pcode
-        if (
-          (!Array.isArray(filteredGeo) || filteredGeo.length === 0) &&
-          !(filteredGeo?.features && filteredGeo.features.length > 0)
-        ) {
-          console.warn("RPC geo fetch yielded no matches; falling back to view by admin_pcode");
-          const { data: geoRows, error: geoViewError } = await supabase
-            .from("v_instance_admin_scores_geojson")
-            .select("admin_pcode, geojson")
-            .eq("instance_id", instanceId)
-            .in("admin_pcode", adminPcodes);
           
-          if (geoViewError) {
-            console.error("Error fetching GeoJSON from view:", geoViewError);
-          } else if (geoRows && geoRows.length > 0) {
-            geoData = { 
-              type: 'FeatureCollection', 
-              features: geoRows.map((r: any) => (typeof r.geojson === 'string' ? JSON.parse(r.geojson) : r.geojson))
-            };
+          if (geoData?.type === 'FeatureCollection' && Array.isArray(geoData.features)) {
+            geoFeatures = geoData.features;
+            console.log(`Fetched ${geoFeatures.length} ADM3 features via RPC for hazard scores`);
           }
         }
         
-        // Parse GeoJSON response (should be a FeatureCollection)
-        let geoFeatures: any[] = [];
-        if (geoData) {
-          if (typeof geoData === 'string') {
-            try {
-              const parsed = JSON.parse(geoData);
-              geoFeatures = parsed.type === 'FeatureCollection' ? parsed.features : [parsed];
-            } catch (e) {
-              console.error("Error parsing GeoJSON string:", e);
+        // If no ADM3 matches, try ADM2
+        if (geoFeatures.length === 0) {
+          console.log("No ADM3 geometry found, trying ADM2");
+          const { data: adm2Geo, error: adm2Error } = await supabase.rpc('get_admin_boundaries_geojson', {
+            admin_pcodes: adminPcodes,
+            admin_level: 'ADM2',
+            country_id: countryId,
+          });
+          
+          if (!adm2Error && adm2Geo) {
+            if (typeof adm2Geo === 'string') {
+              geoData = JSON.parse(adm2Geo);
+            } else {
+              geoData = adm2Geo;
             }
-          } else if (Array.isArray(geoData)) {
-            // If it's an array of features
-            geoFeatures = geoData;
-          } else if (geoData.type === 'FeatureCollection') {
-            geoFeatures = geoData.features || [];
-          } else if (geoData.type === 'Feature') {
-            geoFeatures = [geoData];
+            
+            if (geoData?.type === 'FeatureCollection' && Array.isArray(geoData.features)) {
+              geoFeatures = geoData.features;
+              console.log(`Fetched ${geoFeatures.length} ADM2 features via RPC for hazard scores`);
+            }
+          }
+        }
+        
+        // Fallback: Use view if RPC didn't work
+        if (geoFeatures.length === 0) {
+          console.warn("RPC didn't return features, falling back to view");
+          const CHUNK_SIZE = 1000;
+          let geoRows: any[] = [];
+          let offset = 0;
+          let hasMore = true;
+          let consecutiveEmptyChunks = 0;
+          const adminPcodeSet = new Set(adminPcodes);
+
+          while (hasMore) {
+            const { data: chunk, error: geoViewError } = await supabase
+              .from("v_instance_admin_scores_geojson")
+              .select("admin_pcode, geojson")
+              .eq("instance_id", instanceId)
+              .range(offset, offset + CHUNK_SIZE - 1);
+            
+            if (geoViewError) {
+              console.error("Error fetching GeoJSON chunk from view:", geoViewError);
+              hasMore = false;
+              break;
+            }
+
+            if (!chunk || chunk.length === 0) {
+              consecutiveEmptyChunks++;
+              if (consecutiveEmptyChunks >= 2) {
+                hasMore = false;
+                break;
+              }
+              offset += CHUNK_SIZE;
+              continue;
+            }
+
+            consecutiveEmptyChunks = 0;
+            const filteredChunk = chunk.filter((row: any) => adminPcodeSet.has(row.admin_pcode));
+            geoRows = geoRows.concat(filteredChunk);
+
+            if (chunk.length < CHUNK_SIZE) {
+              hasMore = false;
+            } else {
+              offset += chunk.length;
+            }
+          }
+          
+          if (geoRows && geoRows.length > 0) {
+            geoFeatures = geoRows.map((r: any) => {
+              const feature = typeof r.geojson === 'string' ? JSON.parse(r.geojson) : r.geojson;
+              // Ensure admin_pcode is in properties
+              return {
+                ...feature,
+                properties: {
+                  ...feature.properties,
+                  admin_pcode: r.admin_pcode,
+                }
+              };
+            });
+            console.log(`Fetched ${geoFeatures.length} features from view fallback`);
           }
         }
         
@@ -1197,7 +1531,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
           return;
         }
         
-        // Map scores to features - only include features that have scores
+        // Map scores to features - all features should have admin_pcode in properties from RPC
         const hazardFeatures = geoFeatures
           .map((feature: any) => {
             const adminPcode = feature.properties?.admin_pcode;
@@ -1223,7 +1557,7 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                 admin_name: feature.properties?.admin_name || feature.properties?.name || adminPcode,
                 score: hazardScore,
                 magnitude_value: magnitudeValue !== undefined ? magnitudeValue : null,
-                has_score: true, // Always true since we filter out features without scores
+                has_score: true,
               }
             };
           })
@@ -1419,15 +1753,57 @@ export default function InstancePage({ params }: { params: { id: string } }) {
     
     // If admin_scope was updated, delete scores for areas outside the new scope
     if (updatedInstance?.admin_scope && Array.isArray(updatedInstance.admin_scope) && updatedInstance.admin_scope.length > 0) {
-      // Get ADM3 codes that are within the new scope
-      const { data: affectedAdm3, error: adm3Error } = await supabase.rpc('get_affected_adm3', {
-        in_scope: updatedInstance.admin_scope,
-      });
+      // Get ADM3 codes that are within the new scope using pagination
+      const CHUNK_SIZE = 2000;
+      let allAdm3Codes: any[] = [];
+      let offset = 0;
+      let totalCount: number | null = null;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: affectedAdm3, error: adm3Error } = await supabase.rpc('get_affected_adm3', {
+          in_scope: updatedInstance.admin_scope,
+          in_limit: CHUNK_SIZE,
+          in_offset: offset,
+        });
+
+        if (adm3Error) {
+          console.error('Error getting affected ADM3 codes for cleanup:', adm3Error);
+          break; // Stop pagination on error
+        }
+
+        if (!affectedAdm3 || affectedAdm3.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Get total count from first response
+        if (totalCount === null && affectedAdm3.length > 0) {
+          totalCount = affectedAdm3[0].total_count || affectedAdm3.length;
+        }
+
+        allAdm3Codes = allAdm3Codes.concat(affectedAdm3);
+
+        // Check if we've fetched all data
+        if (totalCount !== null && allAdm3Codes.length >= totalCount) {
+          hasMore = false;
+        } else if (affectedAdm3.length === 0) {
+          hasMore = false;
+        } else if (totalCount !== null && allAdm3Codes.length < totalCount) {
+          offset += affectedAdm3.length;
+        } else if (affectedAdm3.length >= CHUNK_SIZE) {
+          offset += affectedAdm3.length;
+        } else {
+          hasMore = false;
+        }
+      }
       
-      if (!adm3Error && affectedAdm3 && Array.isArray(affectedAdm3)) {
-        const validAdm3Codes = affectedAdm3.map((row: any) => 
+      if (allAdm3Codes.length > 0) {
+        const validAdm3Codes = allAdm3Codes.map((row: any) => 
           typeof row === 'string' ? row : (row.admin_pcode || row.pcode || row.code)
         ).filter(Boolean);
+        
+        console.log(`Found ${validAdm3Codes.length} valid ADM3 codes within new scope (loaded via pagination)`);
         
         if (validAdm3Codes.length > 0) {
           // Delete scores for admin_pcodes NOT in the valid list
@@ -1823,9 +2199,72 @@ export default function InstancePage({ params }: { params: { id: string } }) {
         <div className="flex-1 border rounded overflow-hidden bg-white" style={{ height: '700px', minHeight: '700px' }}>
           {features.length === 0 && !loading && !loadingFeatures ? (
             <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
-              <div className="text-center">
-                <p className="mb-2">No map data available</p>
-                <p className="text-sm">Scores may not have been calculated yet.</p>
+              <div className="text-center p-4 border rounded-lg max-w-md" style={{ 
+                backgroundColor: mapDataDiagnostics?.issue === 'no_admin_scope' ? 'rgba(239, 68, 68, 0.05)' : 'rgba(251, 191, 36, 0.05)',
+                borderColor: mapDataDiagnostics?.issue === 'no_admin_scope' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(251, 191, 36, 0.3)'
+              }}>
+                <p className="mb-2 font-semibold" style={{ 
+                  color: mapDataDiagnostics?.issue === 'no_admin_scope' ? 'var(--gsc-red, #ef4444)' : 'var(--gsc-yellow, #fbbf24)'
+                }}>
+                  {mapDataDiagnostics?.issue === 'no_admin_scope' 
+                    ? 'Affected Area Not Defined' 
+                    : mapDataDiagnostics?.issue === 'no_geometry'
+                    ? 'No Geometry Data Available'
+                    : mapDataDiagnostics?.issue === 'no_affected_areas'
+                    ? 'No Affected Areas Found'
+                    : 'No Map Data Available'}
+                </p>
+                {mapDataDiagnostics?.issue === 'no_admin_scope' ? (
+                  <>
+                    <p className="text-sm mb-3">This instance does not have an affected area defined.</p>
+                    <p className="text-xs mb-4">To fix this:</p>
+                    <ol className="text-xs text-left list-decimal list-inside space-y-1 mb-4">
+                      <li>Click "Edit Affected Area" button above</li>
+                      <li>Select the administrative areas affected by this event</li>
+                      <li>Save your selection</li>
+                      <li>The map will appear once the affected area is defined</li>
+                    </ol>
+                    <button
+                      onClick={() => setShowAffectedAreaModal(true)}
+                      className="btn text-xs py-1 px-3"
+                      style={{ backgroundColor: 'var(--gsc-blue)', color: 'white' }}
+                    >
+                      Define Affected Area
+                    </button>
+                  </>
+                ) : mapDataDiagnostics?.issue === 'no_geometry' ? (
+                  <>
+                    <p className="text-sm mb-3">The affected area is defined, but geometry data is missing from the database.</p>
+                    <p className="text-xs mb-4">This usually means:</p>
+                    <ul className="text-xs text-left list-disc list-inside space-y-1 mb-4">
+                      <li>The admin_boundaries table may not have geometry for these areas</li>
+                      <li>The geometry data may need to be imported</li>
+                      <li>Contact your administrator to check the database</li>
+                    </ul>
+                  </>
+                ) : mapDataDiagnostics?.issue === 'no_affected_areas' ? (
+                  <>
+                    <p className="text-sm mb-3">The affected area is defined, but no matching administrative areas were found.</p>
+                    <p className="text-xs mb-4">This might indicate:</p>
+                    <ul className="text-xs text-left list-disc list-inside space-y-1 mb-4">
+                      <li>The admin_scope codes don't match any ADM3 areas in the database</li>
+                      <li>The affected area may need to be redefined</li>
+                      <li>Try clicking "Edit Affected Area" to update the selection</li>
+                    </ul>
+                    <button
+                      onClick={() => setShowAffectedAreaModal(true)}
+                      className="btn text-xs py-1 px-3"
+                      style={{ backgroundColor: 'var(--gsc-blue)', color: 'white' }}
+                    >
+                      Edit Affected Area
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm mb-2">Scores may not have been calculated yet.</p>
+                    <p className="text-xs">If you've defined an affected area, try refreshing the page.</p>
+                  </>
+                )}
               </div>
             </div>
           ) : loadingFeatures ? (
@@ -1848,6 +2287,35 @@ export default function InstancePage({ params }: { params: { id: string } }) {
                   <li>Return here to view the priority ranking</li>
                 </ol>
                 <p className="text-xs italic">Note: Priority ranking creates relative scores (1-5) from absolute severity scores.</p>
+              </div>
+            </div>
+          ) : overallScoresMissing && (selectedLayer.type === 'overall' || !selectedLayer.type) ? (
+            <div className="h-full flex items-center justify-center" style={{ color: 'var(--gsc-gray)' }}>
+              <div className="text-center p-4 border rounded-lg" style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
+                <p className="mb-2 font-semibold text-red-600">Overall Scores Not Computed</p>
+                <p className="text-sm mb-3">Overall scores have not been computed yet for this instance.</p>
+                {hasDatasetScores ? (
+                  <>
+                    <p className="text-xs mb-4">Dataset scores exist. To compute Overall scores:</p>
+                    <ol className="text-xs text-left list-decimal list-inside space-y-1 mb-4">
+                      <li>Click "Adjust Scoring" button</li>
+                      <li>Click "Compute Final Rollup" button (blue button)</li>
+                      <li>Wait for the computation to complete</li>
+                      <li>Return here to view the overall scores</li>
+                    </ol>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs mb-4">To compute Overall scores, first apply scoring to datasets:</p>
+                    <ol className="text-xs text-left list-decimal list-inside space-y-1 mb-4">
+                      <li>Click "Adjust Scoring" button</li>
+                      <li>Apply scoring to each dataset (click "Adjust Scoring" for each dataset)</li>
+                      <li>Click "Compute Framework Rollup" (if using framework categories)</li>
+                      <li>Click "Compute Final Rollup" to generate Overall scores</li>
+                    </ol>
+                  </>
+                )}
+                <p className="text-xs italic">Note: Overall scores aggregate all category scores (Framework, Hazard, Underlying Vulnerability) into a single score per location.</p>
               </div>
             </div>
           ) : (

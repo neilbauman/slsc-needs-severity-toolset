@@ -1,0 +1,13 @@
+# Files to ignore when deploying to Vercel
+.env*.local
+.env.local
+dump_zsh_state
+*.md
+docs/
+scripts/
+supabase/migrations/
+.cursorrules
+AGENT_SUMMARY.md
+GET_STARTED_NOW.md
+NEXT_STEPS_AFTER_ENV.md
+QUICK_START.md

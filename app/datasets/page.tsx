@@ -200,6 +200,18 @@ function DatasetsPageContent() {
 
   const filteredDatasets = useMemo(() => {
     return datasets.filter((dataset) => {
+      // Filter out computed hazard scores - these are analysis results from hazard events,
+      // not uploaded datasets. They're stored in hazard_event_scores table.
+      // Hazard scores should be managed through the instance scoring interface, not here.
+      const name = (dataset.name || '').toLowerCase();
+      const isComputedHazardScore = 
+        (name === 'hazard score' || name === 'hazards/risks score') &&
+        (dataset.is_derived || dataset.metadata?.source === 'hazard_event_analysis');
+      
+      if (isComputedHazardScore) {
+        return false; // Hide computed hazard scores from datasets workspace
+      }
+      
       const categoryKey = deriveCategoryKey(dataset);
       if (categoryFilter && categoryFilter !== categoryKey) {
         return false;
@@ -299,6 +311,17 @@ function DatasetsPageContent() {
         Data health reflects alignment, coverage, completeness, and uniqueness metrics. Click on a dataset to view
         detailed metrics and start the cleaning workflow.
       </p>
+      <div className="flex items-start gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+        <Info size={16} className="mt-0.5 flex-shrink-0" />
+        <div>
+          <p className="font-semibold">Note: Hazard Scores are computed analysis results</p>
+          <p className="text-xs mt-1">
+            Hazard scores are generated from hazard event analysis (e.g., earthquake shake maps) and stored in the <code className="bg-white px-1">hazard_event_scores</code> table. 
+            They are not uploaded datasets and are managed through the instance scoring interface. 
+            To view or manage hazard events, go to an instance page and use the scoring configuration.
+          </p>
+        </div>
+      </div>
 
       {filterActive && (
         <div className="flex flex-wrap items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -389,7 +412,19 @@ function DatasetsPageContent() {
                         }}
                       >
                         <td className="px-4 py-3 font-medium text-gray-900">{dataset.name}</td>
-                        <td className="px-4 py-3 text-gray-600">{categoryLabel}</td>
+                        <td className="px-4 py-3 text-gray-600">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDrawerMode('edit');
+                              setSelectedDataset(dataset);
+                            }}
+                            className="hover:text-amber-600 hover:underline"
+                            title="Click to edit category"
+                          >
+                            {categoryLabel}
+                          </button>
+                        </td>
                         <td className="px-4 py-3 text-gray-600">{dataset.admin_level || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{dataset.type || '—'}</td>
                         <td className="px-4 py-3">

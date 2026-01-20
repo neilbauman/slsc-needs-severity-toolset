@@ -367,13 +367,54 @@ export default function NumericScoringModal({
     // If scope is "affected", filter by affected ADM3 codes
     let affectedAdm3Codes: string[] = [];
     if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
-      // Get ADM3 codes from affected ADM2 areas
-      const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
-        in_scope: instance.admin_scope, // ADM2 codes
-      });
+      // Get ADM3 codes from affected ADM2 areas (with pagination)
+      const CHUNK_SIZE = 2000;
+      let allAdm3Data: any[] = [];
+      let offset = 0;
+      let totalCount: number | null = null;
+      let hasMore = true;
 
-      if (!adm3Error && adm3Data && Array.isArray(adm3Data)) {
-        affectedAdm3Codes = adm3Data.map((row: any) => row.admin_pcode || row.pcode || row.code).filter(Boolean);
+      while (hasMore) {
+        const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
+          in_scope: instance.admin_scope, // ADM2 codes
+          in_limit: CHUNK_SIZE,
+          in_offset: offset,
+        });
+
+        if (adm3Error) {
+          console.error("Error getting affected ADM3 codes for preview:", adm3Error);
+          hasMore = false;
+          break;
+        }
+
+        if (!adm3Data || adm3Data.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Get total count from first response
+        if (totalCount === null && adm3Data.length > 0) {
+          totalCount = adm3Data[0].total_count || adm3Data.length;
+        }
+
+        allAdm3Data = allAdm3Data.concat(adm3Data);
+
+        // Check if we've fetched all data
+        if (totalCount !== null && allAdm3Data.length >= totalCount) {
+          hasMore = false;
+        } else if (adm3Data.length === 0) {
+          hasMore = false;
+        } else if (totalCount !== null && allAdm3Data.length < totalCount) {
+          offset += adm3Data.length;
+        } else if (adm3Data.length >= CHUNK_SIZE) {
+          offset += adm3Data.length;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      if (allAdm3Data.length > 0) {
+        affectedAdm3Codes = allAdm3Data.map((row: any) => row.admin_pcode || row.pcode || row.code).filter(Boolean);
         if (affectedAdm3Codes.length > 0) {
           query = query.in("admin_pcode", affectedAdm3Codes);
         }
@@ -461,21 +502,66 @@ export default function NumericScoringModal({
     
     setLoadingDataPreview(true);
     try {
-      // If scope is "affected", get affected ADM3 codes first
+      // If scope is "affected", get affected ADM3 codes first (with pagination)
       let affectedAdm3Codes: string[] = [];
       if (scope === "affected" && instance?.admin_scope && Array.isArray(instance.admin_scope) && instance.admin_scope.length > 0) {
-        // Get ADM3 codes from affected ADM2 areas
-        const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
-          in_scope: instance.admin_scope, // ADM2 codes
-        });
+        // Get ADM3 codes from affected ADM2 areas using pagination
+        const CHUNK_SIZE = 2000;
+        let allAdm3Data: any[] = [];
+        let offset = 0;
+        let totalCount: number | null = null;
+        let hasMore = true;
 
-        if (adm3Error) {
-          console.error("Error getting affected ADM3 codes:", adm3Error);
-        } else if (adm3Data && Array.isArray(adm3Data)) {
-          affectedAdm3Codes = adm3Data.map((row: any) => {
+        while (hasMore) {
+          const { data: adm3Data, error: adm3Error } = await supabase.rpc("get_affected_adm3", {
+            in_scope: instance.admin_scope, // ADM2 codes
+            in_limit: CHUNK_SIZE,
+            in_offset: offset,
+          });
+
+          if (adm3Error) {
+            console.error("Error getting affected ADM3 codes:", adm3Error);
+            hasMore = false;
+            break;
+          }
+
+          if (!adm3Data || adm3Data.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          // Get total count from first response
+          if (totalCount === null && adm3Data.length > 0) {
+            totalCount = adm3Data[0].total_count || adm3Data.length;
+          }
+
+          allAdm3Data = allAdm3Data.concat(adm3Data);
+          console.log(`Fetched ADM3 chunk: ${adm3Data.length} codes (offset: ${offset}, total so far: ${allAdm3Data.length})`);
+
+          // Check if we've fetched all data
+          if (totalCount !== null && allAdm3Data.length >= totalCount) {
+            console.log(`✓ Reached total count: ${allAdm3Data.length} >= ${totalCount}`);
+            hasMore = false;
+          } else if (adm3Data.length === 0) {
+            hasMore = false;
+          } else if (totalCount !== null && allAdm3Data.length < totalCount) {
+            offset += adm3Data.length;
+            console.log(`→ Continuing: ${allAdm3Data.length} < ${totalCount}, next offset=${offset}`);
+          } else if (adm3Data.length >= CHUNK_SIZE) {
+            offset += adm3Data.length;
+            console.log(`→ Got full chunk, continuing, next offset=${offset}`);
+          } else {
+            console.log(`✓ Got fewer rows than requested (${adm3Data.length} < ${CHUNK_SIZE}) and no totalCount, stopping`);
+            hasMore = false;
+          }
+        }
+
+        if (allAdm3Data.length > 0) {
+          affectedAdm3Codes = allAdm3Data.map((row: any) => {
             // Handle different possible field names
             return row.admin_pcode || row.pcode || row.code || null;
           }).filter(Boolean);
+          console.log(`Loaded ${affectedAdm3Codes.length} affected ADM3 codes for preview (via pagination)`);
         }
       }
 
@@ -534,8 +620,20 @@ export default function NumericScoringModal({
           .eq("dataset_id", dataset.id);
 
         // Filter by affected area if scope is "affected" and we have codes
+        // Handle large lists by splitting into chunks (Supabase .in() has a limit)
+        const IN_CLAUSE_LIMIT = 1000; // Supabase .in() clause limit
+        let affectedAdm3Set: Set<string> | null = null;
+        
         if (scope === "affected" && affectedAdm3Codes.length > 0) {
-          query = query.in("admin_pcode", affectedAdm3Codes);
+          if (affectedAdm3Codes.length <= IN_CLAUSE_LIMIT) {
+            // Small enough to use .in() directly
+            query = query.in("admin_pcode", affectedAdm3Codes);
+          } else {
+            // Too many codes - fetch all and filter client-side
+            console.log(`Too many ADM3 codes (${affectedAdm3Codes.length}), fetching all and filtering client-side`);
+            affectedAdm3Set = new Set(affectedAdm3Codes);
+            // Don't add .in() filter - we'll filter after fetching
+          }
         }
         // For "country" scope, don't filter - get all data
 
@@ -556,7 +654,12 @@ export default function NumericScoringModal({
           }
           
           if (batchData && batchData.length > 0) {
-            allData = [...allData, ...batchData];
+            // If we have a large list, filter client-side
+            const filteredBatch = affectedAdm3Set 
+              ? batchData.filter((row: any) => affectedAdm3Set.has(row.admin_pcode))
+              : batchData;
+            
+            allData = [...allData, ...filteredBatch];
             offset += batchSize;
             
             // If we got fewer rows than batchSize, we're done

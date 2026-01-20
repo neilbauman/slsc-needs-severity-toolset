@@ -1,0 +1,971 @@
+{
+  "pillars": [
+    {
+      "name": "The Settlement",
+      "description": "People have appropriate access to common services and infrastructure.",
+      "sort_order": 3,
+      "id": "7ebea0e5-2268-4a85-8316-35ad2c900acf",
+      "default_indicator_id": null
+    },
+    {
+      "name": "The Living Conditions",
+      "description": "People can live properly and with dignity in their dwelling.",
+      "sort_order": 2,
+      "id": "0194d2e0-a3c4-4c56-81d4-b039a01191dd",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Fake pillar",
+      "description": "this is all fake",
+      "sort_order": 4,
+      "id": "ce0b1deb-1910-4ed0-ae5b-f83833d20518",
+      "default_indicator_id": null
+    },
+    {
+      "name": "another",
+      "description": "another",
+      "sort_order": 5,
+      "id": "ab398851-7192-4cbf-9a9e-940812a65d04",
+      "default_indicator_id": null
+    },
+    {
+      "name": "added pillar",
+      "description": "a pillar",
+      "sort_order": 6,
+      "id": "ee776417-d5d8-4cb7-9a33-49f61021f1bb",
+      "default_indicator_id": null
+    },
+    {
+      "name": "The Shelter",
+      "description": "People have a dwelling. yeah2345679d",
+      "sort_order": 1,
+      "id": "703042c9-3276-4ade-b8e0-5ff17253b098",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Untitled Pillar",
+      "description": "",
+      "sort_order": 7,
+      "id": "136a5c6b-8244-4cbe-bc99-b29b415ab4fc",
+      "default_indicator_id": null
+    }
+  ],
+  "themes": [
+    {
+      "name": "Presence of Hazards",
+      "description": "Households live in safe settlements in terms of location.",
+      "sort_order": 3,
+      "pillar_id": "7ebea0e5-2268-4a85-8316-35ad2c900acf",
+      "id": "020cb54e-9f7e-48ec-a077-18972b853561",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Physical safety",
+      "description": "Households live in adequate dwellings in terms of physical protection from the weather, structural integrity and location.",
+      "sort_order": 1,
+      "pillar_id": "703042c9-3276-4ade-b8e0-5ff17253b098",
+      "id": "f41ad273-aea1-4430-b738-2f7e38ac3302",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Overcrowding and privacy",
+      "description": "Dwellings provide sufficient space and privacy to the inhabitants of the shelter.",
+      "sort_order": 2,
+      "pillar_id": "703042c9-3276-4ade-b8e0-5ff17253b098",
+      "id": "42cf37dc-30d5-4143-a81b-e6b489d6f154",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Habitability and health",
+      "description": "Dwellings provide protection against the weather to achieve thermal comfort, sufficient ventilation and protection against vectors.",
+      "sort_order": 3,
+      "pillar_id": "703042c9-3276-4ade-b8e0-5ff17253b098",
+      "id": "1970a1ef-797b-4175-b83d-742c326ccea5",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Security of tenure",
+      "description": "Households perceive their tenure as secure and do not fear losing their home or land in the near future.",
+      "sort_order": 4,
+      "pillar_id": "703042c9-3276-4ade-b8e0-5ff17253b098",
+      "id": "0e1a1f15-ce17-49d2-8d98-174b2a69a9b9",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Accessibility",
+      "description": "Dwellings accommodate for persons with disabilities, allowing access and movement in the home.",
+      "sort_order": 5,
+      "pillar_id": "703042c9-3276-4ade-b8e0-5ff17253b098",
+      "id": "df1c46fb-9e1c-4e69-b81b-41d2fe20847c",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Thermal comfort (clothing)",
+      "description": "People have sufficient and appropriate quality clothing.",
+      "sort_order": 1,
+      "pillar_id": "0194d2e0-a3c4-4c56-81d4-b039a01191dd",
+      "id": "ebfeb8e8-0989-4f43-aae1-88950b53f9d7",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Energy",
+      "description": "People have access to sufficient, safe and affordable energy supply.",
+      "sort_order": 2,
+      "pillar_id": "0194d2e0-a3c4-4c56-81d4-b039a01191dd",
+      "id": "51e3e107-2a56-4a57-98fd-1af9b0de16ef",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Cooking items",
+      "description": "People have sufficient and appropriate items to prepare and eat food.",
+      "sort_order": 3,
+      "pillar_id": "0194d2e0-a3c4-4c56-81d4-b039a01191dd",
+      "id": "3cd9bee0-afde-4772-93b6-823953b39515",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Sleeping",
+      "description": "People have sufficient and appropriate quality items for safe, healthy and private sleeping.",
+      "sort_order": 4,
+      "pillar_id": "0194d2e0-a3c4-4c56-81d4-b039a01191dd",
+      "id": "082daa23-6163-419b-a515-03cc5a89e825",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Cleanliness (Hygiene)",
+      "description": "People have sufficient and appropriate items to maintain the shelter clean and store waste.",
+      "sort_order": 5,
+      "pillar_id": "0194d2e0-a3c4-4c56-81d4-b039a01191dd",
+      "id": "fa97ecbe-7059-406f-bc3e-e22bf8b97e33",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Access to services and resources",
+      "description": "People have access to basic services in their settlements.",
+      "sort_order": 1,
+      "pillar_id": "7ebea0e5-2268-4a85-8316-35ad2c900acf",
+      "id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Access to communal infrastructure",
+      "description": "Settlements provide basic communal infrastructure.",
+      "sort_order": 2,
+      "pillar_id": "7ebea0e5-2268-4a85-8316-35ad2c900acf",
+      "id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "a theme",
+      "description": "ddd",
+      "sort_order": 1,
+      "pillar_id": "ee776417-d5d8-4cb7-9a33-49f61021f1bb",
+      "id": "9c5b5295-6e16-48e6-ae70-79cc91c1d0f8",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Untitled Theme",
+      "description": "",
+      "sort_order": 1,
+      "pillar_id": "136a5c6b-8244-4cbe-bc99-b29b415ab4fc",
+      "id": "3ae760e7-9f3b-4896-a2e5-58c23c50138a",
+      "default_indicator_id": null
+    },
+    {
+      "name": "New Theme",
+      "description": "",
+      "sort_order": 2,
+      "pillar_id": "ee776417-d5d8-4cb7-9a33-49f61021f1bb",
+      "id": "f03c60d9-a0e5-48a2-a28a-bb229bf569d0",
+      "default_indicator_id": null
+    },
+    {
+      "name": "New Theme",
+      "description": "",
+      "sort_order": 3,
+      "pillar_id": "ee776417-d5d8-4cb7-9a33-49f61021f1bb",
+      "id": "5ee97a38-3248-4dd2-8e00-4f063eb30753",
+      "default_indicator_id": null
+    }
+  ],
+  "subthemes": [
+    {
+      "name": "Physical safety (general)",
+      "description": "Physical safety within the dwelling context.",
+      "sort_order": 1,
+      "id": "df5229c2-b30c-47da-9717-aeee5883b4c3",
+      "theme_id": "f41ad273-aea1-4430-b738-2f7e38ac3302",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Overcrowding and privacy (general)",
+      "description": "Space and privacy conditions within the dwelling.",
+      "sort_order": 1,
+      "id": "638d1889-e9b5-4419-92c5-b0d246846176",
+      "theme_id": "42cf37dc-30d5-4143-a81b-e6b489d6f154",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Habitability and health (general)",
+      "description": "Thermal comfort, ventilation and vector protection.",
+      "sort_order": 1,
+      "id": "2d4aa949-6334-4734-a85d-5dc174ce8e85",
+      "theme_id": "1970a1ef-797b-4175-b83d-742c326ccea5",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Security of tenure (general)",
+      "description": "Perception of tenure security.",
+      "sort_order": 1,
+      "id": "8f0f8d65-f3b9-494b-820d-c9eec5272511",
+      "theme_id": "0e1a1f15-ce17-49d2-8d98-174b2a69a9b9",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Accessibility (general)",
+      "description": "Accessibility of the dwelling for persons with disabilities.",
+      "sort_order": 1,
+      "id": "5afe2d16-3c14-41f9-8992-a8cc8de95195",
+      "theme_id": "df1c46fb-9e1c-4e69-b81b-41d2fe20847c",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Clothing sufficiency",
+      "description": "Sufficient and appropriate quality clothing.",
+      "sort_order": 1,
+      "id": "e86c2d76-614f-40a8-9b79-e2e1074c5627",
+      "theme_id": "ebfeb8e8-0989-4f43-aae1-88950b53f9d7",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Lighting",
+      "description": "Energy for lighting.",
+      "sort_order": 2,
+      "id": "ebf84a30-ee64-431b-81d8-fced3fbe6fe6",
+      "theme_id": "51e3e107-2a56-4a57-98fd-1af9b0de16ef",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Thermal comfort (energy)",
+      "description": "Energy for thermal comfort.",
+      "sort_order": 1,
+      "id": "f02c7421-6684-4def-9473-794182afbd95",
+      "theme_id": "51e3e107-2a56-4a57-98fd-1af9b0de16ef",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Education",
+      "description": "Access to education at acceptable distance.",
+      "sort_order": 3,
+      "id": "d8540109-2c46-44eb-a1a1-d5117c8a34ba",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Market",
+      "description": "Access to market at acceptable distance.",
+      "sort_order": 2,
+      "id": "e5ebc1aa-926f-4245-88b6-1f46ad4fb10e",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "HLP rights",
+      "description": "Collapse/likely collapse of HLP rights.",
+      "sort_order": 3,
+      "id": "5c4dfa26-7b04-4594-96dd-9117ca698b07",
+      "theme_id": "020cb54e-9f7e-48ec-a077-18972b853561",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Environmental hazards",
+      "description": "Impact from environmental hazards.",
+      "sort_order": 2,
+      "id": "29ca2e08-9161-4611-aed6-d5b5e335aaaa",
+      "theme_id": "020cb54e-9f7e-48ec-a077-18972b853561",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Conflict-related hazards",
+      "description": "Impact from conflict-related hazards.",
+      "sort_order": 1,
+      "id": "cca85f0e-c49c-48a4-9c15-972ead6360a9",
+      "theme_id": "020cb54e-9f7e-48ec-a077-18972b853561",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Communication & Livelihood",
+      "description": "Energy for communication and livelihoods.",
+      "sort_order": 4,
+      "id": "06f00393-9120-4130-b446-6fd687a2639c",
+      "theme_id": "51e3e107-2a56-4a57-98fd-1af9b0de16ef",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Cooking (energy supply)",
+      "description": "Energy for cooking.",
+      "sort_order": 3,
+      "id": "e6ecb905-de5a-4fce-add6-857a08b0aa76",
+      "theme_id": "51e3e107-2a56-4a57-98fd-1af9b0de16ef",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Cooking and eating items",
+      "description": "Items to prepare and eat food.",
+      "sort_order": 2,
+      "id": "ef3389fd-6555-4df8-abf4-bacda16a8b97",
+      "theme_id": "3cd9bee0-afde-4772-93b6-823953b39515",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Food storage items",
+      "description": "Items to store food and water.",
+      "sort_order": 1,
+      "id": "aa1718fc-b09a-4dd9-8da6-89310c491508",
+      "theme_id": "3cd9bee0-afde-4772-93b6-823953b39515",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Sleeping items",
+      "description": "Items for safe, healthy and private sleeping.",
+      "sort_order": 1,
+      "id": "ed4dcb9d-5ccf-414a-b93d-2e001e1e2668",
+      "theme_id": "082daa23-6163-419b-a515-03cc5a89e825",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Waste storage items",
+      "description": "Items to adequately store solid waste.",
+      "sort_order": 2,
+      "id": "224a5295-5c4b-4ac1-818e-d6484885c0d2",
+      "theme_id": "fa97ecbe-7059-406f-bc3e-e22bf8b97e33",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Cleaning items",
+      "description": "Items to maintain the shelter clean.",
+      "sort_order": 1,
+      "id": "0bcedde6-9063-4a65-8a76-c203c5420dd7",
+      "theme_id": "fa97ecbe-7059-406f-bc3e-e22bf8b97e33",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Livelihood opportunities",
+      "description": "Access to livelihood opportunities at acceptable distance.",
+      "sort_order": 8,
+      "id": "0f461541-0dae-4060-879e-36cc578e1205",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Communication",
+      "description": "Access to means of communication at acceptable distance.",
+      "sort_order": 7,
+      "id": "ab9a63a2-57f4-4e9e-8a2c-7032d267ee66",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Waste management (HH access)",
+      "description": "Access to waste collection points at acceptable distance.",
+      "sort_order": 6,
+      "id": "05f4810d-88ce-4498-a7b7-99eaa2687fa4",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Transportation",
+      "description": "Access to transportation at acceptable distance.",
+      "sort_order": 5,
+      "id": "9a9fd515-a151-4e38-b61e-ecc6ef2e1774",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Health",
+      "description": "Access to health facility at acceptable distance.",
+      "sort_order": 4,
+      "id": "7f2d3eda-6d09-4369-b25e-62b7c8d9c595",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Water",
+      "description": "Access to water at acceptable distance.",
+      "sort_order": 1,
+      "id": "19ba6b64-c38c-47f4-b71c-a8e76b526fa9",
+      "theme_id": "e4ac7a53-de4b-4283-9f06-3a6675a50405",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Wastewater management",
+      "description": "Wastewater management services/infrastructure available.",
+      "sort_order": 6,
+      "id": "2ae8ad97-2765-49d4-b7a2-5d36574e76c8",
+      "theme_id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Waste management (services)",
+      "description": "Solid waste management services available.",
+      "sort_order": 5,
+      "id": "42892b12-e6a2-4b2b-805a-cbcf696357f6",
+      "theme_id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Lighting & Electricity",
+      "description": "Appropriate and sufficient public lighting and electricity.",
+      "sort_order": 4,
+      "id": "a1c10cf2-934a-4e96-855d-3ae2896d79fb",
+      "theme_id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Public spaces",
+      "description": "Appropriate and sufficient public spaces.",
+      "sort_order": 3,
+      "id": "9083170a-214c-4a20-98a1-13c00c630a48",
+      "theme_id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "DRR",
+      "description": "Disaster resilient infrastructure.",
+      "sort_order": 2,
+      "id": "9ac55f35-d565-4e34-83b4-befb615afdf8",
+      "theme_id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Roads",
+      "description": "Appropriate roads and access infrastructure.",
+      "sort_order": 1,
+      "id": "6329323f-dbc4-480e-9cb0-b7353d195852",
+      "theme_id": "f1a58e9a-d6d3-4a13-b0fa-84bf2f0e13e1",
+      "default_indicator_id": null
+    },
+    {
+      "name": "New Subtheme",
+      "description": "",
+      "sort_order": 1,
+      "id": "760286db-b1ea-4e70-9b1c-1c86061a1505",
+      "theme_id": "9c5b5295-6e16-48e6-ae70-79cc91c1d0f8",
+      "default_indicator_id": null
+    },
+    {
+      "name": "Untitled Subtheme",
+      "description": "",
+      "sort_order": 1,
+      "id": "2e2b4a1e-b44d-4110-9582-5aa229c46080",
+      "theme_id": "3ae760e7-9f3b-4896-a2e5-58c23c50138a",
+      "default_indicator_id": null
+    },
+    {
+      "name": "New Subtheme",
+      "description": "",
+      "sort_order": 2,
+      "id": "37b0b019-cf75-4ae0-8c89-f9d60cc27252",
+      "theme_id": "3ae760e7-9f3b-4896-a2e5-58c23c50138a",
+      "default_indicator_id": null
+    },
+    {
+      "name": "New Subtheme",
+      "description": "",
+      "sort_order": 1,
+      "id": "0bfb02ca-dc0f-408e-bbf0-a9ca39628ffb",
+      "theme_id": "f03c60d9-a0e5-48a2-a28a-bb229bf569d0",
+      "default_indicator_id": null
+    },
+    {
+      "name": "New Subtheme",
+      "description": "",
+      "sort_order": 3,
+      "id": "dc11a4be-740a-4298-943a-3f0ec7e10585",
+      "theme_id": "f03c60d9-a0e5-48a2-a28a-bb229bf569d0",
+      "default_indicator_id": null
+    }
+  ],
+  "indicators": [
+    {
+      "level": "pillar",
+      "ref_code": "P1",
+      "name": "Default indicator for The Shelter",
+      "description": "People have a dwelling.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "fe35e273-f012-4c39-b0b9-08a5f25de386",
+      "theme_id": null
+    },
+    {
+      "level": "pillar",
+      "ref_code": "P2",
+      "name": "Default indicator for The Living Conditions",
+      "description": "People can live properly and with dignity in their dwelling.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "1e95b593-9d38-4ed1-8660-ac5b726c2f66",
+      "theme_id": null
+    },
+    {
+      "level": "pillar",
+      "ref_code": "P3",
+      "name": "Default indicator for The Settlement",
+      "description": "People have appropriate access to common services and infrastructure.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "99067197-121c-429f-97c6-1771523637ac",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T1.1",
+      "name": "Default indicator for Physical safety",
+      "description": "Households live in adequate dwellings in terms of physical protection from the weather, structural integrity and location.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "74640ebf-7ef4-43e0-affa-1c5425324c6b",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T1.2",
+      "name": "Default indicator for Overcrowding and privacy",
+      "description": "Dwellings provide sufficient space and privacy to the inhabitants of the shelter.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "88c669ae-53fd-4c2c-85c1-02cb67614317",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T1.3",
+      "name": "Default indicator for Habitability and health",
+      "description": "Dwellings provide protection against the weather to achieve thermal comfort, sufficient ventilation and protection against vectors.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "e5af49be-689e-4868-a2f1-71ca472353fa",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T1.4",
+      "name": "Default indicator for Security of tenure",
+      "description": "Households perceive their tenure as secure and do not fear losing their home or land in the near future.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "9004d964-b95c-47d1-b3a7-f4a13b59df5d",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T1.5",
+      "name": "Default indicator for Accessibility",
+      "description": "Dwellings accommodate for persons with disabilities, allowing access and movement in the home.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "0b6391cf-e415-4154-b421-f5b4e941aa34",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T2.1",
+      "name": "Default indicator for Thermal comfort (clothing)",
+      "description": "People have sufficient and appropriate quality clothing.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "8ffbbf9e-04ea-4af2-8b1f-66afaab1e2d6",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T2.2",
+      "name": "Default indicator for Energy",
+      "description": "People have access to sufficient, safe and affordable energy supply.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "b387be63-f6fa-46ca-a8e1-9095ab9b61f2",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T2.3",
+      "name": "Default indicator for Cooking items",
+      "description": "People have sufficient and appropriate items to prepare and eat food.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "ac53b2e8-8c4a-487f-b151-7961cc8ae3c6",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T2.4",
+      "name": "Default indicator for Sleeping",
+      "description": "People have sufficient and appropriate quality items for safe, healthy and private sleeping.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "90790af2-cfca-42a2-a4c9-c7ed1cf1c870",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T2.5",
+      "name": "Default indicator for Cleanliness (Hygiene)",
+      "description": "People have sufficient and appropriate items to maintain the shelter clean and store waste.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "8c41466f-f376-483e-822d-287d8133a5ab",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T3.1",
+      "name": "Default indicator for Access to services and resources",
+      "description": "People have access to basic services in their settlements.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "ed13769a-117c-424b-955e-5b5294dbca2b",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T3.2",
+      "name": "Default indicator for Access to communal infrastructure",
+      "description": "Settlements provide basic communal infrastructure.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "2164ebec-a4a3-4a77-a776-89f5c03328f0",
+      "theme_id": null
+    },
+    {
+      "level": "theme",
+      "ref_code": "T3.3",
+      "name": "Default indicator for Presence of Hazards",
+      "description": "Households live in safe settlements in terms of location.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "f4dd2386-2ad4-46d5-8384-f7c834f1b768",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST1.1.1",
+      "name": "Default indicator for Physical safety (general)",
+      "description": "Physical safety within the dwelling context.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "9c51df00-b1fc-41f8-a60b-9ea0708be22c",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST1.2.1",
+      "name": "Default indicator for Overcrowding and privacy (general)",
+      "description": "Space and privacy conditions within the dwelling.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "1358a875-2368-45ab-a8e7-eeed38c3868a",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST1.3.1",
+      "name": "Default indicator for Habitability and health (general)",
+      "description": "Thermal comfort, ventilation and vector protection.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "74493599-459b-43ac-a52a-9a4d5c8e7f9e",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST1.4.1",
+      "name": "Default indicator for Security of tenure (general)",
+      "description": "Perception of tenure security.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "681e1581-1206-413f-90ec-e9b146ab7e76",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST1.5.1",
+      "name": "Default indicator for Accessibility (general)",
+      "description": "Accessibility of the dwelling for persons with disabilities.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "6d393782-d40e-4634-9c01-52e3bd99c0f5",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.1.1",
+      "name": "Default indicator for Clothing sufficiency",
+      "description": "Sufficient and appropriate quality clothing.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "dde6fae6-9ccf-4255-8fe3-f5daa58a5320",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.2.1",
+      "name": "Default indicator for Thermal comfort (energy)",
+      "description": "Energy for thermal comfort.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "5e9585cb-554b-4064-8ed5-49d921cf3672",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.2.2",
+      "name": "Default indicator for Lighting",
+      "description": "Energy for lighting.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "06841d41-6489-41bc-acbc-ac7c70218d9c",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.2.3",
+      "name": "Default indicator for Cooking (energy supply)",
+      "description": "Energy for cooking.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "09d7b01d-5466-463d-a99d-8681d948d7c0",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.2.4",
+      "name": "Default indicator for Communication & Livelihood",
+      "description": "Energy for communication and livelihoods.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "b24390de-42f2-496d-b71c-2e262ca35f28",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.3.1",
+      "name": "Default indicator for Food storage items",
+      "description": "Items to store food and water.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "5103b8b7-8434-47bd-931d-c3ae09add5ac",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.3.2",
+      "name": "Default indicator for Cooking and eating items",
+      "description": "Items to prepare and eat food.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "c73895da-e698-4e32-a97e-45f450a38038",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.4.1",
+      "name": "Default indicator for Sleeping items",
+      "description": "Items for safe, healthy and private sleeping.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "f20d4404-e449-4743-89b9-9a2895e275c8",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.5.1",
+      "name": "Default indicator for Cleaning items",
+      "description": "Items to maintain the shelter clean.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "6c93d86a-dce5-4ed6-804f-2f49c91c8f3a",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST2.5.2",
+      "name": "Default indicator for Waste storage items",
+      "description": "Items to adequately store solid waste.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "682bb706-c5ec-4d82-b1e5-90ab1df97ead",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.1",
+      "name": "Default indicator for Water",
+      "description": "Access to water at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "1fdc7b6e-2e12-47a5-8af7-b473de902e7d",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.2",
+      "name": "Default indicator for Market",
+      "description": "Access to market at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "5f63e3f2-ff03-4e1c-9141-e36337706223",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.3",
+      "name": "Default indicator for Education",
+      "description": "Access to education at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "ec9b1f08-5e2d-4f21-89d5-b632b8b7ed1b",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.4",
+      "name": "Default indicator for Health",
+      "description": "Access to health facility at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "15493d1c-0558-47d1-bb61-9812ca142574",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.5",
+      "name": "Default indicator for Transportation",
+      "description": "Access to transportation at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "3616be1a-60f8-4a06-a7c8-a2daed50726a",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.6",
+      "name": "Default indicator for Waste management (HH access)",
+      "description": "Access to waste collection points at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "18e9365d-44a6-41c2-b4d8-3b29b8c99626",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.7",
+      "name": "Default indicator for Communication",
+      "description": "Access to means of communication at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "8c6dd5d3-58ed-40f3-ad3c-c66596446a33",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.1.8",
+      "name": "Default indicator for Livelihood opportunities",
+      "description": "Access to livelihood opportunities at acceptable distance.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "2192b36c-6dc0-431f-9553-8b92fdeebb6a",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.2.1",
+      "name": "Default indicator for Roads",
+      "description": "Appropriate roads and access infrastructure.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "d1488449-013f-4e70-ad1b-e26f34585c59",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.2.2",
+      "name": "Default indicator for DRR",
+      "description": "Disaster resilient infrastructure.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "a2e6e3d6-d42c-4c70-9267-c5c2f0a56a24",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.2.3",
+      "name": "Default indicator for Public spaces",
+      "description": "Appropriate and sufficient public spaces.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "965bf79a-4123-4622-8dbc-63461f760f51",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.2.4",
+      "name": "Default indicator for Lighting & Electricity",
+      "description": "Appropriate and sufficient public lighting and electricity.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "7eb093ee-93b8-4f49-8350-298cc862f6a0",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.2.5",
+      "name": "Default indicator for Waste management (services)",
+      "description": "Solid waste management services available.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "1c86a542-fb94-4bc5-b310-b1bd68b1ca33",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.2.6",
+      "name": "Default indicator for Wastewater management",
+      "description": "Wastewater management services/infrastructure available.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "ad6c2498-20e4-4589-b45f-8fb600d2c3d6",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.3.1",
+      "name": "Default indicator for Conflict-related hazards",
+      "description": "Impact from conflict-related hazards.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "5ed1fd44-f387-4526-b38b-a887aa39c7da",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.3.2",
+      "name": "Default indicator for Environmental hazards",
+      "description": "Impact from environmental hazards.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "9c4519de-fbda-4d5c-8f6d-a610ceaf8ff3",
+      "theme_id": null
+    },
+    {
+      "level": "subtheme",
+      "ref_code": "ST3.3.3",
+      "name": "Default indicator for HLP rights",
+      "description": "Collapse/likely collapse of HLP rights.",
+      "sort_order": 1,
+      "subtheme_id": null,
+      "id": "0131a61b-c5bd-455a-a6b8-7876ce68f8d3",
+      "theme_id": null
+    }
+  ]
+}
