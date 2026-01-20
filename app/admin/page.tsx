@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
 import { createClient } from '@/lib/supabaseClient';
-import { Plus, Trash2, Edit2, X, Check, AlertTriangle, Globe, Shield, Users } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Check, AlertTriangle, Globe, Shield, Users, Settings } from 'lucide-react';
 import Link from 'next/link';
 
 interface Country {
@@ -456,6 +456,13 @@ export default function AdminPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Link
+                      href={`/admin/admin-levels?countryId=${country.id}`}
+                      className="p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-md transition"
+                      title="Configure admin levels"
+                    >
+                      <Settings size={18} />
+                    </Link>
                     <button
                       onClick={() => startEdit(country)}
                       className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition"

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
 import CountryAdminLevelsConfig from '@/components/CountryAdminLevelsConfig';
@@ -12,7 +12,16 @@ export default function AdminLevelsPage() {
   const { user, loading: authLoading } = useAuth();
   const { isSiteAdmin, loading: countryLoading, availableCountries } = useCountry();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [selectedCountryId, setSelectedCountryId] = useState<string>('');
+  
+  // Pre-select country from URL parameter
+  useEffect(() => {
+    const countryIdParam = searchParams.get('countryId');
+    if (countryIdParam && availableCountries.some(c => c.id === countryIdParam)) {
+      setSelectedCountryId(countryIdParam);
+    }
+  }, [searchParams, availableCountries]);
 
   // Redirect if not site admin
   if (!authLoading && !countryLoading && (!user || !isSiteAdmin)) {
