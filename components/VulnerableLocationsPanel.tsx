@@ -161,15 +161,38 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
         const populationMap = new Map<string, number>();
         const povertyMap = new Map<string, number>();
 
+        // Auto-detect population dataset if not set on instance
+        let populationDatasetId = instanceData?.population_dataset_id;
+        if (!populationDatasetId && instanceData?.country_id) {
+          console.log('Population dataset not set on instance, attempting auto-detection...');
+          const { data: autoPopDataset } = await supabase
+            .from('datasets')
+            .select('id, admin_level, name')
+            .or('name.ilike.%population%,name.ilike.%pop%')
+            .eq('type', 'numeric')
+            .eq('country_id', instanceData.country_id)
+            .in('admin_level', ['ADM3', 'ADM4'])
+            .order('name', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          
+          if (autoPopDataset) {
+            populationDatasetId = autoPopDataset.id;
+            console.log(`Auto-detected population dataset: ${autoPopDataset.name} (${autoPopDataset.admin_level})`);
+          } else {
+            console.warn('Could not auto-detect population dataset');
+          }
+        }
+
         // Batch fetch population data - aggregate from ADM4 to ADM3 if needed
-        if (instanceData?.population_dataset_id && adminPcodes.length > 0) {
-          console.log(`Fetching population for ${adminPcodes.length} locations from dataset ${instanceData.population_dataset_id}`);
+        if (populationDatasetId && adminPcodes.length > 0) {
+          console.log(`Fetching population for ${adminPcodes.length} locations from dataset ${populationDatasetId}`);
           
           // First try exact ADM3 match
           const { data: popDataAdm3, error: popError } = await supabase
             .from('dataset_values_numeric')
             .select('admin_pcode, value')
-            .eq('dataset_id', instanceData.population_dataset_id)
+            .eq('dataset_id', populationDatasetId)
             .in('admin_pcode', adminPcodes);
           
           if (popError) {
@@ -192,7 +215,7 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
           const { data: popDataset } = await supabase
             .from('datasets')
             .select('admin_level')
-            .eq('id', instanceData.population_dataset_id)
+            .eq('id', populationDatasetId)
             .single();
 
           // If population is at ADM4, aggregate to ADM3
@@ -211,7 +234,7 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
               const { data: popDataAdm4 } = await supabase
                 .from('dataset_values_numeric')
                 .select('admin_pcode, value')
-                .eq('dataset_id', instanceData.population_dataset_id)
+                .eq('dataset_id', populationDatasetId)
                 .in('admin_pcode', adm4Codes);
               
               if (popDataAdm4) {
@@ -293,21 +316,21 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
                 // Create map of ADM4 to ADM3
                 const adm4ToAdm3 = new Map(boundaries.map((b: any) => [b.admin_pcode, b.parent_pcode]));
                 
-                // Get ADM4 population for weighting (if population dataset is also ADM4)
-                const adm4PopMap = new Map<string, number>();
-                if (instanceData?.population_dataset_id) {
-                  const { data: popDataset } = await supabase
-                    .from('datasets')
-                    .select('admin_level')
-                    .eq('id', instanceData.population_dataset_id)
-                    .single();
-                  
-                  if (popDataset?.admin_level?.toUpperCase() === 'ADM4') {
-                    const { data: popDataAdm4 } = await supabase
-                      .from('dataset_values_numeric')
-                      .select('admin_pcode, value')
-                      .eq('dataset_id', instanceData.population_dataset_id)
-                      .in('admin_pcode', adm4Codes);
+                  // Get ADM4 population for weighting (if population dataset is also ADM4)
+                  const adm4PopMap = new Map<string, number>();
+                  if (populationDatasetId) {
+                    const { data: popDataset } = await supabase
+                      .from('datasets')
+                      .select('admin_level')
+                      .eq('id', populationDatasetId)
+                      .single();
+                    
+                    if (popDataset?.admin_level?.toUpperCase() === 'ADM4') {
+                      const { data: popDataAdm4 } = await supabase
+                        .from('dataset_values_numeric')
+                        .select('admin_pcode, value')
+                        .eq('dataset_id', populationDatasetId)
+                        .in('admin_pcode', adm4Codes);
                     
                     if (popDataAdm4) {
                       popDataAdm4.forEach((row: any) => {
