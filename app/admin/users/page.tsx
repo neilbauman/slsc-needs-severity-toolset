@@ -35,7 +35,7 @@ interface Country {
 
 export default function UserManagementPage() {
   const { user, loading: authLoading } = useAuth();
-  const { isSiteAdmin, loading: countryLoading } = useCountry();
+  const { isSiteAdmin, loading: countryLoading, userCountries } = useCountry();
   const router = useRouter();
   const supabase = createClient();
   
@@ -58,12 +58,26 @@ export default function UserManagementPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Redirect if not site admin
+  // Redirect if not site admin - but only after loading is complete
   useEffect(() => {
-    if (!authLoading && !countryLoading && (!user || !isSiteAdmin)) {
+    // Don't redirect while still loading
+    if (authLoading || countryLoading) {
+      return;
+    }
+    
+    // If no user, redirect immediately
+    if (!user) {
+      router.push('/');
+      return;
+    }
+    
+    // Only redirect if we've loaded user countries and confirmed user is not a site admin
+    // userCountries will be an empty array if user has no countries, which is fine
+    // The key is that countryLoading is false, meaning we've completed the check
+    if (!isSiteAdmin) {
       router.push('/');
     }
-  }, [user, isSiteAdmin, authLoading, countryLoading, router]);
+  }, [user, isSiteAdmin, authLoading, countryLoading, router, userCountries]);
 
   // Load users and countries
   const loadData = async () => {
