@@ -114,10 +114,6 @@ function AdminLevelsContent() {
   );
 }
 
-// Force dynamic rendering to prevent static generation issues with useSearchParams
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 // Note: This page uses useSearchParams which requires dynamic rendering
 // The Suspense boundary ensures proper client-side rendering
 export default function AdminLevelsPage() {
