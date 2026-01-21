@@ -755,7 +755,7 @@ export default function CountryDashboardPage() {
             featureCollection={adminBoundaryGeo}
             headline="National footprint"
             description={`${getAdminLevelName(adminLevels, 1, true)} boundaries shown as the base canvas for layering SSC instances.`}
-            countryCode={targetCountry.iso_code}
+            countryCode={currentCountry?.iso_code || countryCode}
           />
         </section>
         {supportingPillars.length > 0 && (
