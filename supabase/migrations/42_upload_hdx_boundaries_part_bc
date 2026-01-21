@@ -1,0 +1,1000 @@
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55850318',
+    'ADM4',
+    'Bishnupur',
+    'BD558503',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.04515135600019 25.611258405000115)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60912021',
+    'ADM4',
+    'Bishwanath',
+    'BD609120',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.76385738900007 24.80436244000009)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20135815',
+    'ADM4',
+    'Bitara',
+    'BD201358',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.85498544400019 23.419667362000155)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20193625',
+    'ADM4',
+    'Biteshwar',
+    'BD201936',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.76853677200006 23.482716809000124)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20128522',
+    'ADM4',
+    'Bitghar (tiara)',
+    'BD201285',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.03625402800014 23.841891139000097)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20199417',
+    'ADM4',
+    'Bitikandi',
+    'BD201994',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.84862861900012 23.576603147000128)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55274740',
+    'ADM4',
+    'Boaldar',
+    'BD552747',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.03987075300017 25.306589459000122)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30333219',
+    'ADM4',
+    'Boali',
+    'BD303332',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.30489075100013 24.128883518000066)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55322421',
+    'ADM4',
+    'Boali',
+    'BD553224',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.54927811400012 25.296251782000013)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30824718',
+    'ADM4',
+    'Boalia',
+    'BD308247',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.46210226500017 23.75396906200018)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD40503920',
+    'ADM4',
+    'Boalia',
+    'BD405039',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.83059153900007 23.959384330000148)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50646029',
+    'ADM4',
+    'Boalia',
+    'BD506460',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.96725250200018 24.81377543399998)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50703731',
+    'ADM4',
+    'Boalia',
+    'BD507037',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.27417765800016 24.829301476000126)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60910813',
+    'ADM4',
+    'Boaljur Bazar',
+    'BD609108',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.77540579000015 24.674396233000095)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20464331',
+    'ADM4',
+    'Boalkhali',
+    'BD204643',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (92.03325188100013 23.23194830700004)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30291815',
+    'ADM4',
+    'Boalmari',
+    'BD302918',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.68913602800012 23.412766379000175)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30291899',
+    'ADM4',
+    'Boalmari Paurashava',
+    'BD302918',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.68217762100005 23.393522559000075)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55772521',
+    'ADM4',
+    'Boda',
+    'BD557725',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.58440200200005 26.22336906300012)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20845840',
+    'ADM4',
+    'Bogachatar',
+    'BD208458',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (92.22927294400006 22.94437605100012)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50102099',
+    'ADM4',
+    'Bogra Paurashava',
+    'BD501020',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.37044269000012 24.8462210080001)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50108112',
+    'ADM4',
+    'Bohail',
+    'BD501081',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.65091025300006 24.783263340000133)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD45612322',
+    'ADM4',
+    'Bokainagar',
+    'BD456123',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.60723612500004 24.73379437300008)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20129017',
+    'ADM4',
+    'Bolakot',
+    'BD201290',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.12465462900019 24.199804745000165)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55490628',
+    'ADM4',
+    'Boldia',
+    'BD554906',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.76910953400005 26.065183002000026)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55328819',
+    'ADM4',
+    'Bonar Para',
+    'BD553288',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.52152035900019 25.168146686000057)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55731528',
+    'ADM4',
+    'Boragari',
+    'BD557315',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.81980473200014 26.136847963000037)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD40652814',
+    'ADM4',
+    'Boranal Eliasabad',
+    'BD406528',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.63296466700007 22.9912928600001)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD45615231',
+    'ADM4',
+    'Borar Char',
+    'BD456152',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.28514592300013 24.866881904000024)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30353211',
+    'ADM4',
+    'Borasi',
+    'BD303532',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.84133573500014 22.980058390000124)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55738527',
+    'ADM4',
+    'Bothlagari',
+    'BD557385',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.86762053000012 25.80867687000017)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60903321',
+    'ADM4',
+    'Bougla Bazar',
+    'BD609033',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.5704693040002 25.130749184000024)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30562829',
+    'ADM4',
+    'Boyra',
+    'BD305628',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.97740083800011 23.732386447000124)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30568219',
+    'ADM4',
+    'Boyra',
+    'BD305682',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.09268430400004 23.818121224000038)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD40878247',
+    'ADM4',
+    'Brahma Rajpur',
+    'BD408782',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.10605136200013 22.69625348599999)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50886113',
+    'ADM4',
+    'Brahmagachha',
+    'BD508861',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.57933106100012 24.525306204000117)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60586517',
+    'ADM4',
+    'Brahman Bazar',
+    'BD605865',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.95313312600018 24.522708362000117)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20191518',
+    'ADM4',
+    'Brahman Para',
+    'BD201915',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.11418890100003 23.620200650000072)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20121399',
+    'ADM4',
+    'Brahmanbaria Paurashava',
+    'BD201213',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.10040446900013 23.96416650200007)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30670229',
+    'ADM4',
+    'Brahmandi',
+    'BD306702',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.61485971000013 23.773115675000156)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50696326',
+    'ADM4',
+    'Brahmapur',
+    'BD506963',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (88.94785857100015 24.510820144000093)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD50763331',
+    'ADM4',
+    'Bri-lahiribari',
+    'BD507633',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.4395653090001 24.201138179)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60913820',
+    'ADM4',
+    'Budbari Bazar',
+    'BD609138',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (92.08287682600013 24.822257426000135)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20121394',
+    'ADM4',
+    'Budhal',
+    'BD201213',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.09645213100009 24.0405927220001)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD20120728',
+    'ADM4',
+    'Budhanti',
+    'BD201207',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.26033330700005 24.067883438000024)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD40870434',
+    'ADM4',
+    'Budhhata',
+    'BD408704',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.1483316770001 22.585512259000154)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD10041947',
+    'ADM4',
+    'Bukabunia',
+    'BD100419',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.05255047200006 22.308278275000134)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55274319',
+    'ADM4',
+    'Bulakipur',
+    'BD552743',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.19966509900019 25.33586879900014)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60366827',
+    'ADM4',
+    'Bulla',
+    'BD603668',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.28148071700008 24.338825572000076)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD60367134',
+    'ADM4',
+    'Bulla',
+    'BD603671',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (91.2959409500001 24.156080960999986)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD30676825',
+    'ADM4',
+    'Bulta',
+    'BD306768',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.54885946200011 23.7979836560001)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD40558523',
+    'ADM4',
+    'Bunagati',
+    'BD405585',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.42849038200006 23.32058912300016)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD10044735',
+    'ADM4',
+    'Bura Mazumdar',
+    'BD100447',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (90.13307604500011 22.31589459000014)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)
+ON CONFLICT (admin_pcode) DO UPDATE SET
+    admin_level = EXCLUDED.admin_level,
+    name = EXCLUDED.name,
+    parent_pcode = EXCLUDED.parent_pcode,
+    country_id = EXCLUDED.country_id,
+    geometry = EXCLUDED.geometry,
+    metadata = EXCLUDED.metadata;
+
+
+INSERT INTO public.admin_boundaries (admin_pcode, admin_level, name, parent_pcode, country_id, geometry, metadata)
+VALUES (
+    'BD55499422',
+    'ADM4',
+    'Buraburi',
+    'BD554994',
+    '0aa6850c-b932-444b-88b4-7e29ea8cc0bc'::uuid,
+    ST_GeomFromText('POINT (89.69967976300006 25.722804970000027)', 4326)::geography,
+    '{"source": "HDX", "upload_method": "script"}'::jsonb
+)

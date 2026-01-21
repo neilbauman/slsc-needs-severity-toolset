@@ -8,6 +8,9 @@ import CountryAdminLevelsConfig from '@/components/CountryAdminLevelsConfig';
 import { Shield, Globe } from 'lucide-react';
 import Link from 'next/link';
 
+// Prevent static generation - this page uses useSearchParams
+export const dynamic = 'force-dynamic';
+
 function AdminLevelsContent() {
   const { user, loading: authLoading } = useAuth();
   const { isSiteAdmin, loading: countryLoading, availableCountries } = useCountry();
