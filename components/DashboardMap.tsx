@@ -19,11 +19,26 @@ function MapBoundsController({ features }: { features: any[] }) {
   useEffect(() => {
     if (features.length > 0) {
       try {
-        const bounds = L.geoJSON(features).getBounds();
-        map.fitBounds(bounds, { 
-          padding: [20, 20],
-          maxZoom: 8 // Limit max zoom to keep country in view
+        // Filter out Point geometries - they can't be used for bounds
+        const validFeatures = features.filter((f: any) => {
+          const geomType = f.geometry?.type;
+          return geomType && geomType !== 'Point';
         });
+        
+        if (validFeatures.length > 0) {
+          const bounds = L.geoJSON(validFeatures).getBounds();
+          // Check if bounds are valid (not infinite or NaN)
+          if (bounds.isValid()) {
+            map.fitBounds(bounds, { 
+              padding: [20, 20],
+              maxZoom: 8 // Limit max zoom to keep country in view
+            });
+          } else {
+            console.warn('Invalid bounds calculated from features');
+          }
+        } else {
+          console.warn('No valid polygon features found for map bounds');
+        }
       } catch (err) {
         console.error("Error fitting bounds:", err);
       }
@@ -103,7 +118,11 @@ export default function DashboardMap({
                 key={features.length}
                 data={{
                   type: 'FeatureCollection',
-                  features,
+                  // Filter out Point geometries - they won't render as boundaries
+                  features: features.filter((f: any) => {
+                    const geomType = f.geometry?.type;
+                    return geomType && geomType !== 'Point';
+                  }),
                 } as GeoJsonObject}
                 style={() => ({
                   color: '#2563eb',
