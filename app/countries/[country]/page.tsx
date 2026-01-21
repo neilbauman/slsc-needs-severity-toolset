@@ -342,7 +342,7 @@ export default function CountryDashboardPage() {
       setInstances(sortedInstances);
       setInstanceDatasets(instanceDatasetData || []);
 
-      // Try to load admin boundaries - gracefully handle if function doesn't exist
+      // Try to load admin boundaries - use ADM0 (country boundary) for map bounds
       // Use targetCountry from URL, not currentCountry from context
       try {
         if (!targetCountry?.id) {
@@ -352,10 +352,25 @@ export default function CountryDashboardPage() {
         
         console.log(`Loading admin boundaries for country: ${targetCountry.name} (${targetCountry.iso_code}), ID: ${targetCountry.id}`);
         
-        const { data: geojsonData, error: geoError } = await supabase.rpc('get_admin_boundaries_geojson', {
-          admin_level: 'ADM1',
+        // First try ADM0 (country boundary) for map bounds
+        let { data: geojsonData, error: geoError } = await supabase.rpc('get_admin_boundaries_geojson', {
+          admin_level: 'ADM0',
           country_id: targetCountry.id,
         });
+        
+        // If ADM0 doesn't exist, fall back to ADM1
+        if (geoError || !geojsonData || (geojsonData.features && geojsonData.features.length === 0)) {
+          console.log('ADM0 not found, falling back to ADM1 for map bounds');
+          const { data: adm1Data, error: adm1Error } = await supabase.rpc('get_admin_boundaries_geojson', {
+            admin_level: 'ADM1',
+            country_id: targetCountry.id,
+          });
+          
+          if (!adm1Error && adm1Data) {
+            geojsonData = adm1Data;
+            geoError = null;
+          }
+        }
         
         if (geoError) {
           // Function might not exist yet - that's okay, just log it

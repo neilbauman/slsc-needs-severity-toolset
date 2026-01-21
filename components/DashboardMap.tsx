@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo } from 'react';
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet';
+import { useMemo, useEffect } from 'react';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
 
@@ -11,7 +12,37 @@ type DashboardMapProps = {
   description?: string;
 };
 
-const defaultCenter: [number, number] = [12.8797, 121.774]; // Philippines centroid
+// Component to auto-fit map bounds to features
+function MapBoundsController({ features }: { features: any[] }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (features.length > 0) {
+      try {
+        const bounds = L.geoJSON(features).getBounds();
+        map.fitBounds(bounds, { 
+          padding: [20, 20],
+          maxZoom: 8 // Limit max zoom to keep country in view
+        });
+      } catch (err) {
+        console.error("Error fitting bounds:", err);
+      }
+    }
+  }, [features, map]);
+
+  return null;
+}
+
+// Default centers by country (fallback if no features)
+const countryCenters: Record<string, [number, number]> = {
+  'PHL': [12.8797, 121.774], // Philippines
+  'LKA': [7.8731, 80.7718], // Sri Lanka
+  'BGD': [23.6850, 90.3563], // Bangladesh
+  'MOZ': [-18.6657, 35.5296], // Mozambique
+  'PSE': [31.9522, 35.2332], // Palestine
+};
+
+const defaultCenter: [number, number] = [12.8797, 121.774]; // Default to Philippines
 
 export default function DashboardMap({
   featureCollection,
@@ -26,6 +57,21 @@ export default function DashboardMap({
     return [featureCollection];
   }, [featureCollection]);
 
+  // Calculate center from features if available, otherwise use default
+  const mapCenter = useMemo(() => {
+    if (features.length > 0) {
+      try {
+        const bounds = L.geoJSON(features).getBounds();
+        return bounds.getCenter().toArray() as [number, number];
+      } catch {
+        return defaultCenter;
+      }
+    }
+    return defaultCenter;
+  }, [features]);
+
+  const initialZoom = features.length > 0 ? 6 : 5;
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <div className="border-b border-gray-100 px-5 py-4">
@@ -39,9 +85,9 @@ export default function DashboardMap({
       </div>
       <div className="h-80">
         <MapContainer
-          center={defaultCenter}
-          zoom={5}
-          minZoom={4}
+          center={mapCenter}
+          zoom={initialZoom}
+          minZoom={3}
           maxZoom={11}
           scrollWheelZoom={false}
           className="h-full w-full"
@@ -51,19 +97,22 @@ export default function DashboardMap({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           {features.length > 0 && (
-            <GeoJSON
-              key={features.length}
-              data={{
-                type: 'FeatureCollection',
-                features,
-              } as GeoJsonObject}
-              style={() => ({
-                color: '#2563eb',
-                weight: 1,
-                fillColor: '#93c5fd',
-                fillOpacity: 0.12,
-              })}
-            />
+            <>
+              <GeoJSON
+                key={features.length}
+                data={{
+                  type: 'FeatureCollection',
+                  features,
+                } as GeoJsonObject}
+                style={() => ({
+                  color: '#2563eb',
+                  weight: 1,
+                  fillColor: '#93c5fd',
+                  fillOpacity: 0.12,
+                })}
+              />
+              <MapBoundsController features={features} />
+            </>
           )}
         </MapContainer>
       </div>
