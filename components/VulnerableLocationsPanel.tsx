@@ -41,36 +41,44 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
       try {
         const supabase = createClient();
         
-        // Get instance to find population dataset
+        // Get instance to find population dataset and country
         const { data: instanceData } = await supabase
           .from('instances')
-          .select('population_dataset_id, admin_scope')
+          .select('population_dataset_id, admin_scope, country_id')
           .eq('id', instanceId)
           .single();
 
-        // Find poverty rate dataset - try multiple search patterns
+        // Find poverty rate dataset - try multiple search patterns, filtered by country
         let povertyDataset: any = null;
         
-        // Try different search patterns
+        // Try different search patterns, filtered by the instance's country
         const searchPatterns = ['%poverty%', '%pov%', '%poor%'];
         for (const pattern of searchPatterns) {
-          const { data, error } = await supabase
+          let query = supabase
             .from('datasets')
             .select('id, admin_level, name')
             .ilike('name', pattern)
-            .eq('type', 'numeric')
+            .eq('type', 'numeric');
+          
+          // Filter by country if instance has a country_id
+          if (instanceData?.country_id) {
+            query = query.eq('country_id', instanceData.country_id);
+          }
+          
+          const { data, error } = await query
             .limit(1)
             .maybeSingle();
           
           if (!error && data) {
             povertyDataset = data;
-            console.log(`Found poverty dataset: ${data.name} (${data.admin_level})`);
+            console.log(`Found poverty dataset: ${data.name} (${data.admin_level}) for country ${instanceData?.country_id}`);
             break;
           }
         }
         
         if (!povertyDataset) {
-          console.warn('No poverty dataset found - PIN values will not be calculated');
+          console.warn(`No poverty dataset found for country ${instanceData?.country_id} - PIN values will not be calculated`);
+          console.warn('Searched patterns:', searchPatterns);
         }
 
         // Get affected ADM3 codes first - we need these to filter locations
@@ -155,6 +163,8 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
 
         // Batch fetch population data - aggregate from ADM4 to ADM3 if needed
         if (instanceData?.population_dataset_id && adminPcodes.length > 0) {
+          console.log(`Fetching population for ${adminPcodes.length} locations from dataset ${instanceData.population_dataset_id}`);
+          
           // First try exact ADM3 match
           const { data: popDataAdm3, error: popError } = await supabase
             .from('dataset_values_numeric')
@@ -162,13 +172,20 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
             .eq('dataset_id', instanceData.population_dataset_id)
             .in('admin_pcode', adminPcodes);
           
+          if (popError) {
+            console.error('Error fetching ADM3 population:', popError);
+          }
+          
           if (!popError && popDataAdm3) {
+            console.log(`Found ${popDataAdm3.length} ADM3 population records`);
             popDataAdm3.forEach((row: any) => {
               const value = Number(row.value);
               if (!isNaN(value)) {
                 populationMap.set(row.admin_pcode, value);
               }
             });
+          } else {
+            console.log('No direct ADM3 population match found, checking if aggregation needed...');
           }
 
           // Get dataset admin level to check if we need to aggregate
@@ -231,19 +248,27 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
           
           if (povAdminLevel === 'ADM3') {
             // Direct ADM3 match
+            console.log(`Fetching ADM3 poverty data for ${adminPcodes.length} locations from dataset ${povertyDataset.id}`);
             const { data: povData, error: povError } = await supabase
               .from('dataset_values_numeric')
               .select('admin_pcode, value')
               .eq('dataset_id', povertyDataset.id)
               .in('admin_pcode', adminPcodes);
             
+            if (povError) {
+              console.error('Error fetching ADM3 poverty data:', povError);
+            }
+            
             if (!povError && povData) {
+              console.log(`Found ${povData.length} ADM3 poverty records`);
               povData.forEach((row: any) => {
                 const value = Number(row.value);
                 if (!isNaN(value)) {
                   povertyMap.set(row.admin_pcode, value);
                 }
               });
+            } else {
+              console.log('No ADM3 poverty data found');
             }
           } else if (povAdminLevel === 'ADM4') {
             // Aggregate ADM4 poverty data to ADM3 using population-weighted average
@@ -353,6 +378,14 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
           let peopleInNeed: number | null = null;
           if (population !== null && povertyRate !== null) {
             peopleInNeed = Math.round(population * (povertyRate / 100));
+          } else {
+            // Debug logging for missing data
+            if (population === null) {
+              console.debug(`No population data for ${loc.name} (${loc.admin_pcode})`);
+            }
+            if (povertyRate === null) {
+              console.debug(`No poverty rate data for ${loc.name} (${loc.admin_pcode})`);
+            }
           }
 
           return {
@@ -363,6 +396,12 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
             people_in_need: peopleInNeed,
           };
         });
+        
+        // Log summary for debugging
+        const locationsWithPIN = locationsWithData.filter(l => l.people_in_need !== null).length;
+        console.log(`PIN calculation: ${locationsWithPIN}/${locationsWithData.length} locations have PIN values`);
+        console.log(`Population data: ${locationsWithData.filter(l => l.population !== null).length}/${locationsWithData.length} locations have population`);
+        console.log(`Poverty data: ${povertyMap.size} poverty rates found for ${adminPcodes.length} locations`);
 
         setLocations(locationsWithData);
       } catch (err: any) {
