@@ -41,6 +41,23 @@ export async function POST(req: Request) {
       );
     }
 
+    // Check if user already exists first
+    const { data: existingUsers } = await serverClient.auth.admin.listUsers();
+    const existingUser = existingUsers?.users?.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+
+    if (existingUser) {
+      // User already exists - return helpful info
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'A user with this email address already exists',
+          existingUserId: existingUser.id,
+          existingUserEmail: existingUser.email,
+        },
+        { status: 400 }
+      );
+    }
+
     // Create the user using admin API
     const { data: newUser, error: createError } = await serverClient.auth.admin.createUser({
       email,
@@ -51,9 +68,12 @@ export async function POST(req: Request) {
 
     if (createError) {
       // Handle specific errors
-      if (createError.message.includes('already registered')) {
+      if (createError.message.includes('already registered') || createError.message.includes('already exists')) {
         return NextResponse.json(
-          { success: false, error: 'A user with this email already exists' },
+          { 
+            success: false, 
+            error: 'A user with this email address already exists. Please find them in the users list below and assign access.',
+          },
           { status: 400 }
         );
       }

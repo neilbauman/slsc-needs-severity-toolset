@@ -11,6 +11,7 @@ import Link from 'next/link';
 interface UserWithAccess {
   id: string;
   email: string;
+  full_name?: string | null;
   created_at: string;
   user_countries: {
     id: string;
@@ -76,80 +77,51 @@ export default function UserManagementPage() {
       if (countriesError) throw countriesError;
       setCountries(countriesData || []);
 
-      // Load all users with their access using RPC function
-      const { data: usersData, error: usersError } = await supabase
-        .rpc('get_users_with_access');
-
-      if (usersError) {
-        // If RPC fails (might not be created yet), fall back to user_countries query
-        console.warn('RPC function not available, using fallback method:', usersError);
-        
-        const { data: userCountriesData, error: userCountriesError } = await supabase
-          .from('user_countries')
-          .select(`
-            id,
-            user_id,
-            country_id,
-            role,
-            country:countries(*)
-          `)
-          .order('user_id');
-
-        if (userCountriesError) throw userCountriesError;
-
-        // Group by user_id
-        const uniqueUserIds = new Set<string>();
-        (userCountriesData || []).forEach((uc: any) => {
-          uniqueUserIds.add(uc.user_id);
-        });
-
-        const usersList: UserWithAccess[] = [];
-        
-        for (const userId of uniqueUserIds) {
-          const userCountries = (userCountriesData || [])
-            .filter((uc: any) => uc.user_id === userId)
-            .map((uc: any) => ({
-              id: uc.id,
-              country_id: uc.country_id,
-              role: uc.role,
-              country: uc.country,
-            }));
-
-          const isSiteAdmin = userCountries.some((uc: any) => uc.role === 'admin');
-
-          usersList.push({
-            id: userId,
-            email: `user-${userId.slice(0, 8)}@...`, // Placeholder
-            created_at: new Date().toISOString(),
-            user_countries: userCountries,
-            isSiteAdmin,
-          });
-        }
-
-        setUsers(usersList);
-      } else {
-        // Transform RPC response to our format
-        const usersList: UserWithAccess[] = (usersData || []).map((u: any) => {
-          const userCountries = (u.user_countries || []).map((uc: any) => ({
-            id: uc.id,
-            country_id: uc.country_id,
-            role: uc.role,
-            country: uc.country,
-          }));
-
-          const isSiteAdmin = userCountries.some((uc: any) => uc.role === 'admin');
-
-          return {
-            id: u.user_id,
-            email: u.email || `user-${u.user_id.slice(0, 8)}@...`,
-            created_at: u.created_at,
-            user_countries: userCountries,
-            isSiteAdmin,
-          };
-        });
-
-        setUsers(usersList);
+      // Load all users using API route (uses service role to access auth.users)
+      const response = await fetch('/api/admin/get-all-users');
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to load users' }));
+        throw new Error(errorData.error || `Failed to load users: ${response.status} ${response.statusText}`);
       }
+      
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to load users');
+      }
+
+      // Transform API response to our format
+      const usersList: UserWithAccess[] = (result.users || []).map((u: any) => {
+        const userCountries = (u.user_countries || []).map((uc: any) => ({
+          id: uc.id,
+          country_id: uc.country_id,
+          role: uc.role,
+          country: uc.country,
+        }));
+
+        const isSiteAdmin = userCountries.some((uc: any) => uc.role === 'admin');
+
+        return {
+          id: u.id,
+          email: u.email || `user-${u.id.slice(0, 8)}@...`,
+          full_name: u.full_name || null,
+          created_at: u.created_at,
+          user_countries: userCountries,
+          isSiteAdmin,
+        };
+      });
+
+      // Sort users: site admins first, then by email
+      usersList.sort((a, b) => {
+        if (a.isSiteAdmin !== b.isSiteAdmin) {
+          return a.isSiteAdmin ? -1 : 1;
+        }
+        return (a.email || '').localeCompare(b.email || '');
+      });
+
+      console.log(`Loaded ${usersList.length} users from API`);
+      setUsers(usersList);
     } catch (err: any) {
       console.error('Error loading data:', err);
       setError(err.message || 'Failed to load users');
@@ -255,6 +227,22 @@ export default function UserManagementPage() {
       const result = await response.json();
 
       if (!result.success) {
+        // If user already exists, reload data to show them in the list
+        if (result.existingUserId) {
+          await loadData();
+          // Scroll to the existing user after a brief delay
+          setTimeout(() => {
+            const userElement = document.getElementById(`user-${result.existingUserId}`);
+            if (userElement) {
+              userElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              // Highlight the user briefly
+              userElement.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2');
+              setTimeout(() => {
+                userElement.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2');
+              }, 3000);
+            }
+          }, 500);
+        }
         throw new Error(result.error || 'Failed to create user');
       }
 
@@ -387,7 +375,12 @@ export default function UserManagementPage() {
             
             {formError && (
               <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
-                <p className="text-sm text-red-800">{formError}</p>
+                <p className="text-sm text-red-800 font-medium mb-1">{formError}</p>
+                {formError.includes('already exists') && (
+                  <p className="text-xs text-red-700 mt-1">
+                    The user has been highlighted in the list below. Click "Add Access" to assign country access and roles.
+                  </p>
+                )}
               </div>
             )}
 
@@ -482,7 +475,10 @@ export default function UserManagementPage() {
           <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-gray-900">
-                Assign Access to {assigningUser.email}
+                Assign Access to {assigningUser.full_name || assigningUser.email}
+                {assigningUser.full_name && (
+                  <span className="text-sm font-normal text-gray-600 ml-2">({assigningUser.email})</span>
+                )}
               </h2>
               <button
                 onClick={() => {
@@ -499,7 +495,12 @@ export default function UserManagementPage() {
             
             {formError && (
               <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
-                <p className="text-sm text-red-800">{formError}</p>
+                <p className="text-sm text-red-800 font-medium mb-1">{formError}</p>
+                {formError.includes('already exists') && (
+                  <p className="text-xs text-red-700 mt-1">
+                    The user has been highlighted in the list below. Click "Add Access" to assign country access and roles.
+                  </p>
+                )}
               </div>
             )}
 
@@ -604,14 +605,15 @@ export default function UserManagementPage() {
           ) : users.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
               <Users className="mx-auto text-gray-400 mb-4" size={48} />
-              <p>No users found. Users will appear here once they have country assignments.</p>
+              <p>No users found in the system.</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
               {users.map((userItem) => (
                 <div
                   key={userItem.id}
-                  className="px-6 py-4 hover:bg-gray-50"
+                  id={`user-${userItem.id}`}
+                  className="px-6 py-4 hover:bg-gray-50 transition-all"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -622,10 +624,22 @@ export default function UserManagementPage() {
                           <User className="text-gray-400" size={20} />
                         )}
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900">
-                            {userItem.email}
-                          </h3>
-                          {userItem.isSiteAdmin && (
+                          {userItem.full_name && (
+                            <h3 className="text-lg font-semibold text-gray-900">
+                              {userItem.full_name}
+                            </h3>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <p className={`text-sm ${userItem.full_name ? 'text-gray-600' : 'text-lg font-semibold text-gray-900'}`}>
+                              {userItem.email}
+                            </p>
+                            {userItem.isSiteAdmin && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                Site Administrator
+                              </span>
+                            )}
+                          </div>
+                          {!userItem.full_name && userItem.isSiteAdmin && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mt-1">
                               Site Administrator
                             </span>
