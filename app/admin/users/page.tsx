@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
 import { createClient } from '@/lib/supabaseClient';
-import { Plus, Trash2, Edit2, Shield, User, Users, X, Check, AlertTriangle, Globe } from 'lucide-react';
+import { Plus, Trash2, Edit2, Shield, User, Users, X, Check, AlertTriangle, Globe, Key } from 'lucide-react';
 import Link from 'next/link';
 
 interface UserWithAccess {
@@ -53,6 +53,10 @@ export default function UserManagementPage() {
   const [sendInvite, setSendInvite] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [resettingPassword, setResettingPassword] = useState<UserWithAccess | null>(null);
+  const [resetPasswordMethod, setResetPasswordMethod] = useState<'email' | 'direct'>('email');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   // Redirect if not site admin
   useEffect(() => {
@@ -286,6 +290,63 @@ export default function UserManagementPage() {
     } catch (err: any) {
       console.error('Error removing access:', err);
       alert(err.message || 'Failed to remove access');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Reset user password
+  const handleResetPassword = async () => {
+    if (!resettingPassword) return;
+
+    if (resetPasswordMethod === 'direct') {
+      if (!newPassword || newPassword.length < 6) {
+        setFormError('Password must be at least 6 characters long');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setFormError('Passwords do not match');
+        return;
+      }
+    }
+
+    setSaving(true);
+    setFormError(null);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/admin/reset-user-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': session.user.id,
+        },
+        body: JSON.stringify({
+          targetUserId: resettingPassword.id,
+          newPassword: resetPasswordMethod === 'direct' ? newPassword : undefined,
+          sendResetEmail: resetPasswordMethod === 'email',
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to reset password');
+      }
+
+      // Reset form and close modal
+      setResettingPassword(null);
+      setResetPasswordMethod('email');
+      setNewPassword('');
+      setConfirmPassword('');
+      alert(result.message || 'Password reset successful');
+    } catch (err: any) {
+      console.error('Error resetting password:', err);
+      setFormError(err.message || 'Failed to reset password');
     } finally {
       setSaving(false);
     }
@@ -589,6 +650,142 @@ export default function UserManagementPage() {
           </div>
         )}
 
+        {/* Reset Password Form */}
+        {resettingPassword && (
+          <div className="mb-6 bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Reset Password for {resettingPassword.full_name || resettingPassword.email}
+                {resettingPassword.full_name && (
+                  <span className="text-sm font-normal text-gray-600 ml-2">({resettingPassword.email})</span>
+                )}
+              </h2>
+              <button
+                onClick={() => {
+                  setResettingPassword(null);
+                  setResetPasswordMethod('email');
+                  setNewPassword('');
+                  setConfirmPassword('');
+                  setFormError(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            {formError && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800">{formError}</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Reset Method
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="resetMethod"
+                      value="email"
+                      checked={resetPasswordMethod === 'email'}
+                      onChange={(e) => setResetPasswordMethod(e.target.value as 'email' | 'direct')}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                      disabled={saving}
+                    />
+                    <span className="ml-2 block text-sm text-gray-700">
+                      Send password reset email (user will set their own password)
+                    </span>
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      name="resetMethod"
+                      value="direct"
+                      checked={resetPasswordMethod === 'direct'}
+                      onChange={(e) => setResetPasswordMethod(e.target.value as 'email' | 'direct')}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300"
+                      disabled={saving}
+                    />
+                    <span className="ml-2 block text-sm text-gray-700">
+                      Set new password directly
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {resetPasswordMethod === 'direct' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      New Password *
+                    </label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter new password (min 6 characters)"
+                      disabled={saving}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Confirm Password *
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Confirm new password"
+                      disabled={saving}
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleResetPassword}
+                  disabled={saving || (resetPasswordMethod === 'direct' && (!newPassword || newPassword !== confirmPassword))}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Resetting...
+                    </>
+                  ) : (
+                    <>
+                      <Key size={16} />
+                      {resetPasswordMethod === 'email' ? 'Send Reset Email' : 'Update Password'}
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
+                    setResettingPassword(null);
+                    setResetPasswordMethod('email');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setFormError(null);
+                  }}
+                  disabled={saving}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Users List */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
@@ -693,6 +890,20 @@ export default function UserManagementPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setResettingPassword(userItem);
+                          setResetPasswordMethod('email');
+                          setNewPassword('');
+                          setConfirmPassword('');
+                          setFormError(null);
+                        }}
+                        className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded-md hover:bg-gray-700 flex items-center gap-2"
+                        title="Reset password"
+                      >
+                        <Key size={14} />
+                        Reset Password
+                      </button>
                       <button
                         onClick={() => {
                           setAssigningUser(userItem);
