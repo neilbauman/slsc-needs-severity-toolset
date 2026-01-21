@@ -25,6 +25,8 @@ interface MetaState {
   category: string;
   admin_level: 'ADM1' | 'ADM2' | 'ADM3' | 'ADM4' | 'ADM5';
   type: DatasetType;
+  source: string;
+  source_link: string;
 }
 
 // --- Helper functions ------------------------------------------------
@@ -182,6 +184,8 @@ export default function UploadDatasetModal({
     category: '',
     admin_level: 'ADM3',
     type: 'numeric',
+    source: '',
+    source_link: '',
   });
 
   const [isPercentage, setIsPercentage] = useState<boolean>(false);
@@ -324,17 +328,30 @@ export default function UploadDatasetModal({
 
     try {
       // 1) Create dataset metadata row
+      const datasetMetadata: any = {
+        name: meta.name.trim(),
+        description: meta.description.trim() || null,
+        category: meta.category,
+        type: meta.type,
+        admin_level: meta.admin_level,
+      };
+      
+      // Add source information
+      if (meta.source.trim()) {
+        datasetMetadata.source = meta.source.trim();
+      }
+      
+      // Store source link in metadata JSONB
+      if (meta.source_link.trim()) {
+        datasetMetadata.metadata = {
+          ...(datasetMetadata.metadata || {}),
+          source_link: meta.source_link.trim(),
+        };
+      }
+      
       const { data: dataset, error: datasetError } = await supabase
         .from('datasets')
-        .insert([
-          {
-            name: meta.name.trim(),
-            description: meta.description.trim() || null,
-            category: meta.category,
-            type: meta.type,
-            admin_level: meta.admin_level,
-          },
-        ])
+        .insert([datasetMetadata])
         .select()
         .single();
 
@@ -589,6 +606,35 @@ export default function UploadDatasetModal({
                   rows={2}
                   disabled={loading}
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium">Source</label>
+                  <input
+                    type="text"
+                    value={meta.source}
+                    onChange={(e) =>
+                      setMeta((prev) => ({ ...prev, source: e.target.value }))
+                    }
+                    className="border rounded px-2 py-1 w-full"
+                    placeholder="e.g., OCHA HDX, World Bank"
+                    disabled={loading}
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium">Source Link</label>
+                  <input
+                    type="url"
+                    value={meta.source_link}
+                    onChange={(e) =>
+                      setMeta((prev) => ({ ...prev, source_link: e.target.value }))
+                    }
+                    className="border rounded px-2 py-1 w-full"
+                    placeholder="https://..."
+                    disabled={loading}
+                  />
+                </div>
               </div>
 
               {/* Numeric-only options */}

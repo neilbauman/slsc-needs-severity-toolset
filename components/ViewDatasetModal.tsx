@@ -124,7 +124,22 @@ export default function ViewDatasetModal({ dataset, onClose }: ViewDatasetModalP
             </p>
             <p>
               <span className="font-semibold text-gray-700">Source:</span>{' '}
-              {dataset.source || '—'}
+              {dataset.source ? (
+                dataset.metadata?.source_link ? (
+                  <a
+                    href={dataset.metadata.source_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:text-blue-800 underline"
+                  >
+                    {dataset.source}
+                  </a>
+                ) : (
+                  dataset.source
+                )
+              ) : (
+                '—'
+              )}
             </p>
           </div>
         </div>
