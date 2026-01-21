@@ -48,13 +48,30 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
           .eq('id', instanceId)
           .single();
 
-        // Find poverty rate dataset
-        const { data: povertyDataset } = await supabase
-          .from('datasets')
-          .select('id, admin_level')
-          .ilike('name', '%poverty%')
-          .limit(1)
-          .single();
+        // Find poverty rate dataset - try multiple search patterns
+        let povertyDataset: any = null;
+        
+        // Try different search patterns
+        const searchPatterns = ['%poverty%', '%pov%', '%poor%'];
+        for (const pattern of searchPatterns) {
+          const { data, error } = await supabase
+            .from('datasets')
+            .select('id, admin_level, name')
+            .ilike('name', pattern)
+            .eq('type', 'numeric')
+            .limit(1)
+            .maybeSingle();
+          
+          if (!error && data) {
+            povertyDataset = data;
+            console.log(`Found poverty dataset: ${data.name} (${data.admin_level})`);
+            break;
+          }
+        }
+        
+        if (!povertyDataset) {
+          console.warn('No poverty dataset found - PIN values will not be calculated');
+        }
 
         // Get affected ADM3 codes first - we need these to filter locations
         let affectedCodes: string[] = [];
@@ -208,22 +225,123 @@ export default function VulnerableLocationsPanel({ instanceId, refreshKey }: Pro
           }
         }
 
-        // Batch fetch poverty rate data
+        // Batch fetch poverty rate data - handle different admin levels
         if (povertyDataset?.id && adminPcodes.length > 0) {
-          const { data: povData, error: povError } = await supabase
-            .from('dataset_values_numeric')
-            .select('admin_pcode, value')
-            .eq('dataset_id', povertyDataset.id)
-            .in('admin_pcode', adminPcodes);
+          const povAdminLevel = povertyDataset.admin_level?.toUpperCase();
           
-          if (!povError && povData) {
-            povData.forEach((row: any) => {
-              const value = Number(row.value);
-              if (!isNaN(value)) {
-                povertyMap.set(row.admin_pcode, value);
+          if (povAdminLevel === 'ADM3') {
+            // Direct ADM3 match
+            const { data: povData, error: povError } = await supabase
+              .from('dataset_values_numeric')
+              .select('admin_pcode, value')
+              .eq('dataset_id', povertyDataset.id)
+              .in('admin_pcode', adminPcodes);
+            
+            if (!povError && povData) {
+              povData.forEach((row: any) => {
+                const value = Number(row.value);
+                if (!isNaN(value)) {
+                  povertyMap.set(row.admin_pcode, value);
+                }
+              });
+            }
+          } else if (povAdminLevel === 'ADM4') {
+            // Aggregate ADM4 poverty data to ADM3 using population-weighted average
+            // Get all ADM4 boundaries that belong to our ADM3 codes
+            const { data: boundaries } = await supabase
+              .from('admin_boundaries')
+              .select('admin_pcode, parent_pcode')
+              .in('parent_pcode', adminPcodes)
+              .eq('admin_level', 'ADM4');
+            
+            if (boundaries && boundaries.length > 0) {
+              const adm4Codes = boundaries.map((b: any) => b.admin_pcode);
+              
+              // Get ADM4 poverty values
+              const { data: povDataAdm4, error: povError } = await supabase
+                .from('dataset_values_numeric')
+                .select('admin_pcode, value')
+                .eq('dataset_id', povertyDataset.id)
+                .in('admin_pcode', adm4Codes);
+              
+              if (!povError && povDataAdm4) {
+                // Create map of ADM4 to ADM3
+                const adm4ToAdm3 = new Map(boundaries.map((b: any) => [b.admin_pcode, b.parent_pcode]));
+                
+                // Get ADM4 population for weighting (if population dataset is also ADM4)
+                const adm4PopMap = new Map<string, number>();
+                if (instanceData?.population_dataset_id) {
+                  const { data: popDataset } = await supabase
+                    .from('datasets')
+                    .select('admin_level')
+                    .eq('id', instanceData.population_dataset_id)
+                    .single();
+                  
+                  if (popDataset?.admin_level?.toUpperCase() === 'ADM4') {
+                    const { data: popDataAdm4 } = await supabase
+                      .from('dataset_values_numeric')
+                      .select('admin_pcode, value')
+                      .eq('dataset_id', instanceData.population_dataset_id)
+                      .in('admin_pcode', adm4Codes);
+                    
+                    if (popDataAdm4) {
+                      popDataAdm4.forEach((row: any) => {
+                        const value = Number(row.value);
+                        if (!isNaN(value) && value > 0) {
+                          adm4PopMap.set(row.admin_pcode, value);
+                        }
+                      });
+                    }
+                  }
+                }
+                
+                // Aggregate ADM4 poverty rates to ADM3 (population-weighted if available, otherwise simple average)
+                const adm3PovMap = new Map<string, { weightedSum: number; totalPop: number; count: number }>();
+                
+                povDataAdm4.forEach((row: any) => {
+                  const adm3Code = adm4ToAdm3.get(row.admin_pcode);
+                  if (adm3Code && adminPcodes.includes(adm3Code)) {
+                    const povRate = Number(row.value);
+                    if (!isNaN(povRate)) {
+                      const adm4Pop = adm4PopMap.get(row.admin_pcode) || 0;
+                      const current = adm3PovMap.get(adm3Code) || { weightedSum: 0, totalPop: 0, count: 0 };
+                      
+                      if (adm4Pop > 0) {
+                        // Population-weighted: sum(pop * pov_rate) / sum(pop)
+                        adm3PovMap.set(adm3Code, {
+                          weightedSum: current.weightedSum + (adm4Pop * povRate),
+                          totalPop: current.totalPop + adm4Pop,
+                          count: current.count + 1,
+                        });
+                      } else {
+                        // Simple average fallback
+                        adm3PovMap.set(adm3Code, {
+                          weightedSum: current.weightedSum + povRate,
+                          totalPop: current.totalPop,
+                          count: current.count + 1,
+                        });
+                      }
+                    }
+                  }
+                });
+                
+                // Calculate weighted average poverty rate for each ADM3
+                adm3PovMap.forEach((stats, code) => {
+                  if (stats.totalPop > 0) {
+                    // Population-weighted average
+                    povertyMap.set(code, stats.weightedSum / stats.totalPop);
+                  } else if (stats.count > 0) {
+                    // Simple average fallback
+                    povertyMap.set(code, stats.weightedSum / stats.count);
+                  }
+                });
               }
-            });
+            }
+          } else {
+            console.warn(`Poverty dataset admin level ${povAdminLevel} not supported for aggregation`);
           }
+        } else if (!povertyDataset) {
+          console.warn('No poverty dataset found - PIN values will not be calculated');
         }
 
         // Map data to locations
