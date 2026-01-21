@@ -43,8 +43,20 @@ def main():
     
     supabase = create_client(supabase_url, supabase_key)
     
-    # Get country ID
-    country_resp = supabase.table("countries").select("id").eq("iso_code", country_iso).single().execute()
+    # Get country ID with retry
+    import time
+    max_retries = 3
+    country_resp = None
+    for attempt in range(max_retries):
+        try:
+            country_resp = supabase.table("countries").select("id").eq("iso_code", country_iso).single().execute()
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Connection timeout, retrying in 5 seconds... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(5)
+            else:
+                raise
     if not country_resp.data:
         print(f"Country {country_iso} not found")
         return
