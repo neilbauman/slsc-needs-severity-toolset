@@ -332,23 +332,43 @@ export default function CountryDashboardPage() {
 
       // Try to load admin boundaries - gracefully handle if function doesn't exist
       try {
+        if (!currentCountry?.id) {
+          console.warn('Cannot load admin boundaries: currentCountry.id is missing');
+          return;
+        }
+        
+        console.log(`Loading admin boundaries for country: ${currentCountry.name} (${currentCountry.iso_code}), ID: ${currentCountry.id}`);
+        
         const { data: geojsonData, error: geoError } = await supabase.rpc('get_admin_boundaries_geojson', {
           admin_level: 'ADM1',
           country_id: currentCountry.id,
         });
+        
         if (geoError) {
           // Function might not exist yet - that's okay, just log it
           if (geoError.code === 'PGRST202') {
             console.info('Admin boundaries RPC function not found - skipping map data');
           } else {
-            console.warn('Failed to load admin boundaries:', geoError);
+            console.error('Failed to load admin boundaries:', geoError);
+            console.error('Country ID used:', currentCountry.id);
+            console.error('Country ISO code:', currentCountry.iso_code);
           }
         } else {
-          setAdminBoundaryGeo(geojsonData as GeoJSON);
+          if (geojsonData && typeof geojsonData === 'object' && 'features' in geojsonData) {
+            const featureCount = Array.isArray(geojsonData.features) ? geojsonData.features.length : 0;
+            console.log(`Loaded ${featureCount} admin boundary features for ${currentCountry.name}`);
+            if (featureCount === 0) {
+              console.warn(`No admin boundaries found for country ${currentCountry.name} (${currentCountry.id})`);
+            }
+            setAdminBoundaryGeo(geojsonData as GeoJSON);
+          } else {
+            console.warn('Admin boundaries RPC returned unexpected data format:', geojsonData);
+          }
         }
       } catch (err) {
-        // Silently handle errors - map is optional
-        console.info('Admin boundaries not available');
+        // Log errors for debugging
+        console.error('Error loading admin boundaries:', err);
+        console.error('Country context:', { id: currentCountry?.id, name: currentCountry?.name, iso_code: currentCountry?.iso_code });
       }
 
       // Count admin boundaries by level
