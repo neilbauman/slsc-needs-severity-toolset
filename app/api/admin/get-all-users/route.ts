@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
 import { headers } from 'next/headers';
 
+// Mark this route as dynamic since it uses headers()
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: Request) {
   try {
     // Get the current user ID from the custom header sent by the client
