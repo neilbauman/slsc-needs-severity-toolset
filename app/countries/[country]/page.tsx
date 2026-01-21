@@ -282,11 +282,23 @@ export default function CountryDashboardPage() {
   }, [countryCode, availableCountries, currentCountry, setCurrentCountry, router]);
 
   const loadDashboard = useCallback(async () => {
-    if (!currentCountry) return;
+    // Ensure we're using the country from the URL, not just context
+    if (!countryCode || !availableCountries.length) return;
+    
+    const countryFromUrl = availableCountries.find(c => c.iso_code === countryCode);
+    if (!countryFromUrl) {
+      console.warn(`Country ${countryCode} not found in available countries`);
+      return;
+    }
+    
+    // Use country from URL, not currentCountry from context (which might be cached)
+    const targetCountry = countryFromUrl;
     
     try {
       setLoading(true);
       setError(null);
+
+      console.log(`Loading dashboard for country: ${targetCountry.name} (${targetCountry.iso_code}), ID: ${targetCountry.id}`);
 
       // Get filtered datasets and instances first
       const [
@@ -294,8 +306,8 @@ export default function CountryDashboardPage() {
         { data: instanceData, error: instanceError },
       ] =
         await Promise.all([
-          supabase.from('datasets').select('*').eq('country_id', currentCountry.id).order('name', { ascending: true }),
-          supabase.from('instances').select('*').eq('country_id', currentCountry.id),
+          supabase.from('datasets').select('*').eq('country_id', targetCountry.id).order('name', { ascending: true }),
+          supabase.from('instances').select('*').eq('country_id', targetCountry.id),
         ]);
 
       if (datasetError) throw datasetError;
@@ -331,17 +343,18 @@ export default function CountryDashboardPage() {
       setInstanceDatasets(instanceDatasetData || []);
 
       // Try to load admin boundaries - gracefully handle if function doesn't exist
+      // Use targetCountry from URL, not currentCountry from context
       try {
-        if (!currentCountry?.id) {
-          console.warn('Cannot load admin boundaries: currentCountry.id is missing');
+        if (!targetCountry?.id) {
+          console.warn('Cannot load admin boundaries: targetCountry.id is missing');
           return;
         }
         
-        console.log(`Loading admin boundaries for country: ${currentCountry.name} (${currentCountry.iso_code}), ID: ${currentCountry.id}`);
+        console.log(`Loading admin boundaries for country: ${targetCountry.name} (${targetCountry.iso_code}), ID: ${targetCountry.id}`);
         
         const { data: geojsonData, error: geoError } = await supabase.rpc('get_admin_boundaries_geojson', {
           admin_level: 'ADM1',
-          country_id: currentCountry.id,
+          country_id: targetCountry.id,
         });
         
         if (geoError) {
@@ -356,9 +369,9 @@ export default function CountryDashboardPage() {
         } else {
           if (geojsonData && typeof geojsonData === 'object' && 'features' in geojsonData) {
             const featureCount = Array.isArray(geojsonData.features) ? geojsonData.features.length : 0;
-            console.log(`Loaded ${featureCount} admin boundary features for ${currentCountry.name}`);
+            console.log(`Loaded ${featureCount} admin boundary features for ${targetCountry.name}`);
             if (featureCount === 0) {
-              console.warn(`No admin boundaries found for country ${currentCountry.name} (${currentCountry.id})`);
+              console.warn(`No admin boundaries found for country ${targetCountry.name} (${targetCountry.id})`);
             }
             setAdminBoundaryGeo(geojsonData as GeoJSON);
           } else {
@@ -368,7 +381,7 @@ export default function CountryDashboardPage() {
       } catch (err) {
         // Log errors for debugging
         console.error('Error loading admin boundaries:', err);
-        console.error('Country context:', { id: currentCountry?.id, name: currentCountry?.name, iso_code: currentCountry?.iso_code });
+        console.error('Target country:', { id: targetCountry?.id, name: targetCountry?.name, iso_code: targetCountry?.iso_code });
       }
 
       // Count admin boundaries by level
@@ -410,7 +423,7 @@ export default function CountryDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentCountry]);
+  }, [countryCode, availableCountries]);
 
   useEffect(() => {
     loadDashboard();
