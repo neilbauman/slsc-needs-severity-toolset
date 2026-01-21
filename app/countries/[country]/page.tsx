@@ -363,8 +363,8 @@ export default function CountryDashboardPage() {
             console.info('Admin boundaries RPC function not found - skipping map data');
           } else {
             console.error('Failed to load admin boundaries:', geoError);
-            console.error('Country ID used:', currentCountry.id);
-            console.error('Country ISO code:', currentCountry.iso_code);
+            console.error('Country ID used:', targetCountry.id);
+            console.error('Country ISO code:', targetCountry.iso_code);
           }
         } else {
           if (geojsonData && typeof geojsonData === 'object' && 'features' in geojsonData) {
