@@ -172,10 +172,13 @@ def main():
             feature_collection = {"type": "FeatureCollection", "features": batch}
             
             try:
+                # Only clear existing on first batch
+                clear_existing = (i == 0)
                 resp = supabase.rpc("import_admin_boundaries", {
                     "p_country_id": country_id,
                     "p_admin_level": level_key,
-                    "p_boundaries": feature_collection
+                    "p_boundaries": feature_collection,
+                    "p_clear_existing": clear_existing
                 }).execute()
                 
                 if resp.data:

@@ -7,7 +7,8 @@
 CREATE OR REPLACE FUNCTION public.import_admin_boundaries(
   p_country_id UUID,
   p_admin_level TEXT,
-  p_boundaries JSONB
+  p_boundaries JSONB,
+  p_clear_existing BOOLEAN DEFAULT false
 )
 RETURNS TABLE(
   imported_count INTEGER,
@@ -29,10 +30,12 @@ DECLARE
   v_name TEXT;
   v_parent_pcode TEXT;
 BEGIN
-  -- Delete existing boundaries for this country and level
-  DELETE FROM public.admin_boundaries
-  WHERE country_id = p_country_id
-    AND admin_level = p_admin_level;
+  -- Only delete existing boundaries if explicitly requested (first batch)
+  IF p_clear_existing THEN
+    DELETE FROM public.admin_boundaries
+    WHERE country_id = p_country_id
+      AND admin_level = p_admin_level;
+  END IF;
   
   -- Process each feature
   FOR v_feature IN SELECT * FROM jsonb_array_elements(p_boundaries->'features')
