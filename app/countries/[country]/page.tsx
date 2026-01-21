@@ -358,17 +358,35 @@ export default function CountryDashboardPage() {
           country_id: targetCountry.id,
         });
         
-        // If ADM0 doesn't exist, fall back to ADM1
-        if (geoError || !geojsonData || (geojsonData.features && geojsonData.features.length === 0)) {
-          console.log('ADM0 not found, falling back to ADM1 for map bounds');
+        // Check if ADM0 exists but is a Point (not a Polygon) - Points can't be used as boundaries
+        let useAdm0 = false;
+        if (!geoError && geojsonData && geojsonData.features && geojsonData.features.length > 0) {
+          const firstFeature = geojsonData.features[0];
+          // Check if geometry is a Polygon or MultiPolygon (not a Point)
+          if (firstFeature.geometry && 
+              (firstFeature.geometry.type === 'Polygon' || 
+               firstFeature.geometry.type === 'MultiPolygon')) {
+            useAdm0 = true;
+            console.log(`Using ADM0 boundary for ${targetCountry.name}`);
+          } else {
+            console.log(`ADM0 exists but is ${firstFeature.geometry?.type || 'unknown'} type, falling back to ADM1`);
+          }
+        }
+        
+        // If ADM0 doesn't exist or is a Point, fall back to ADM1
+        if (!useAdm0) {
+          if (geoError || !geojsonData || (geojsonData.features && geojsonData.features.length === 0)) {
+            console.log('ADM0 not found, falling back to ADM1 for map bounds');
+          }
           const { data: adm1Data, error: adm1Error } = await supabase.rpc('get_admin_boundaries_geojson', {
             admin_level: 'ADM1',
             country_id: targetCountry.id,
           });
           
-          if (!adm1Error && adm1Data) {
+          if (!adm1Error && adm1Data && adm1Data.features && adm1Data.features.length > 0) {
             geojsonData = adm1Data;
             geoError = null;
+            console.log(`Using ADM1 boundaries (${adm1Data.features.length} features) for ${targetCountry.name}`);
           }
         }
         
