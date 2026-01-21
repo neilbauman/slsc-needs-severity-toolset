@@ -9,7 +9,22 @@ export function createClient(): SupabaseClient {
   if (cached) return cached;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  cached = createSBClient(url, anon, { auth: { persistSession: true } });
+  cached = createSBClient(url, anon, { 
+    auth: { persistSession: true },
+    db: {
+      schema: 'public',
+    },
+    global: {
+      headers: {
+        'x-client-info': 'slsc-toolset',
+      },
+    },
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
+  });
   return cached;
 }
 

@@ -27,26 +27,37 @@ export default function HomePage() {
   const [showFrameworkConfig, setShowFrameworkConfig] = useState(false);
   const [showFrameworkStructure, setShowFrameworkStructure] = useState(false);
 
-  // Load public countries (all active countries)
+  // Load public countries (all active countries) with retry logic
   useEffect(() => {
     let cancelled = false;
+    let retryCount = 0;
+    const maxRetries = 3;
+    const retryDelay = 2000; // 2 seconds
+
     const timeoutId = setTimeout(() => {
       if (loadingCountries && publicCountries.length === 0 && !error) {
         console.warn('Countries query is taking longer than 5 seconds');
-        setError('Countries query is taking longer than expected. Check your Supabase connection.');
+        setError('Countries query is taking longer than expected. Check your Supabase connection. If you haven\'t run the database migrations yet, please run them in your Supabase SQL Editor.');
         setLoadingCountries(false);
       }
     }, 5000);
 
-    async function loadPublicCountries() {
+    async function loadPublicCountries(attempt = 1) {
       try {
         setError(null);
         const supabase = createClient();
-        const { data, error: queryError } = await supabase
-          .from('countries')
-          .select('*')
-          .eq('active', true)
-          .order('name');
+        
+        // Use a simpler query with timeout handling
+        const { data, error: queryError } = await Promise.race([
+          supabase
+            .from('countries')
+            .select('id, iso_code, name, active')
+            .eq('active', true)
+            .order('name'),
+          new Promise<{ data: null; error: { message: string } }>((_, reject) =>
+            setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000)
+          ),
+        ]) as any;
         
         if (cancelled) return;
         
@@ -55,20 +66,36 @@ export default function HomePage() {
           // If table doesn't exist, that's okay - show empty state
           if (queryError.code === 'PGRST116' || queryError.message?.includes('does not exist')) {
             setError('Countries table not set up yet. Please run database migrations.');
+            setPublicCountries([]);
+            setLoadingCountries(false);
+          } else if (attempt < maxRetries && !cancelled) {
+            // Retry on transient errors
+            console.log(`Retrying countries query (attempt ${attempt + 1}/${maxRetries})...`);
+            setTimeout(() => {
+              if (!cancelled) loadPublicCountries(attempt + 1);
+            }, retryDelay);
           } else {
-            setError(`Failed to load countries: ${queryError.message}`);
+            setError(`Failed to load countries: ${queryError.message || 'Connection timeout. Please check your Supabase connection and try refreshing the page.'}`);
+            setPublicCountries([]);
+            setLoadingCountries(false);
           }
-          setPublicCountries([]);
         } else {
           setPublicCountries(data || []);
+          setLoadingCountries(false);
         }
       } catch (err: any) {
         if (cancelled) return;
         console.error('Failed to load countries:', err);
-        setError(err?.message || 'Failed to load countries');
-        setPublicCountries([]);
-      } finally {
-        if (!cancelled) {
+        
+        if (attempt < maxRetries && !cancelled) {
+          // Retry on timeout/network errors
+          console.log(`Retrying countries query after error (attempt ${attempt + 1}/${maxRetries})...`);
+          setTimeout(() => {
+            if (!cancelled) loadPublicCountries(attempt + 1);
+          }, retryDelay);
+        } else {
+          setError(err?.message || 'Failed to load countries. The database connection may be slow or unavailable. Please try refreshing the page.');
+          setPublicCountries([]);
           setLoadingCountries(false);
         }
       }
@@ -154,6 +181,17 @@ export default function HomePage() {
             <p className="text-xs text-yellow-700 mt-2">
               If you haven't run the database migrations yet, please run them in your Supabase SQL Editor.
             </p>
+            <button
+              onClick={() => {
+                setError(null);
+                setLoadingCountries(true);
+                setPublicCountries([]);
+                window.location.reload();
+              }}
+              className="mt-3 px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-sm"
+            >
+              Retry Connection
+            </button>
           </div>
         )}
 
