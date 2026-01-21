@@ -62,7 +62,8 @@ export default function DashboardMap({
     if (features.length > 0) {
       try {
         const bounds = L.geoJSON(features).getBounds();
-        return bounds.getCenter().toArray() as [number, number];
+        const center = bounds.getCenter();
+        return [center.lat, center.lng] as [number, number];
       } catch {
         return defaultCenter;
       }
