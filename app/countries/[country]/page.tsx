@@ -352,42 +352,44 @@ export default function CountryDashboardPage() {
         
         console.log(`Loading admin boundaries for country: ${targetCountry.name} (${targetCountry.iso_code}), ID: ${targetCountry.id}`);
         
-        // First try ADM0 (country boundary) for map bounds
-        let { data: geojsonData, error: geoError } = await supabase.rpc('get_admin_boundaries_geojson', {
-          admin_level: 'ADM0',
-          country_id: targetCountry.id,
-        });
+        // Try to find polygon boundaries at any admin level
+        // Start with ADM0, then try ADM1, ADM2, ADM3 in order
+        let geojsonData: any = null;
+        let geoError: any = null;
+        const adminLevelsToTry = ['ADM0', 'ADM1', 'ADM2', 'ADM3'];
+        let foundPolygons = false;
         
-        // Check if ADM0 exists but is a Point (not a Polygon) - Points can't be used as boundaries
-        let useAdm0 = false;
-        if (!geoError && geojsonData && geojsonData.features && geojsonData.features.length > 0) {
-          const firstFeature = geojsonData.features[0];
-          // Check if geometry is a Polygon or MultiPolygon (not a Point)
-          if (firstFeature.geometry && 
-              (firstFeature.geometry.type === 'Polygon' || 
-               firstFeature.geometry.type === 'MultiPolygon')) {
-            useAdm0 = true;
-            console.log(`Using ADM0 boundary for ${targetCountry.name}`);
-          } else {
-            console.log(`ADM0 exists but is ${firstFeature.geometry?.type || 'unknown'} type, falling back to ADM1`);
-          }
-        }
-        
-        // If ADM0 doesn't exist or is a Point, fall back to ADM1
-        if (!useAdm0) {
-          if (geoError || !geojsonData || (geojsonData.features && geojsonData.features.length === 0)) {
-            console.log('ADM0 not found, falling back to ADM1 for map bounds');
-          }
-          const { data: adm1Data, error: adm1Error } = await supabase.rpc('get_admin_boundaries_geojson', {
-            admin_level: 'ADM1',
+        for (const level of adminLevelsToTry) {
+          const { data: levelData, error: levelError } = await supabase.rpc('get_admin_boundaries_geojson', {
+            admin_level: level,
             country_id: targetCountry.id,
           });
           
-          if (!adm1Error && adm1Data && adm1Data.features && adm1Data.features.length > 0) {
-            geojsonData = adm1Data;
-            geoError = null;
-            console.log(`Using ADM1 boundaries (${adm1Data.features.length} features) for ${targetCountry.name}`);
+          if (!levelError && levelData && levelData.features && levelData.features.length > 0) {
+            // Check if any features are polygons (not points)
+            const polygonFeatures = levelData.features.filter((f: any) => {
+              const geomType = f.geometry?.type;
+              return geomType === 'Polygon' || geomType === 'MultiPolygon';
+            });
+            
+            if (polygonFeatures.length > 0) {
+              geojsonData = {
+                type: 'FeatureCollection',
+                features: polygonFeatures,
+              };
+              geoError = null;
+              foundPolygons = true;
+              console.log(`Found ${polygonFeatures.length} polygon features at ${level} for ${targetCountry.name}`);
+              break;
+            } else {
+              console.log(`All ${level} boundaries are Points, trying next level...`);
+            }
           }
+        }
+        
+        if (!foundPolygons) {
+          console.warn(`No polygon boundaries found at any admin level for ${targetCountry.name}. All boundaries appear to be Points.`);
+          geoError = { message: 'No polygon boundaries available' };
         }
         
         if (geoError) {
