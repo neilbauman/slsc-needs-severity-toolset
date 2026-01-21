@@ -384,7 +384,7 @@ export default function CountryDashboardPage() {
         console.error('Target country:', { id: targetCountry?.id, name: targetCountry?.name, iso_code: targetCountry?.iso_code });
       }
 
-      // Count admin boundaries by level
+      // Count admin boundaries by level - use targetCountry from URL
       const levelCounts = await Promise.all(
         ADMIN_LEVELS.map(async (level) => {
           try {
@@ -392,7 +392,7 @@ export default function CountryDashboardPage() {
               .from('admin_boundaries')
               .select('admin_pcode', { count: 'exact', head: true })
               .eq('admin_level', level)
-              .eq('country_id', currentCountry.id);
+              .eq('country_id', targetCountry.id);
             return result;
           } catch (err) {
             console.warn(`Failed to count ${level}:`, err);
