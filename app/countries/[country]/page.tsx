@@ -403,12 +403,28 @@ export default function CountryDashboardPage() {
           if (geojsonData && typeof geojsonData === 'object' && 'features' in geojsonData) {
             const featureCount = Array.isArray(geojsonData.features) ? geojsonData.features.length : 0;
             console.log(`Loaded ${featureCount} admin boundary features for ${targetCountry.name}`);
-            if (featureCount === 0) {
-              console.warn(`No admin boundaries found for country ${targetCountry.name} (${targetCountry.id})`);
+            
+            // Filter out Point geometries - they can't be used for boundaries
+            const validFeatures = (geojsonData.features || []).filter((f: any) => {
+              const geomType = f.geometry?.type;
+              return geomType && geomType !== 'Point';
+            });
+            
+            if (validFeatures.length === 0) {
+              console.warn(`No valid polygon boundaries found for country ${targetCountry.name} (${targetCountry.id}) - all features are Points or invalid`);
+              // Set empty GeoJSON so map uses country center
+              setAdminBoundaryGeo({ type: 'FeatureCollection', features: [] } as GeoJSON);
+            } else {
+              console.log(`Using ${validFeatures.length} valid polygon features for ${targetCountry.name}`);
+              setAdminBoundaryGeo({
+                type: 'FeatureCollection',
+                features: validFeatures,
+              } as GeoJSON);
             }
-            setAdminBoundaryGeo(geojsonData as GeoJSON);
           } else {
             console.warn('Admin boundaries RPC returned unexpected data format:', geojsonData);
+            // Set empty so map uses country center
+            setAdminBoundaryGeo({ type: 'FeatureCollection', features: [] } as GeoJSON);
           }
         }
       } catch (err) {
@@ -739,6 +755,7 @@ export default function CountryDashboardPage() {
             featureCollection={adminBoundaryGeo}
             headline="National footprint"
             description={`${getAdminLevelName(adminLevels, 1, true)} boundaries shown as the base canvas for layering SSC instances.`}
+            countryCode={targetCountry.iso_code}
           />
         </section>
         {supportingPillars.length > 0 && (

@@ -10,6 +10,7 @@ type DashboardMapProps = {
   featureCollection?: GeoJSONType | null;
   headline?: string;
   description?: string;
+  countryCode?: string; // ISO code for country-specific center
 };
 
 // Component to auto-fit map bounds to features
@@ -63,6 +64,7 @@ export default function DashboardMap({
   featureCollection,
   headline,
   description,
+  countryCode,
 }: DashboardMapProps) {
   const features = useMemo(() => {
     if (!featureCollection) return [];
@@ -72,19 +74,35 @@ export default function DashboardMap({
     return [featureCollection];
   }, [featureCollection]);
 
-  // Calculate center from features if available, otherwise use default
+  // Get country-specific center if provided, otherwise use default
+  const countryCenter = countryCode && countryCenters[countryCode] 
+    ? countryCenters[countryCode] 
+    : defaultCenter;
+
+  // Calculate center from features if available, otherwise use country-specific center
   const mapCenter = useMemo(() => {
     if (features.length > 0) {
       try {
-        const bounds = L.geoJSON(features).getBounds();
-        const center = bounds.getCenter();
-        return [center.lat, center.lng] as [number, number];
-      } catch {
-        return defaultCenter;
+        // Filter out Point geometries for bounds calculation
+        const validFeatures = features.filter((f: any) => {
+          const geomType = f.geometry?.type;
+          return geomType && geomType !== 'Point';
+        });
+        
+        if (validFeatures.length > 0) {
+          const bounds = L.geoJSON(validFeatures).getBounds();
+          if (bounds.isValid()) {
+            const center = bounds.getCenter();
+            return [center.lat, center.lng] as [number, number];
+          }
+        }
+      } catch (err) {
+        console.warn('Error calculating center from features:', err);
       }
     }
-    return defaultCenter;
-  }, [features]);
+    // Fall back to country-specific center or default
+    return countryCenter;
+  }, [features, countryCenter]);
 
   const initialZoom = features.length > 0 ? 6 : 5;
 
