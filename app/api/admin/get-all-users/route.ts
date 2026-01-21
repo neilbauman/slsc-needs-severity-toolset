@@ -1,31 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 
 export async function GET(req: Request) {
   try {
-    // Get the current user's session from cookies
-    const cookieStore = await cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    
-    // Create a client that can read cookies for session
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-      },
-    });
-    
-    // Check if user is authenticated and is a site admin
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    
-    if (sessionError || !session) {
+    // Get the current user ID from the custom header sent by the client
+    const headersList = await headers();
+    const currentUserId = headersList.get('x-user-id');
+
+    if (!currentUserId) {
       return NextResponse.json(
-        { success: false, error: 'Not authenticated' },
-        { status: 401 }
+        { success: false, error: 'User ID is required' },
+        { status: 400 }
       );
     }
 
@@ -34,7 +20,7 @@ export async function GET(req: Request) {
     const { data: userCountries, error: userCountriesError } = await serverClient
       .from('user_countries')
       .select('role')
-      .eq('user_id', session.user.id)
+      .eq('user_id', currentUserId)
       .eq('role', 'admin')
       .limit(1);
 

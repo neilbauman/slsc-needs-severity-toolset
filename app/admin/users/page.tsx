@@ -78,7 +78,17 @@ export default function UserManagementPage() {
       setCountries(countriesData || []);
 
       // Load all users using API route (uses service role to access auth.users)
-      const response = await fetch('/api/admin/get-all-users');
+      // Get current user's session to send user ID
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/admin/get-all-users', {
+        headers: {
+          'x-user-id': session.user.id,
+        },
+      });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Failed to load users' }));
