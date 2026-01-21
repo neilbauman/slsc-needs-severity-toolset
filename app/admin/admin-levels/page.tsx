@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
@@ -8,20 +8,27 @@ import CountryAdminLevelsConfig from '@/components/CountryAdminLevelsConfig';
 import { Shield, Globe } from 'lucide-react';
 import Link from 'next/link';
 
-export default function AdminLevelsPage() {
+function AdminLevelsContent() {
   const { user, loading: authLoading } = useAuth();
   const { isSiteAdmin, loading: countryLoading, availableCountries } = useCountry();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [selectedCountryId, setSelectedCountryId] = useState<string>('');
+  const [mounted, setMounted] = useState(false);
+  
+  // Ensure we're on the client before accessing searchParams
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   
   // Pre-select country from URL parameter
   useEffect(() => {
+    if (!mounted) return;
     const countryIdParam = searchParams.get('countryId');
     if (countryIdParam && availableCountries.some(c => c.id === countryIdParam)) {
       setSelectedCountryId(countryIdParam);
     }
-  }, [searchParams, availableCountries]);
+  }, [mounted, searchParams, availableCountries]);
 
   // Redirect if not site admin
   if (!authLoading && !countryLoading && (!user || !isSiteAdmin)) {
@@ -101,5 +108,26 @@ export default function AdminLevelsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Force dynamic rendering to prevent static generation issues with useSearchParams
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+// Note: This page uses useSearchParams which requires dynamic rendering
+// The Suspense boundary ensures proper client-side rendering
+export default function AdminLevelsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <AdminLevelsContent />
+    </Suspense>
   );
 }
