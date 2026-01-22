@@ -54,7 +54,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const foundUser = users?.find(u => u.email === targetEmail);
+    const usersList: any[] = users || [];
+    const foundUser = usersList.find((u: any) => u.email === targetEmail);
     
     if (!foundUser) {
       return NextResponse.json(
