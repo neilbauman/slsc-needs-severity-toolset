@@ -34,16 +34,41 @@ def get_all_datasets(supabase, country_id=None):
 
 def get_boundaries(supabase, country_id, admin_level):
     """Get all boundaries for a country and admin level."""
-    resp = supabase.table("admin_boundaries").select("admin_pcode, name").eq("country_id", country_id).eq("admin_level", admin_level).execute()
-    return resp.data
+    all_data = []
+    page_size = 1000
+    offset = 0
+    
+    while True:
+        resp = supabase.table("admin_boundaries").select("admin_pcode, name").eq("country_id", country_id).eq("admin_level", admin_level).range(offset, offset + page_size - 1).execute()
+        if not resp.data:
+            break
+        all_data.extend(resp.data)
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+    
+    return all_data
 
 def get_dataset_values(supabase, dataset_id, dataset_type):
     """Get all values for a dataset."""
-    if dataset_type == "numeric":
-        resp = supabase.table("dataset_values_numeric").select("admin_pcode, value").eq("dataset_id", dataset_id).execute()
-    else:
-        resp = supabase.table("dataset_values_categorical").select("admin_pcode, category, value").eq("dataset_id", dataset_id).execute()
-    return resp.data
+    all_data = []
+    page_size = 1000
+    offset = 0
+    
+    while True:
+        if dataset_type == "numeric":
+            resp = supabase.table("dataset_values_numeric").select("admin_pcode, value").eq("dataset_id", dataset_id).range(offset, offset + page_size - 1).execute()
+        else:
+            resp = supabase.table("dataset_values_categorical").select("admin_pcode, category, value").eq("dataset_id", dataset_id).range(offset, offset + page_size - 1).execute()
+        
+        if not resp.data:
+            break
+        all_data.extend(resp.data)
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+    
+    return all_data
 
 def audit_dataset(supabase, dataset, country):
     """Audit a single dataset."""
