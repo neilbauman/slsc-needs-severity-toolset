@@ -124,6 +124,7 @@ def main():
                          "replaced with actual data when available. Source: Estimated based on World Bank " \
                          "province-level poverty data (2016) and regional patterns."
     
+    # Check if category column exists, otherwise store in metadata
     dataset_metadata = {
         "name": dataset_name,
         "description": dataset_description,
@@ -143,6 +144,17 @@ def main():
             "created_at": pd.Timestamp.now().isoformat(),
         }
     }
+    
+    # Try to set category as a column if it exists
+    try:
+        # Check if category column exists by trying a test query
+        test_resp = supabase.table("datasets").select("category").limit(1).execute()
+        if test_resp.data is not None:
+            # Category column exists
+            dataset_metadata["category"] = "Underlying Vulnerability"
+    except:
+        # Category column doesn't exist, it's stored in metadata (which we already set)
+        pass
     
     # Insert dataset
     print("Creating placeholder dataset...")
