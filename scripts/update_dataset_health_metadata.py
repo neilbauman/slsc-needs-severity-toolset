@@ -286,6 +286,10 @@ def main():
             # Determine cleaning status
             cleaning_status = determine_cleaning_status(health_metrics, dataset, supabase)
             
+            # Override status if health metrics indicate ready (even if existing status says otherwise)
+            if health_metrics and health_metrics.get("alignment_rate", 0) >= 0.95 and health_metrics.get("completeness", 0) >= 0.95:
+                cleaning_status = "ready"
+            
             # Update metadata
             current_metadata = dataset.get("metadata") or {}
             updated_metadata = {
