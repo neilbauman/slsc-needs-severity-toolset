@@ -355,11 +355,33 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
     
     try {
-      // Fetch all values - ADM4 datasets can have 40k+ values
-      const { data: values } = await supabase
-        .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
-        .select('admin_pcode, value')
-        .eq('dataset_id', dataset.id);
+      // Fetch all values with pagination - ADM4 datasets can have 40k+ values
+      // Supabase has a default limit of 1000, so we need to paginate
+      const tableName = dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
+      const pageSize = 10000;
+      let allValues: any[] = [];
+      let page = 0;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const from = page * pageSize;
+        const to = from + pageSize - 1;
+        const { data: pageData } = await supabase
+          .from(tableName)
+          .select('admin_pcode, value')
+          .eq('dataset_id', dataset.id)
+          .range(from, to);
+        
+        if (pageData && pageData.length > 0) {
+          allValues = allValues.concat(pageData);
+          hasMore = pageData.length === pageSize;
+          page++;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      const values = allValues;
 
       if (!values || values.length === 0) {
         setLoadingDatasets(prev => {
