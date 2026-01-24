@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -10,38 +9,42 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'datasetId required' }, { status: 400 });
   }
 
-  // Create client inside request handler to ensure fresh env vars
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // Use RPC function that returns all values as JSON (bypasses PostgREST row limit)
-    const { data, error } = await supabase.rpc('get_dataset_values_json', {
-      p_dataset_id: datasetId,
-      p_type: type
+    // Use direct REST API call instead of JS client (debugging connection issue)
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/get_dataset_values_json`, {
+      method: 'POST',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_dataset_id: datasetId,
+        p_type: type
+      }),
     });
 
-    if (error) {
-      console.error('Error fetching dataset values:', error);
+    if (!response.ok) {
+      const errorText = await response.text();
       return NextResponse.json({ 
-        error: error.message,
-        supabaseUrl: supabaseUrl?.substring(0, 30) + '...',
+        error: errorText,
+        status: response.status,
+        supabaseUrl: supabaseUrl?.substring(0, 40) + '...',
         datasetId,
         type
       }, { status: 500 });
     }
 
-    // data is already a JSON array
-    const values = data || [];
+    const values = await response.json();
     return NextResponse.json({ 
       values, 
-      count: values.length,
+      count: Array.isArray(values) ? values.length : 0,
       datasetId,
       type,
-      supabaseUrl: supabaseUrl?.substring(0, 40) + '...',
-      rawDataType: typeof data,
-      isArray: Array.isArray(data)
+      supabaseUrl: supabaseUrl?.substring(0, 40) + '...'
     });
   } catch (error: any) {
     console.error('Error in datasetValues API:', error);
