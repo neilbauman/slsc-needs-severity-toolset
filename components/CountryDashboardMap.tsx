@@ -425,7 +425,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
       const maxValue = Math.max(...numericValues);
       const minValue = Math.min(...numericValues);
-      const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
+      const valueMap = new Map<string, number>(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
       
       console.log(`[Dataset ${dataset.name}] Boundaries: ${boundaries.features?.length}, ValueMap size: ${valueMap.size}`);
 
@@ -435,7 +435,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       const coloredFeatures = boundaries.features.map((f: any) => {
         const pcode = f.properties?.admin_pcode;
         const value = valueMap.get(pcode);
-        const normalized = maxValue > minValue && value !== undefined && !isNaN(value) 
+        const normalized = maxValue > minValue && value !== undefined && !isNaN(value as number) 
           ? ((value - minValue) / (maxValue - minValue)) 
           : 0.5;
         
