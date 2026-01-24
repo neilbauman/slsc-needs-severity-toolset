@@ -75,18 +75,25 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
   // Track loading states for individual layers
   const [loadingLevels, setLoadingLevels] = useState<Set<string>>(new Set(['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4']));
   const [loadingDatasets, setLoadingDatasets] = useState<Set<string>>(new Set());
+  
+  // Track failed/error states
+  const [failedLevels, setFailedLevels] = useState<Set<string>>(new Set());
+  const [failedDatasets, setFailedDatasets] = useState<Set<string>>(new Set());
 
   // Load admin boundaries for each level
   useEffect(() => {
     if (!countryId) return;
 
-    // Reset loading states
+    // Reset loading and error states
     setLoadingLevels(new Set(['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4']));
+    setFailedLevels(new Set());
+    setAdminLevelGeo({});
 
     const loadBoundaries = async () => {
       setLoading(true);
       
       // Load ADM0 first (country boundary) for quick initial display
+      let adm0Success = false;
       try {
         const { data: adm0Data, error: adm0Error } = await supabase.rpc('get_admin_boundaries_geojson', {
           admin_level: 'ADM0',
@@ -107,10 +114,17 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                 features: polygonFeatures,
               } as GeoJSONType,
             }));
+            adm0Success = true;
           }
+        }
+        
+        if (!adm0Success && adm0Error) {
+          console.warn('ADM0 load error:', adm0Error);
+          setFailedLevels(prev => new Set(prev).add('ADM0'));
         }
       } catch (err) {
         console.warn('Failed to load ADM0 boundaries:', err);
+        setFailedLevels(prev => new Set(prev).add('ADM0'));
       }
       
       // Mark ADM0 as done loading
@@ -126,13 +140,17 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       const otherLevels = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
       
       otherLevels.forEach(async (level) => {
+        let success = false;
         try {
           const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
             admin_level: level,
             country_id: countryId,
           });
 
-          if (!error && data && data.features && data.features.length > 0) {
+          if (error) {
+            console.warn(`${level} load error:`, error);
+            setFailedLevels(prev => new Set(prev).add(level));
+          } else if (data && data.features && data.features.length > 0) {
             const polygonFeatures = data.features.filter((f: any) => {
               const geomType = f.geometry?.type;
               return geomType === 'Polygon' || geomType === 'MultiPolygon';
@@ -146,10 +164,12 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                   features: polygonFeatures,
                 } as GeoJSONType,
               }));
+              success = true;
             }
           }
         } catch (err) {
           console.warn(`Failed to load ${level} boundaries:`, err);
+          setFailedLevels(prev => new Set(prev).add(level));
         }
         
         // Mark this level as done loading
@@ -180,6 +200,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         setDatasets(data);
         // Mark all datasets as loading initially
         setLoadingDatasets(new Set(data.map((d: any) => d.id)));
+        setFailedDatasets(new Set());
       }
     };
 
@@ -312,6 +333,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         }));
       } catch (err) {
         console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
+        setFailedDatasets(prev => new Set(prev).add(dataset.id));
       }
       
       // Mark this dataset as done loading
@@ -505,6 +527,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               <div className="space-y-2">
                 {['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
                   const isLoading = loadingLevels.has(level);
+                  const hasFailed = failedLevels.has(level);
                   const hasData = adminLevelGeo[level] !== null && adminLevelGeo[level] !== undefined;
                   const isVisible = visibleLevels.has(level);
                   const levelNum = parseInt(level.replace('ADM', ''));
@@ -515,10 +538,12 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     <button
                       key={level}
                       onClick={() => toggleLevel(level)}
-                      disabled={isLoading || !hasData}
+                      disabled={isLoading || (!hasData && !hasFailed)}
                       className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
                         isLoading
                           ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
+                          : hasFailed && !hasData
+                          ? 'bg-red-50 text-red-600 border-red-200 cursor-not-allowed'
                           : isVisible && hasData
                           ? 'bg-amber-500 text-white border-amber-600'
                           : hasData
@@ -542,6 +567,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                       {isLoading && (
                         <span className="text-xs opacity-75">Loading...</span>
                       )}
+                      {hasFailed && !hasData && !isLoading && (
+                        <span className="text-xs text-red-500">Timeout</span>
+                      )}
                     </button>
                   );
                 })}
@@ -555,6 +583,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                 <div className="space-y-2">
                   {datasets.map(dataset => {
                     const isLoading = loadingDatasets.has(dataset.id);
+                    const hasFailed = failedDatasets.has(dataset.id);
                     const hasData = datasetLayers[dataset.id] !== undefined;
                     const isVisible = visibleDatasets.has(dataset.id);
                     
@@ -562,10 +591,12 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                       <button
                         key={dataset.id}
                         onClick={() => toggleDataset(dataset.id)}
-                        disabled={isLoading || !hasData}
+                        disabled={isLoading || (!hasData && !hasFailed)}
                         className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
                           isLoading
                             ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
+                            : hasFailed && !hasData
+                            ? 'bg-red-50 text-red-600 border-red-200 cursor-not-allowed'
                             : isVisible && hasData
                             ? 'bg-blue-500 text-white border-blue-600'
                             : hasData
@@ -583,13 +614,16 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                           )}
                           <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
                           <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-                            isVisible ? 'bg-blue-600' : 'bg-gray-200 text-gray-600'
+                            isVisible ? 'bg-blue-600' : hasFailed ? 'bg-red-200 text-red-700' : 'bg-gray-200 text-gray-600'
                           }`}>
                             {dataset.admin_level}
                           </span>
                         </span>
                         {isLoading && (
                           <span className="text-xs opacity-75 flex-shrink-0">Loading...</span>
+                        )}
+                        {hasFailed && !hasData && !isLoading && (
+                          <span className="text-xs text-red-500 flex-shrink-0">Error</span>
                         )}
                       </button>
                     );
