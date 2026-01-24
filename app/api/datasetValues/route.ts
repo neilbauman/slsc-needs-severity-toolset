@@ -30,7 +30,12 @@ export async function GET(request: NextRequest) {
 
     // data is already a JSON array
     const values = data || [];
-    return NextResponse.json({ values, count: values.length });
+    return NextResponse.json({ 
+      values, 
+      count: values.length,
+      datasetId,
+      type
+    });
   } catch (error: any) {
     console.error('Error in datasetValues API:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
