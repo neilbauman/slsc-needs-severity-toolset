@@ -34,7 +34,7 @@ export default function Header() {
   };
 
   return (
-    <header className="w-full bg-[#0F2E4A] text-white shadow-sm border-b border-gray-700">
+    <header className="w-full bg-[#0F2E4A] text-white shadow-sm border-b border-gray-700 relative z-50">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-3">
         <Link href="/" className="text-lg font-semibold tracking-wide hover:text-blue-300 transition-colors">
           SLSC Needs Severity Toolset
