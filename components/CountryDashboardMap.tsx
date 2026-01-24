@@ -211,12 +211,15 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
         // Use cached boundaries if available, otherwise fetch
         let boundaries: any = adminLevelGeo[dataset.admin_level];
+        let boundariesWereFetched = false;
+        
         if (!boundaries) {
           const { data: boundaryData } = await supabase.rpc('get_admin_boundaries_geojson', {
             admin_level: dataset.admin_level,
             country_id: countryId,
           });
           boundaries = boundaryData;
+          boundariesWereFetched = true;
         }
 
         if (!boundaries || !boundaries.features) {
@@ -226,6 +229,31 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             return next;
           });
           return;
+        }
+        
+        // Cache boundaries back to adminLevelGeo if we fetched them
+        // This helps when the admin level toggle didn't load but the dataset did
+        if (boundariesWereFetched && boundaries.features.length > 0) {
+          const polygonFeatures = boundaries.features.filter((f: any) => {
+            const geomType = f.geometry?.type;
+            return geomType === 'Polygon' || geomType === 'MultiPolygon';
+          });
+          
+          if (polygonFeatures.length > 0) {
+            setAdminLevelGeo(prev => ({
+              ...prev,
+              [dataset.admin_level]: {
+                type: 'FeatureCollection',
+                features: polygonFeatures,
+              } as GeoJSONType,
+            }));
+            // Also remove from loading state if still there
+            setLoadingLevels(prev => {
+              const next = new Set(prev);
+              next.delete(dataset.admin_level);
+              return next;
+            });
+          }
         }
 
         // Create value map and calculate min/max
@@ -391,8 +419,8 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       </div>
 
       <div className="flex gap-0">
-        {/* Map - Square format */}
-        <div className="flex-1 aspect-square min-h-[500px] relative">
+        {/* Map - Constrained height to fit on screen */}
+        <div className="flex-1 h-[450px] max-h-[60vh] relative">
           {loading ? (
             <div className="h-full flex items-center justify-center text-gray-500">
               Loading map...
@@ -545,18 +573,23 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                             : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                         }`}
                       >
-                        <span className="flex items-center gap-2">
+                        <span className="flex items-center gap-2 flex-1 min-w-0">
                           {isLoading ? (
-                            <Loader2 size={14} className="animate-spin" />
+                            <Loader2 size={14} className="animate-spin flex-shrink-0" />
                           ) : isVisible ? (
-                            <Eye size={14} />
+                            <Eye size={14} className="flex-shrink-0" />
                           ) : (
-                            <EyeOff size={14} />
+                            <EyeOff size={14} className="flex-shrink-0" />
                           )}
                           <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
+                            isVisible ? 'bg-blue-600' : 'bg-gray-200 text-gray-600'
+                          }`}>
+                            {dataset.admin_level}
+                          </span>
                         </span>
                         {isLoading && (
-                          <span className="text-xs opacity-75">Loading...</span>
+                          <span className="text-xs opacity-75 flex-shrink-0">Loading...</span>
                         )}
                       </button>
                     );
