@@ -425,6 +425,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       const minValue = Math.min(...numericValues);
       const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
 
+      // 5-class sequential color palette (blue to green)
+      const colorClasses = ['#2166ac', '#67a9cf', '#d1e5f0', '#91cf60', '#1a9850'];
+      
       const coloredFeatures = boundaries.features.map((f: any) => {
         const pcode = f.properties?.admin_pcode;
         const value = valueMap.get(pcode);
@@ -432,8 +435,8 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
           ? ((value - minValue) / (maxValue - minValue)) 
           : 0.5;
         
-        const hue = 240 - (normalized * 120);
-        const color = `hsl(${hue}, 70%, 50%)`;
+        const classIndex = Math.min(Math.floor(normalized * 5), 4);
+        const color = colorClasses[classIndex];
 
         return {
           ...f,
@@ -567,16 +570,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       loadDatasetLayer(dataset);
     }
   }, [datasets, loadDatasetLayer]);
-
-  const generateColorScale = (steps: number = 5) => {
-    const colors: string[] = [];
-    for (let i = 0; i <= steps; i++) {
-      const normalized = i / steps;
-      const hue = 240 - (normalized * 120);
-      colors.push(`hsl(${hue}, 70%, 50%)`);
-    }
-    return colors;
-  };
 
   const formatValue = (value: number) => {
     if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
@@ -770,44 +763,35 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               <div className="p-3">
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Legend</p>
                 <p className="text-[11px] text-gray-700 font-medium mb-2 truncate" title={activeDatasetLayer.datasetName}>
-                  {activeDatasetLayer.datasetName.replace(/Sri Lanka\s*/i, '').replace(/Mozambique\s*/i, '').split(' - ')[0]}
+                  {activeDatasetLayer.datasetName.replace(/Sri Lanka\s*/i, '').replace(/Mozambique\s*/i, '').replace(/Philippines\s*/i, '').split(' - ')[0]}
                 </p>
                 
-                {/* Compact Color Scale */}
-                <div className="mb-2">
-                  <div className="flex items-center gap-0.5 mb-1">
-                    {generateColorScale(5).map((color, idx) => (
-                      <div
-                        key={idx}
-                        className="flex-1 h-3 first:rounded-l last:rounded-r"
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex justify-between text-[9px] text-gray-500">
-                    <span>{formatValue(activeDatasetLayer.minValue)}</span>
-                    <span>{formatValue(activeDatasetLayer.maxValue)}</span>
-                  </div>
-                </div>
-
-                {/* 5-class breakpoints */}
-                <div className="space-y-0.5 text-[9px] text-gray-500">
-                  {[
-                    { pct: 0, label: 'Low' },
-                    { pct: 0.25, label: 'Low-Mid' },
-                    { pct: 0.5, label: 'Mid' },
-                    { pct: 0.75, label: 'Mid-High' },
-                    { pct: 1, label: 'High' }
-                  ].map(({ pct, label }, idx) => {
-                    const value = activeDatasetLayer.minValue + (activeDatasetLayer.maxValue - activeDatasetLayer.minValue) * pct;
-                    const hue = 240 - (pct * 120);
-                    return (
-                      <div key={idx} className="flex items-center gap-1">
-                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: `hsl(${hue}, 70%, 50%)` }} />
-                        <span>{label}: {formatValue(value)}</span>
+                {/* 5-class discrete color scale */}
+                <div className="space-y-1">
+                  {(() => {
+                    const min = activeDatasetLayer.minValue;
+                    const max = activeDatasetLayer.maxValue;
+                    const range = max - min;
+                    const classes = [
+                      { color: '#2166ac', from: min, to: min + range * 0.2 },
+                      { color: '#67a9cf', from: min + range * 0.2, to: min + range * 0.4 },
+                      { color: '#d1e5f0', from: min + range * 0.4, to: min + range * 0.6 },
+                      { color: '#91cf60', from: min + range * 0.6, to: min + range * 0.8 },
+                      { color: '#1a9850', from: min + range * 0.8, to: max },
+                    ];
+                    
+                    return classes.map((cls, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div 
+                          className="w-6 h-3 rounded-sm flex-shrink-0" 
+                          style={{ backgroundColor: cls.color }} 
+                        />
+                        <span className="text-[9px] text-gray-600">
+                          {formatValue(cls.from)} – {formatValue(cls.to)}
+                        </span>
                       </div>
-                    );
-                  })}
+                    ));
+                  })()}
                 </div>
               </div>
             ) : (
