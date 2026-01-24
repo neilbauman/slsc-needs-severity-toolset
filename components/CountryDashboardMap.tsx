@@ -47,12 +47,32 @@ function setCachedGeoJSON(key: string, data: GeoJSONType): void {
   }
 }
 
+// Minimum expected bounds size for a country (in degrees)
+// If bounds are smaller than this, they're likely incomplete data
+const MIN_COUNTRY_BOUNDS_SIZE = 2; // ~220km
+
 // Component to auto-fit map bounds to features
 function MapBoundsController({ features, countryCode }: { features: any[]; countryCode?: string }) {
   const map = useMap();
   const prevFeaturesLengthRef = useRef(0);
+  const hasInitializedRef = useRef(false);
   
-  // Fit bounds when features change
+  // Set initial view based on country center immediately
+  useEffect(() => {
+    if (countryCode && countryCenters[countryCode] && !hasInitializedRef.current) {
+      const center = countryCenters[countryCode];
+      map.setView(center, 6, { animate: false });
+      hasInitializedRef.current = true;
+    }
+  }, [countryCode, map]);
+
+  // Reset refs when country changes
+  useEffect(() => {
+    prevFeaturesLengthRef.current = 0;
+    hasInitializedRef.current = false;
+  }, [countryCode]);
+  
+  // Fit bounds when features change, but validate bounds are reasonable
   useEffect(() => {
     if (features.length > 0 && features.length !== prevFeaturesLengthRef.current) {
       prevFeaturesLengthRef.current = features.length;
@@ -68,34 +88,35 @@ function MapBoundsController({ features, countryCode }: { features: any[]; count
           const bounds = geoJsonLayer.getBounds();
           
           if (bounds.isValid()) {
-            // Use requestAnimationFrame to ensure map is ready
-            requestAnimationFrame(() => {
-              map.fitBounds(bounds, { 
-                padding: [20, 20],
-                maxZoom: 8,
-                animate: false
+            // Check if bounds are reasonable (not too small)
+            const latSpan = bounds.getNorth() - bounds.getSouth();
+            const lngSpan = bounds.getEast() - bounds.getWest();
+            const boundsSize = Math.max(latSpan, lngSpan);
+            
+            // Only fit if bounds are large enough to be a real country boundary
+            // or if we have more than just ADM0 features
+            if (boundsSize >= MIN_COUNTRY_BOUNDS_SIZE || features.length > 1) {
+              requestAnimationFrame(() => {
+                map.fitBounds(bounds, { 
+                  padding: [20, 20],
+                  maxZoom: 8,
+                  animate: false
+                });
               });
-            });
+            } else {
+              // Bounds too small - likely incomplete ADM0, use country center
+              if (countryCode && countryCenters[countryCode]) {
+                const center = countryCenters[countryCode];
+                map.setView(center, 6, { animate: false });
+              }
+            }
           }
         }
       } catch (err) {
         console.error("Error fitting bounds:", err);
       }
     }
-  }, [features, map]);
-
-  // Set initial view based on country center when no features yet
-  useEffect(() => {
-    if (features.length === 0 && countryCode && countryCenters[countryCode]) {
-      const center = countryCenters[countryCode];
-      map.setView(center, 6, { animate: false });
-    }
-  }, [countryCode, features.length, map]);
-
-  // Reset ref when country changes
-  useEffect(() => {
-    prevFeaturesLengthRef.current = 0;
-  }, [countryCode]);
+  }, [features, map, countryCode]);
 
   return null;
 }
