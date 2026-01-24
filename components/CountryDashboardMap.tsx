@@ -619,9 +619,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     data={geo as GeoJsonObject}
                     style={() => ({
                       color: '#2563eb',
-                      weight: 2,
+                      weight: 1,
                       fillColor: '#93c5fd',
-                      fillOpacity: 0.15,
+                      fillOpacity: 0.1,
                     })}
                   />
                 );
@@ -635,10 +635,10 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     key={datasetId}
                     data={layer.data as GeoJsonObject}
                     style={(feature: any) => ({
-                      color: feature?.properties?._color || layer.color,
-                      weight: 1,
+                      color: '#333',
+                      weight: 0.5,
                       fillColor: feature?.properties?._color || layer.color,
-                      fillOpacity: 0.6,
+                      fillOpacity: 0.7,
                     })}
                     onEachFeature={(feature, layer) => {
                       const value = feature.properties?.value;
