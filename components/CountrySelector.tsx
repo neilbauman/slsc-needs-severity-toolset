@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useCountry } from '@/lib/countryContext';
 import { ChevronDown, Globe } from 'lucide-react';
 
@@ -8,6 +9,7 @@ export default function CountrySelector() {
   const { currentCountry, setCurrentCountry, availableCountries, loading, isSiteAdmin } = useCountry();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -26,8 +28,11 @@ export default function CountrySelector() {
   }
 
   const handleCountrySelect = (country: typeof currentCountry) => {
+    if (!country) return;
     setCurrentCountry(country);
     setIsOpen(false);
+    // Navigate to the country's dashboard
+    router.push(`/countries/${country.iso_code.toLowerCase()}`);
   };
 
   return (
