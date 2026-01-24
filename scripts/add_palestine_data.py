@@ -177,33 +177,14 @@ def import_boundaries(supabase, country_id: str, output_dir: Path):
             z.extractall(extract_dir)
         print(f"✓ Extracted to {extract_dir}")
     
-    # Find shapefiles, GeoJSON, or Geodatabase files
+    # Find shapefiles or GeoJSON files
     shp_files = sorted(extract_dir.glob("*.shp"))
     geojson_files = sorted(extract_dir.glob("*.geojson"))
-    gdb_dirs = [d for d in extract_dir.iterdir() if d.is_dir() and d.suffix == ".gdb" or "gdb" in d.name.lower()]
     
-    if not shp_files and not geojson_files and not gdb_dirs:
-        print("Error: No shapefiles, GeoJSON, or Geodatabase files found")
+    if not shp_files and not geojson_files:
+        print("Error: No shapefiles or GeoJSON files found")
+        print(f"Files in directory: {list(extract_dir.iterdir())}")
         return False
-    
-    # If we have a geodatabase, read from it
-    if gdb_dirs:
-        print(f"Found Geodatabase: {gdb_dirs[0].name}")
-        # Geodatabase is a directory, we'll read layers from it
-        import fiona
-        layers = fiona.listlayers(str(gdb_dirs[0]))
-        print(f"Available layers: {layers}")
-        # For now, we'll process each layer as a separate file
-        shp_files = []
-        for layer in layers:
-            try:
-                gdf = gpd.read_file(str(gdb_dirs[0]), layer=layer)
-                # Save as temporary shapefile for processing
-                temp_shp = extract_dir / f"{layer}.shp"
-                gdf.to_file(temp_shp)
-                shp_files.append(temp_shp)
-            except Exception as e:
-                print(f"  ⚠️  Could not read layer {layer}: {e}")
     
     if not shp_files:
         shp_files = geojson_files

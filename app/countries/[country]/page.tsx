@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Activity, AlertTriangle, Database, Layers, MapPinned, RefreshCcw, ArrowLeft } from 'lucide-react';
+import { Activity, AlertTriangle, Database, Layers, MapPinned, RefreshCcw, ArrowLeft, Settings, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import dynamic from 'next/dynamic';
 import type { GeoJSON } from 'geojson';
 import { useCountry } from '@/lib/countryContext';
 import { getAdminLevelName, getAdminLevelNamesMap } from '@/lib/adminLevelNames';
 import ProtectedRoute from '@/components/ProtectedRoute';
-
-const DashboardMap = dynamic(() => import('@/components/DashboardMap'), { ssr: false });
+import CountryDashboardMap from '@/components/CountryDashboardMap';
+import DatasetDetailDrawer from '@/components/DatasetDetailDrawer';
 
 type Dataset = {
   id: string;
@@ -267,6 +267,8 @@ export default function CountryDashboardPage() {
     ADM4: 0,
     ADM5: 0,
   });
+  const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
+  const [drawerMode, setDrawerMode] = useState<'view' | 'edit'>('view');
 
   // Set current country based on URL
   useEffect(() => {
@@ -661,6 +663,170 @@ export default function CountryDashboardPage() {
           </div>
         )}
 
+        {/* MAP SECTION - At the top */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Country Map</h2>
+            <p className="text-sm text-gray-600">
+              Toggle admin levels and dataset overlays (population, poverty, etc.) to explore geographic data coverage
+            </p>
+          </div>
+          {currentCountry && (
+            <CountryDashboardMap
+              countryId={currentCountry.id}
+              countryCode={currentCountry.iso_code}
+              adminLevels={adminLevels}
+            />
+          )}
+        </section>
+
+        {/* ADMIN LEVEL NAMING SECTION */}
+        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">Administrative Structure</p>
+              <h2 className="text-lg font-semibold text-gray-900">Admin Level Naming</h2>
+              <p className="text-sm text-gray-600 mt-1">Custom administrative level names for {currentCountry.name}</p>
+            </div>
+            <Link href="/datasets?focus=admin_boundaries" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
+              Manage boundaries
+            </Link>
+          </div>
+          
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {['ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
+              const levelNum = parseInt(level.replace('ADM', ''));
+              const levelName = getAdminLevelName(adminLevels, levelNum, false);
+              const count = boundaryCounts[level] || 0;
+              
+              return (
+                <div key={level} className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-gray-500">{level}</span>
+                    <span className="text-xs text-gray-400">{count} boundaries</span>
+                  </div>
+                  <p className="text-base font-semibold text-gray-900">{levelName}</p>
+                  {count === 0 && (
+                    <p className="text-xs text-amber-600 mt-1">No boundaries imported</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* CORE DATASETS SECTION */}
+        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">Reference Layers</p>
+              <h2 className="text-lg font-semibold text-gray-900">Core Datasets</h2>
+              <p className="text-sm text-gray-600 mt-1">Population, boundaries, and baseline reference data with health metrics</p>
+            </div>
+            <Link href="/datasets?focus=population" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
+              Manage core datasets
+            </Link>
+          </div>
+
+          {(() => {
+            const coreDatasets = datasets.filter(d => {
+              const text = `${d.name} ${d.description || ''}`.toLowerCase();
+              return text.includes('population') || text.includes('boundary') || d.is_baseline;
+            });
+
+            const getHealthChip = (dataset: Dataset) => {
+              const health = dataset?.metadata?.data_health;
+              if (!health || health.alignment_rate === undefined) {
+                return { label: '—', color: 'bg-gray-100 text-gray-500', percent: null };
+              }
+              const percent = Math.round((health.alignment_rate || 0) * 100);
+              let color = 'bg-green-100 text-green-700';
+              if (percent < 60) {
+                color = 'bg-red-100 text-red-700';
+              } else if (percent < 85) {
+                color = 'bg-amber-100 text-amber-700';
+              }
+              return { label: `${percent}%`, color, percent };
+            };
+
+            const getStatusChip = (dataset: Dataset) => {
+              const status = dataset?.metadata?.cleaning_status || dataset?.metadata?.readiness || 'needs_review';
+              const statusMap: Record<string, { label: string; color: string }> = {
+                ready: { label: 'Ready', color: 'bg-green-100 text-green-700' },
+                in_progress: { label: 'In cleaning', color: 'bg-amber-100 text-amber-700' },
+                reviewing: { label: 'In review', color: 'bg-blue-100 text-blue-700' },
+                needs_review: { label: 'Needs attention', color: 'bg-red-100 text-red-700' },
+              };
+              return statusMap[status] || statusMap.needs_review;
+            };
+
+            if (coreDatasets.length === 0) {
+              return (
+                <p className="text-sm text-gray-500 text-center py-8 border border-dashed border-gray-200 rounded-lg">
+                  No core datasets yet. Upload population and boundary data to get started.
+                </p>
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                {coreDatasets.map(dataset => {
+                  const healthChip = getHealthChip(dataset);
+                  const statusChip = getStatusChip(dataset);
+                  
+                  return (
+                    <div
+                      key={dataset.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition cursor-pointer"
+                      onClick={() => {
+                        setDrawerMode('view');
+                        setSelectedDataset(dataset);
+                      }}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="text-sm font-semibold text-gray-900">{dataset.name}</h3>
+                            {dataset.is_baseline && (
+                              <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-green-50 text-green-700">
+                                Baseline
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                              {dataset.type || '—'}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                              {dataset.admin_level || '—'}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full font-semibold ${healthChip.color}`}>
+                              Alignment: {healthChip.label}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full font-semibold ${statusChip.color}`}>
+                              {statusChip.label}
+                            </span>
+                          </div>
+                          {dataset.description && (
+                            <p className="text-xs text-gray-600 mt-2">{dataset.description}</p>
+                          )}
+                        </div>
+                        <Link
+                          href={`/datasets/raw/${dataset.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs font-semibold text-amber-600 hover:text-amber-700 ml-4"
+                        >
+                          View
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total datasets"
@@ -696,35 +862,21 @@ export default function CountryDashboardPage() {
           />
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          <ReferenceCard
-            title="Admin boundaries"
-            subtitle="Reference layers"
-            stat={`${numberFormatter.format(boundaryCounts.ADM3)} ${getAdminLevelName(adminLevels, 3, true)} • ${numberFormatter.format(boundaryCounts.ADM4)} ${getAdminLevelName(adminLevels, 4, true)}${boundaryCounts.ADM5 > 0 ? ` • ${numberFormatter.format(boundaryCounts.ADM5)} ${getAdminLevelName(adminLevels, 5, true)}` : ''}`}
-            detail={`${getAdminLevelName(adminLevels, 1, true)} ${numberFormatter.format(boundaryCounts.ADM1)} • ${getAdminLevelName(adminLevels, 2, true)} ${numberFormatter.format(boundaryCounts.ADM2)}`}
-            icon={MapPinned}
-            href="/datasets?focus=admin_boundaries"
-            linkLabel="View guidance"
-          />
-          <ReferenceCard
-            title="Population baselines"
-            subtitle="Reference layers"
-            stat={`${populationDatasets.length} dataset${populationDatasets.length === 1 ? '' : 's'}`}
-            detail={
-              primaryPopulation
-                ? `Primary: ${primaryPopulation.name}`
-                : 'No active population baseline is flagged yet.'
-            }
-            icon={Database}
-            href={
-              primaryPopulation ? `/datasets/raw/${primaryPopulation.id}` : '/datasets?focus=population'
-            }
-            linkLabel={primaryPopulation ? 'Open active dataset' : 'Review candidates'}
-          />
-        </section>
+        {/* SSC FRAMEWORK ARCHITECTURE */}
+        <section className="space-y-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">SSC Framework</p>
+            <h2 className="text-xl font-semibold text-gray-900">Framework Architecture</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Datasets organized by SSC pillars and supporting analyses
+            </p>
+          </div>
 
-        <section className="grid gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-4">
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* SSC Pillars */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900">SSC Pillars</h3>
+              <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-amber-600">
@@ -736,59 +888,270 @@ export default function CountryDashboardPage() {
                 </p>
               </div>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {sscPillars.map((pillar) => {
-                const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
-                const pillarHref = pillarMeta ? `/datasets?pillar=${encodeURIComponent(PILLAR_FILTER_PARAM[pillarMeta.key as PillarKey])}` : undefined;
-                return (
-                  <PillarCard
-                    key={pillar.key}
-                    label={pillarMeta?.label || pillar.label}
-                    description={pillarMeta?.description || pillar.description}
-                    value={pillar.value}
-                    percent={pillar.percent}
-                    href={pillarHref}
-                  />
-                );
-              })}
+                {sscPillars.map((pillar) => {
+                  const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
+                  const pillarHref = pillarMeta ? `/datasets?pillar=${encodeURIComponent(PILLAR_FILTER_PARAM[pillarMeta.key as PillarKey])}` : undefined;
+                  const pillarDatasets = datasets.filter(d => determinePillar(d) === pillar.key);
+                  
+                  const getHealthChip = (dataset: Dataset) => {
+                    const health = dataset?.metadata?.data_health;
+                    if (!health || health.alignment_rate === undefined) {
+                      return { label: '—', color: 'bg-gray-100 text-gray-500' };
+                    }
+                    const percent = Math.round((health.alignment_rate || 0) * 100);
+                    let color = 'bg-green-100 text-green-700';
+                    if (percent < 60) color = 'bg-red-100 text-red-700';
+                    else if (percent < 85) color = 'bg-amber-100 text-amber-700';
+                    return { label: `${percent}%`, color };
+                  };
+
+                  return (
+                    <div key={pillar.key} className="border border-gray-200 rounded-xl p-4 bg-white">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-700">
+                              {pillar.key.replace('SSC Framework - ', '')}
+                            </span>
+                            <h4 className="text-sm font-semibold text-gray-900">{pillarMeta?.label || pillar.label}</h4>
+                          </div>
+                          <p className="text-xs text-gray-600 mt-1">{pillarMeta?.description || pillar.description}</p>
+                        </div>
+                        <span className="text-lg font-semibold text-gray-900">{pillarDatasets.length}</span>
+                      </div>
+                      {pillarDatasets.length > 0 ? (
+                        <div className="space-y-2 mt-3">
+                          {pillarDatasets.slice(0, 3).map(dataset => {
+                            const healthChip = getHealthChip(dataset);
+                            return (
+                              <div
+                                key={dataset.id}
+                                className="flex items-center justify-between text-xs p-2 rounded bg-gray-50 hover:bg-gray-100 cursor-pointer"
+                                onClick={() => {
+                                  setDrawerMode('view');
+                                  setSelectedDataset(dataset);
+                                }}
+                              >
+                                <span className="text-gray-700 truncate flex-1">{dataset.name}</span>
+                                <span className={`px-2 py-0.5 rounded font-semibold ml-2 ${healthChip.color}`}>
+                                  {healthChip.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                          {pillarDatasets.length > 3 && (
+                            <Link
+                              href={pillarHref || '/datasets'}
+                              className="text-xs font-semibold text-amber-600 hover:text-amber-700 block mt-2"
+                            >
+                              View all {pillarDatasets.length} datasets →
+                            </Link>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500 italic">No datasets yet</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Supporting Analyses */}
+            <div className="space-y-4">
+              <h3 className="text-base font-semibold text-gray-900">Supporting Analyses</h3>
+              <div className="space-y-3">
+                {supportingPillars.map((pillar) => {
+                  const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
+                  const pillarHref = pillarMeta ? `/datasets?pillar=${encodeURIComponent(PILLAR_FILTER_PARAM[pillarMeta.key as PillarKey])}` : undefined;
+                  const pillarDatasets = datasets.filter(d => determinePillar(d) === pillar.key);
+                  
+                  const getHealthChip = (dataset: Dataset) => {
+                    const health = dataset?.metadata?.data_health;
+                    if (!health || health.alignment_rate === undefined) {
+                      return { label: '—', color: 'bg-gray-100 text-gray-500' };
+                    }
+                    const percent = Math.round((health.alignment_rate || 0) * 100);
+                    let color = 'bg-green-100 text-green-700';
+                    if (percent < 60) color = 'bg-red-100 text-red-700';
+                    else if (percent < 85) color = 'bg-amber-100 text-amber-700';
+                    return { label: `${percent}%`, color };
+                  };
+
+                  return (
+                    <div key={pillar.key} className="border border-gray-200 rounded-xl p-4 bg-white">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                              pillar.key === 'Hazard' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {pillar.key === 'Hazard' ? 'H' : 'UV'}
+                            </span>
+                            <h4 className="text-sm font-semibold text-gray-900">{pillarMeta?.label || pillar.label}</h4>
+                          </div>
+                          <p className="text-xs text-gray-600 mt-1">{pillarMeta?.description || pillar.description}</p>
+                        </div>
+                        <span className="text-lg font-semibold text-gray-900">{pillarDatasets.length}</span>
+                      </div>
+                      {pillarDatasets.length > 0 ? (
+                        <div className="space-y-2 mt-3">
+                          {pillarDatasets.slice(0, 3).map(dataset => {
+                            const healthChip = getHealthChip(dataset);
+                            return (
+                              <div
+                                key={dataset.id}
+                                className="flex items-center justify-between text-xs p-2 rounded bg-gray-50 hover:bg-gray-100 cursor-pointer"
+                                onClick={() => {
+                                  setDrawerMode('view');
+                                  setSelectedDataset(dataset);
+                                }}
+                              >
+                                <span className="text-gray-700 truncate flex-1">{dataset.name}</span>
+                                <span className={`px-2 py-0.5 rounded font-semibold ml-2 ${healthChip.color}`}>
+                                  {healthChip.label}
+                                </span>
+                              </div>
+                            );
+                          })}
+                          {pillarDatasets.length > 3 && (
+                            <Link
+                              href={pillarHref || '/datasets'}
+                              className="text-xs font-semibold text-amber-600 hover:text-amber-700 block mt-2"
+                            >
+                              View all {pillarDatasets.length} datasets →
+                            </Link>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500 italic">No datasets yet</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-          <DashboardMap
-            featureCollection={adminBoundaryGeo}
-            headline="National footprint"
-            description={`${getAdminLevelName(adminLevels, 1, true)} boundaries shown as the base canvas for layering SSC instances.`}
-            countryCode={currentCountry?.iso_code || countryCode}
-          />
         </section>
-        {supportingPillars.length > 0 && (
-          <section className="space-y-3">
+
+        {/* DATA HEALTH SUMMARY */}
+        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600">
-                Supporting analyses
-              </p>
-              <h2 className="text-lg font-semibold text-gray-900">Hazards & underlying vulnerabilities</h2>
-              <p className="text-sm text-gray-600">
-                These layers complement SSC results: hazard footprints for current events and chronic vulnerability datasets that sit outside the shelter pillars.
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">Data Quality</p>
+              <h2 className="text-lg font-semibold text-gray-900">Dataset Health Summary</h2>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {supportingPillars.map((pillar) => {
-                const pillarMeta = PILLAR_ORDER.find((item) => item.key === pillar.key);
-                const pillarHref = pillarMeta ? `/datasets?pillar=${encodeURIComponent(PILLAR_FILTER_PARAM[pillarMeta.key as PillarKey])}` : undefined;
-                return (
-                  <PillarCard
-                    key={pillar.key}
-                    label={pillarMeta?.label || pillar.label}
-                    description={pillarMeta?.description || pillar.description}
-                    value={pillar.value}
-                    percent={pillar.percent}
-                    href={pillarHref}
-                  />
-                );
-              })}
+            <Link href="/datasets" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
+              View detailed audit
+            </Link>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-4">
+            {(() => {
+              const ready = datasets.filter(d => {
+                const status = d.metadata?.cleaning_status || d.metadata?.readiness;
+                return status === 'ready';
+              }).length;
+              const inProgress = datasets.filter(d => {
+                const status = d.metadata?.cleaning_status || d.metadata?.readiness;
+                return status === 'in_progress';
+              }).length;
+              const needsAttention = datasets.filter(d => {
+                const status = d.metadata?.cleaning_status || d.metadata?.readiness;
+                return !status || status === 'needs_review';
+              }).length;
+              const total = datasets.length;
+
+              return (
+                <>
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle size={16} className="text-green-600" />
+                      <span className="text-xs font-semibold text-gray-600">Ready</span>
+                    </div>
+                    <p className="text-2xl font-semibold text-gray-900">{ready}</p>
+                    <p className="text-xs text-gray-500 mt-1">{total > 0 ? Math.round((ready / total) * 100) : 0}% of datasets</p>
+                  </div>
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertCircle size={16} className="text-amber-600" />
+                      <span className="text-xs font-semibold text-gray-600">In Progress</span>
+                    </div>
+                    <p className="text-2xl font-semibold text-gray-900">{inProgress}</p>
+                    <p className="text-xs text-gray-500 mt-1">{total > 0 ? Math.round((inProgress / total) * 100) : 0}% of datasets</p>
+                  </div>
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <XCircle size={16} className="text-red-600" />
+                      <span className="text-xs font-semibold text-gray-600">Needs Attention</span>
+                    </div>
+                    <p className="text-2xl font-semibold text-gray-900">{needsAttention}</p>
+                    <p className="text-xs text-gray-500 mt-1">{total > 0 ? Math.round((needsAttention / total) * 100) : 0}% of datasets</p>
+                  </div>
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database size={16} className="text-gray-600" />
+                      <span className="text-xs font-semibold text-gray-600">Total Datasets</span>
+                    </div>
+                    <p className="text-2xl font-semibold text-gray-900">{total}</p>
+                    <p className="text-xs text-gray-500 mt-1">Across all categories</p>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </section>
+
+        {/* MANAGEMENT SECTION */}
+        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">Administration</p>
+              <h2 className="text-lg font-semibold text-gray-900">Quick Actions</h2>
             </div>
-          </section>
-        )}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <Link
+              href="/datasets/new"
+              className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition flex items-center gap-3"
+            >
+              <div className="p-2 rounded bg-green-100 text-green-700">
+                <Database size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Upload Dataset</p>
+                <p className="text-xs text-gray-600">Add new baseline data</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/instances/new"
+              className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition flex items-center gap-3"
+            >
+              <div className="p-2 rounded bg-blue-100 text-blue-700">
+                <Layers size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Create Instance</p>
+                <p className="text-xs text-gray-600">Start new response scenario</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/datasets"
+              className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition flex items-center gap-3"
+            >
+              <div className="p-2 rounded bg-amber-100 text-amber-700">
+                <Settings size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Manage Datasets</p>
+                <p className="text-xs text-gray-600">Review and clean data</p>
+              </div>
+            </Link>
+          </div>
+        </section>
         <section className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-6">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -954,6 +1317,21 @@ export default function CountryDashboardPage() {
             </Link>
           </div>
         </section>
+
+        {/* Dataset Detail Drawer */}
+        {selectedDataset && (
+          <DatasetDetailDrawer
+            dataset={selectedDataset}
+            mode={drawerMode}
+            onClose={() => setSelectedDataset(null)}
+            onSaved={loadDashboard}
+            onDelete={async (id: string) => {
+              await supabase.from('datasets').delete().eq('id', id);
+              loadDashboard();
+              setSelectedDataset(null);
+            }}
+          />
+        )}
       </div>
     </ProtectedRoute>
   );

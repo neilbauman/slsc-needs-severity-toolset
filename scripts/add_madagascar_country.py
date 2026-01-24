@@ -195,26 +195,21 @@ def import_boundaries(supabase, country_id: str, output_dir: Path):
             z.extractall(extract_dir)
         print(f"✓ Extracted to {extract_dir}")
     
-    # Find GeoJSON files
-    geojson_files = list(extract_dir.glob("*.geojson"))
-    if not geojson_files:
-        # Try to find shapefile and convert
-        shp_files = list(extract_dir.glob("*.shp"))
-        if shp_files:
-            print(f"Found shapefile: {shp_files[0]}")
-            gdf = gpd.read_file(shp_files[0])
-            geojson_path = extract_dir / "boundaries.geojson"
-            gdf.to_file(geojson_path, driver="GeoJSON")
-            geojson_files = [geojson_path]
+    # Find shapefiles and process them
+    shp_files = sorted(extract_dir.glob("*.shp"))
     
-    if not geojson_files:
-        print("Error: No GeoJSON files found")
-        return False
+    if not shp_files:
+        # Try GeoJSON files
+        geojson_files = list(extract_dir.glob("*.geojson"))
+        if not geojson_files:
+            print("Error: No shapefiles or GeoJSON files found")
+            return False
+        shp_files = geojson_files
     
-    # Process each admin level
+    # Process each admin level file
     admin_levels_imported = {}
     
-    for geojson_file in sorted(geojson_files):
+    for shp_file in sorted(shp_files):
         print(f"\nProcessing {shp_file.name}...")
         
         try:
