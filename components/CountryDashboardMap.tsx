@@ -56,9 +56,17 @@ const countryCenters: Record<string, [number, number]> = {
 
 const defaultCenter: [number, number] = [12.8797, 121.774];
 
+type DatasetLayerInfo = {
+  data: GeoJSONType | null;
+  color: string;
+  minValue: number;
+  maxValue: number;
+  datasetName: string;
+};
+
 export default function CountryDashboardMap({ countryId, countryCode, adminLevels }: CountryDashboardMapProps) {
   const [adminLevelGeo, setAdminLevelGeo] = useState<Record<string, GeoJSONType | null>>({});
-  const [datasetLayers, setDatasetLayers] = useState<Record<string, { data: GeoJSONType | null; color: string }>>({});
+  const [datasetLayers, setDatasetLayers] = useState<Record<string, DatasetLayerInfo>>({});
   const [visibleLevels, setVisibleLevels] = useState<Set<string>>(new Set(['ADM1']));
   const [visibleDatasets, setVisibleDatasets] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -130,7 +138,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     if (datasets.length === 0) return;
 
     const loadDatasetLayers = async () => {
-      const newLayers: Record<string, { data: GeoJSONType | null; color: string }> = {};
+      const newLayers: Record<string, DatasetLayerInfo> = {};
 
       for (const dataset of datasets) {
         try {
@@ -151,18 +159,24 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
           if (!boundaries || !boundaries.features) continue;
 
-          // Create value map
-          const valueMap = new Map(values.map((v: any) => [v.admin_pcode, v.value]));
+          // Create value map and calculate min/max
+          const numericValues = values
+            .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
+            .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
+          
+          if (numericValues.length === 0) continue;
 
-          // Color by value
-          const maxValue = Math.max(...Array.from(valueMap.values()).filter((v: any) => typeof v === 'number' && !isNaN(v)));
-          const minValue = Math.min(...Array.from(valueMap.values()).filter((v: any) => typeof v === 'number' && !isNaN(v)));
+          const maxValue = Math.max(...numericValues);
+          const minValue = Math.min(...numericValues);
+          const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
 
           // Create colored features
           const coloredFeatures = boundaries.features.map((f: any) => {
             const pcode = f.properties?.admin_pcode;
             const value = valueMap.get(pcode);
-            const normalized = maxValue > minValue ? ((value - minValue) / (maxValue - minValue)) : 0.5;
+            const normalized = maxValue > minValue && value !== undefined && !isNaN(value) 
+              ? ((value - minValue) / (maxValue - minValue)) 
+              : 0.5;
             
             // Color scale: blue (low) to red (high)
             const hue = 240 - (normalized * 120); // 240 (blue) to 120 (green/yellow)
@@ -184,6 +198,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               features: coloredFeatures,
             } as GeoJSONType,
             color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
+            minValue,
+            maxValue,
+            datasetName: dataset.name,
           };
         } catch (err) {
           console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
@@ -255,146 +272,260 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
   };
 
+  // Generate color scale for legend
+  const generateColorScale = (steps: number = 5) => {
+    const colors: string[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const normalized = i / steps;
+      const hue = 240 - (normalized * 120); // 240 (blue) to 120 (green/yellow)
+      colors.push(`hsl(${hue}, 70%, 50%)`);
+    }
+    return colors;
+  };
+
+  const formatValue = (value: number) => {
+    if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
+    if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
+    return value.toLocaleString();
+  };
+
+  const activeDatasetLayer = useMemo(() => {
+    const visibleIds = Array.from(visibleDatasets);
+    if (visibleIds.length === 0) return null;
+    return datasetLayers[visibleIds[0]] || null;
+  }, [visibleDatasets, datasetLayers]);
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <div className="border-b border-gray-100 px-5 py-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-xs font-semibold tracking-wider text-amber-600 uppercase mb-1">
-              Country Map
-            </p>
-            <p className="text-sm text-gray-600">
-              Toggle admin levels and dataset overlays to explore country data
-            </p>
-          </div>
-        </div>
-
-        {/* Toggle Controls */}
-        <div className="flex flex-wrap gap-3 mt-4">
-          {/* Admin Level Toggles */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-600">Admin Levels:</span>
-            {['ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
-              const hasData = adminLevelGeo[level] !== null;
-              const isVisible = visibleLevels.has(level);
-              return (
-                <button
-                  key={level}
-                  onClick={() => toggleLevel(level)}
-                  disabled={!hasData}
-                  className={`px-2 py-1 text-xs rounded border transition ${
-                    isVisible && hasData
-                      ? 'bg-amber-500 text-white border-amber-600'
-                      : hasData
-                      ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                      : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                  }`}
-                >
-                  {isVisible ? <Eye size={12} /> : <EyeOff size={12} />} {level}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Dataset Toggles */}
-          {datasets.length > 0 && (
-            <div className="flex items-center gap-2 ml-4 pl-4 border-l border-gray-200">
-              <span className="text-xs font-semibold text-gray-600">Datasets:</span>
-              {datasets.map(dataset => {
-                const isVisible = visibleDatasets.has(dataset.id);
-                return (
-                  <button
-                    key={dataset.id}
-                    onClick={() => toggleDataset(dataset.id)}
-                    className={`px-2 py-1 text-xs rounded border transition ${
-                      isVisible
-                        ? 'bg-blue-500 text-white border-blue-600'
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {isVisible ? <Eye size={12} /> : <EyeOff size={12} />} {dataset.name.split(' - ')[0]}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        <div>
+          <p className="text-xs font-semibold tracking-wider text-amber-600 uppercase mb-1">
+            Country Map
+          </p>
+          <p className="text-sm text-gray-600">
+            Toggle admin levels and dataset overlays to explore country data
+          </p>
         </div>
       </div>
 
-      <div className="h-96">
-        {loading ? (
-          <div className="h-full flex items-center justify-center text-gray-500">
-            Loading map...
-          </div>
-        ) : (
-          <MapContainer
-            center={mapCenter}
-            zoom={6}
-            minZoom={3}
-            maxZoom={11}
-            scrollWheelZoom={true}
-            className="h-full w-full"
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            
-            <LayersControl position="topright">
-              {/* Admin Level Layers */}
-              {Object.entries(adminLevelGeo).map(([level, geo]) => {
-                if (!geo) return null;
-                
-                // Get level name from adminLevels config
-                const levelNum = parseInt(level.replace('ADM', ''));
-                const levelConfig = adminLevels?.find((l: any) => l.level_number === levelNum);
-                const levelName = levelConfig?.name || level;
+      <div className="flex gap-0">
+        {/* Map - Square format */}
+        <div className="flex-1 aspect-square min-h-[500px] relative">
+          {loading ? (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              Loading map...
+            </div>
+          ) : (
+            <MapContainer
+              center={mapCenter}
+              zoom={6}
+              minZoom={3}
+              maxZoom={11}
+              scrollWheelZoom={true}
+              className="h-full w-full"
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              
+              <LayersControl position="topright">
+                {/* Admin Level Layers */}
+                {Object.entries(adminLevelGeo).map(([level, geo]) => {
+                  if (!geo) return null;
+                  
+                  const levelNum = parseInt(level.replace('ADM', ''));
+                  const levelConfig = adminLevels?.find((l: any) => l.level_number === levelNum);
+                  const levelName = levelConfig?.name || level;
+                  
+                  return (
+                    <LayersControl.Overlay key={level} name={levelName} checked={visibleLevels.has(level)}>
+                      <GeoJSON
+                        data={geo as GeoJsonObject}
+                        style={() => ({
+                          color: '#2563eb',
+                          weight: visibleLevels.has(level) ? 2 : 0,
+                          fillColor: '#93c5fd',
+                          fillOpacity: 0.2,
+                        })}
+                      />
+                    </LayersControl.Overlay>
+                  );
+                })}
+              </LayersControl>
+
+              {/* Render visible dataset layers */}
+              {Object.entries(datasetLayers).map(([datasetId, layer]) => {
+                if (!layer.data || !visibleDatasets.has(datasetId)) return null;
                 
                 return (
-                  <LayersControl.Overlay key={level} name={levelName} checked={visibleLevels.has(level)}>
-                    <GeoJSON
-                      data={geo as GeoJsonObject}
-                      style={() => ({
-                        color: '#2563eb',
-                        weight: visibleLevels.has(level) ? 2 : 0,
-                        fillColor: '#93c5fd',
-                        fillOpacity: 0.2,
-                      })}
-                    />
-                  </LayersControl.Overlay>
+                  <GeoJSON
+                    key={datasetId}
+                    data={layer.data as GeoJsonObject}
+                    style={(feature: any) => ({
+                      color: feature?.properties?._color || layer.color,
+                      weight: 1,
+                      fillColor: feature?.properties?._color || layer.color,
+                      fillOpacity: 0.6,
+                    })}
+                    onEachFeature={(feature, layer) => {
+                      const value = feature.properties?.value;
+                      if (value !== undefined) {
+                        layer.bindPopup(`${feature.properties?.name || feature.properties?.admin_pcode}: ${value.toLocaleString()}`);
+                      }
+                    }}
+                  />
                 );
               })}
 
-              {/* Dataset Layers - render outside LayersControl for better control */}
-            </LayersControl>
+              {allFeatures.length > 0 && <MapBoundsController features={allFeatures} />}
+            </MapContainer>
+          )}
+        </div>
 
-            {/* Render visible dataset layers */}
-            {Object.entries(datasetLayers).map(([datasetId, layer]) => {
-              if (!layer.data || !visibleDatasets.has(datasetId)) return null;
-              
-              return (
-                <GeoJSON
-                  key={datasetId}
-                  data={layer.data as GeoJsonObject}
-                  style={(feature: any) => ({
-                    color: feature?.properties?._color || layer.color,
-                    weight: 1,
-                    fillColor: feature?.properties?._color || layer.color,
-                    fillOpacity: 0.6,
+        {/* Right Panel - Toggles and Legend */}
+        <div className="w-80 border-l border-gray-200 bg-gray-50 flex flex-col">
+          {/* Toggle Controls */}
+          <div className="p-4 space-y-4 border-b border-gray-200">
+            {/* Admin Level Toggles */}
+            <div>
+              <p className="text-xs font-semibold text-gray-700 mb-2">Admin Levels</p>
+              <div className="space-y-2">
+                {['ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
+                  const hasData = adminLevelGeo[level] !== null && adminLevelGeo[level] !== undefined;
+                  const isVisible = visibleLevels.has(level);
+                  const levelNum = parseInt(level.replace('ADM', ''));
+                  const levelConfig = adminLevels?.find((l: any) => l.level_number === levelNum);
+                  const levelName = levelConfig?.name || level;
+                  
+                  return (
+                    <button
+                      key={level}
+                      onClick={() => toggleLevel(level)}
+                      disabled={!hasData}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
+                        isVisible && hasData
+                          ? 'bg-amber-500 text-white border-amber-600'
+                          : hasData
+                          ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                          : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                        <span>{level}</span>
+                        {levelName !== level && (
+                          <span className="text-xs opacity-75">({levelName})</span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Dataset Toggles */}
+            {datasets.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-700 mb-2">Datasets</p>
+                <div className="space-y-2">
+                  {datasets.map(dataset => {
+                    const isVisible = visibleDatasets.has(dataset.id);
+                    return (
+                      <button
+                        key={dataset.id}
+                        onClick={() => toggleDataset(dataset.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
+                          isVisible
+                            ? 'bg-blue-500 text-white border-blue-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                          <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
+                        </span>
+                      </button>
+                    );
                   })}
-                  onEachFeature={(feature, layer) => {
-                    const value = feature.properties?.value;
-                    if (value !== undefined) {
-                      layer.bindPopup(`${feature.properties?.name || feature.properties?.admin_pcode}: ${value.toLocaleString()}`);
-                    }
-                  }}
-                />
-              );
-            })}
+                </div>
+              </div>
+            )}
+          </div>
 
-            {allFeatures.length > 0 && <MapBoundsController features={allFeatures} />}
-          </MapContainer>
-        )}
+          {/* Legend */}
+          {activeDatasetLayer && (
+            <div className="p-4 flex-1 overflow-y-auto">
+              <p className="text-xs font-semibold text-gray-700 mb-3">Legend</p>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-gray-600 mb-2 font-medium">{activeDatasetLayer.datasetName}</p>
+                  
+                  {/* Color Scale */}
+                  <div className="mb-3">
+                    <div className="flex items-center gap-1 mb-2">
+                      {generateColorScale(5).map((color, idx) => (
+                        <div
+                          key={idx}
+                          className="flex-1 h-6 rounded-sm border border-gray-300"
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                    
+                    {/* Value Range */}
+                    <div className="flex justify-between text-xs text-gray-600">
+                      <span>Low: {formatValue(activeDatasetLayer.minValue)}</span>
+                      <span>High: {formatValue(activeDatasetLayer.maxValue)}</span>
+                    </div>
+                  </div>
+
+                  {/* Value Breakpoints */}
+                  <div className="space-y-1 text-xs text-gray-600">
+                    <p className="font-semibold mb-2">Value Ranges:</p>
+                    {(() => {
+                      const steps = 5;
+                      const range = activeDatasetLayer.maxValue - activeDatasetLayer.minValue;
+                      const breakpoints: Array<{ color: string; min: number; max: number }> = [];
+                      
+                      for (let i = 0; i <= steps; i++) {
+                        const normalized = i / steps;
+                        const value = activeDatasetLayer.minValue + (range * normalized);
+                        const hue = 240 - (normalized * 120);
+                        const color = `hsl(${hue}, 70%, 50%)`;
+                        
+                        const min = i === 0 ? activeDatasetLayer.minValue : activeDatasetLayer.minValue + (range * ((i - 1) / steps));
+                        const max = i === steps ? activeDatasetLayer.maxValue : value;
+                        
+                        breakpoints.push({ color, min, max });
+                      }
+                      
+                      return breakpoints.map((bp, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <div
+                            className="w-4 h-4 rounded border border-gray-300"
+                            style={{ backgroundColor: bp.color }}
+                          />
+                          <span>
+                            {formatValue(bp.min)} - {formatValue(bp.max)}
+                          </span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!activeDatasetLayer && (
+            <div className="p-4 flex-1 flex items-center justify-center">
+              <p className="text-xs text-gray-500 text-center">
+                Toggle a dataset to see its legend and value ranges
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
