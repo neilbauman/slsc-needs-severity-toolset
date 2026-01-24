@@ -382,6 +382,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       }
       
       const values = allValues;
+      console.log(`[Dataset ${dataset.name}] Loaded ${values.length} values`);
 
       if (!values || values.length === 0) {
         setLoadingDatasets(prev => {
@@ -446,6 +447,10 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       const maxValue = Math.max(...numericValues);
       const minValue = Math.min(...numericValues);
       const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
+      
+      console.log(`[Dataset ${dataset.name}] Boundaries: ${boundaries.features?.length}, ValueMap size: ${valueMap.size}`);
+      // Debug: check if specific pcode exists
+      console.log(`[Dataset ${dataset.name}] Sample valueMap check - PH175111008:`, valueMap.get('PH175111008'));
 
       // 5-class sequential color palette (blue to green)
       const colorClasses = ['#2166ac', '#67a9cf', '#d1e5f0', '#91cf60', '#1a9850'];
