@@ -67,7 +67,7 @@ type DatasetLayerInfo = {
 export default function CountryDashboardMap({ countryId, countryCode, adminLevels }: CountryDashboardMapProps) {
   const [adminLevelGeo, setAdminLevelGeo] = useState<Record<string, GeoJSONType | null>>({});
   const [datasetLayers, setDatasetLayers] = useState<Record<string, DatasetLayerInfo>>({});
-  const [visibleLevels, setVisibleLevels] = useState<Set<string>>(new Set(['ADM1']));
+  const [visibleLevels, setVisibleLevels] = useState<Set<string>>(new Set(['ADM0']));
   const [visibleDatasets, setVisibleDatasets] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [datasets, setDatasets] = useState<any[]>([]);
@@ -321,7 +321,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               zoom={6}
               minZoom={3}
               maxZoom={11}
-              scrollWheelZoom={true}
+              scrollWheelZoom={false}
+              doubleClickZoom={false}
+              dragging={true}
               className="h-full w-full"
             >
               <TileLayer
@@ -391,7 +393,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             <div>
               <p className="text-xs font-semibold text-gray-700 mb-2">Admin Levels</p>
               <div className="space-y-2">
-                {['ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
+                {['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
                   const hasData = adminLevelGeo[level] !== null && adminLevelGeo[level] !== undefined;
                   const isVisible = visibleLevels.has(level);
                   const levelNum = parseInt(level.replace('ADM', ''));
