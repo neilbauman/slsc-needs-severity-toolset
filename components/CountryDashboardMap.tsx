@@ -48,11 +48,18 @@ function setCachedGeoJSON(key: string, data: GeoJSONType): void {
 }
 
 // Component to auto-fit map bounds to features
-function MapBoundsController({ features }: { features: any[] }) {
+function MapBoundsController({ features, countryCode }: { features: any[]; countryCode?: string }) {
   const map = useMap();
+  const [hasFitBounds, setHasFitBounds] = useState(false);
+  
+  // Reset fit state when country changes
+  useEffect(() => {
+    setHasFitBounds(false);
+  }, [countryCode]);
   
   useEffect(() => {
-    if (features.length > 0) {
+    // Always try to fit bounds when features are available
+    if (features.length > 0 && !hasFitBounds) {
       try {
         const validFeatures = features.filter((f: any) => {
           const geomType = f.geometry?.type;
@@ -62,17 +69,29 @@ function MapBoundsController({ features }: { features: any[] }) {
         if (validFeatures.length > 0) {
           const bounds = L.geoJSON(validFeatures).getBounds();
           if (bounds.isValid()) {
-            map.fitBounds(bounds, { 
-              padding: [20, 20],
-              maxZoom: 8
-            });
+            // Use setTimeout to ensure map is ready
+            setTimeout(() => {
+              map.fitBounds(bounds, { 
+                padding: [20, 20],
+                maxZoom: 8
+              });
+              setHasFitBounds(true);
+            }, 100);
           }
         }
       } catch (err) {
         console.error("Error fitting bounds:", err);
       }
     }
-  }, [features, map]);
+  }, [features, map, hasFitBounds]);
+
+  // Also fit when country center is known but no features yet
+  useEffect(() => {
+    if (features.length === 0 && countryCode && countryCenters[countryCode]) {
+      const center = countryCenters[countryCode];
+      map.setView(center, 6);
+    }
+  }, [countryCode, features.length, map]);
 
   return null;
 }
@@ -529,7 +548,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                 );
               })}
 
-              {allFeatures.length > 0 && <MapBoundsController features={allFeatures} />}
+              <MapBoundsController features={allFeatures} countryCode={countryCode} />
             </MapContainer>
           )}
         </div>
