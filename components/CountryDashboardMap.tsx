@@ -594,7 +594,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
       <div className="flex gap-0">
         {/* Map */}
-        <div className="flex-1 h-[380px] relative">
+        <div className="flex-1 h-[456px] relative">
           {loading ? (
             <div className="h-full flex items-center justify-center text-gray-500">
               <Loader2 className="animate-spin mr-2" size={20} />
