@@ -153,6 +153,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
   const [loadingDatasets, setLoadingDatasets] = useState<Set<string>>(new Set());
   const [failedLevels, setFailedLevels] = useState<Set<string>>(new Set());
   const [failedDatasets, setFailedDatasets] = useState<Set<string>>(new Set());
+  
+  // Track which admin levels have data in the database
+  const [availableLevels, setAvailableLevels] = useState<Set<string>>(new Set());
 
   // Load a single admin level boundary (with caching)
   const loadAdminLevel = useCallback(async (level: string) => {
@@ -278,6 +281,25 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
     initMap();
   }, [countryId, loadAdminLevel]);
+
+  // Check which admin levels have data in the database
+  useEffect(() => {
+    if (!countryId) return;
+
+    const checkAvailableLevels = async () => {
+      const { data } = await supabase
+        .from('admin_boundaries')
+        .select('admin_level')
+        .eq('country_id', countryId);
+
+      if (data) {
+        const levels = new Set(data.map((d: any) => d.admin_level));
+        setAvailableLevels(levels);
+      }
+    };
+
+    checkAvailableLevels();
+  }, [countryId]);
 
   // Load datasets metadata
   useEffect(() => {
@@ -633,15 +655,18 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                   const hasFailed = failedLevels.has(level);
                   const hasData = adminLevelGeo[level] !== null && adminLevelGeo[level] !== undefined;
                   const isVisible = visibleLevels.has(level);
+                  const isAvailable = availableLevels.has(level);
                   
                   return (
                     <button
                       key={level}
-                      onClick={() => hasFailed ? retryLevel(level) : toggleLevel(level)}
-                      disabled={isLoading}
-                      title={hasFailed ? 'Click to retry' : undefined}
+                      onClick={() => isAvailable ? (hasFailed ? retryLevel(level) : toggleLevel(level)) : undefined}
+                      disabled={isLoading || !isAvailable}
+                      title={!isAvailable ? 'No data available' : hasFailed ? 'Click to retry' : undefined}
                       className={`px-2 py-1 text-[11px] font-medium rounded transition ${
-                        isLoading
+                        !isAvailable
+                          ? 'bg-gray-100 text-gray-300 cursor-not-allowed line-through'
+                          : isLoading
                           ? 'bg-gray-200 text-gray-400'
                           : hasFailed
                           ? 'bg-red-100 text-red-600 hover:bg-red-200'
