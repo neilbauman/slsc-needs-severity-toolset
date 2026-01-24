@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
@@ -558,29 +558,23 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               
-              <LayersControl position="topright">
-                {Object.entries(adminLevelGeo).map(([level, geo]) => {
-                  if (!geo) return null;
-                  
-                  const levelNum = parseInt(level.replace('ADM', ''));
-                  const levelConfig = adminLevels?.find((l: any) => l.level_number === levelNum);
-                  const levelName = levelConfig?.name || level;
-                  
-                  return (
-                    <LayersControl.Overlay key={level} name={levelName} checked={visibleLevels.has(level)}>
-                      <GeoJSON
-                        data={geo as GeoJsonObject}
-                        style={() => ({
-                          color: '#2563eb',
-                          weight: visibleLevels.has(level) ? 2 : 0,
-                          fillColor: '#93c5fd',
-                          fillOpacity: 0.2,
-                        })}
-                      />
-                    </LayersControl.Overlay>
-                  );
-                })}
-              </LayersControl>
+              {/* Render visible admin level boundaries directly */}
+              {Object.entries(adminLevelGeo).map(([level, geo]) => {
+                if (!geo || !visibleLevels.has(level)) return null;
+                
+                return (
+                  <GeoJSON
+                    key={`${level}-${countryId}`}
+                    data={geo as GeoJsonObject}
+                    style={() => ({
+                      color: '#2563eb',
+                      weight: 2,
+                      fillColor: '#93c5fd',
+                      fillOpacity: 0.15,
+                    })}
+                  />
+                );
+              })}
 
               {Object.entries(datasetLayers).map(([datasetId, layer]) => {
                 if (!layer.data || !visibleDatasets.has(datasetId)) return null;
