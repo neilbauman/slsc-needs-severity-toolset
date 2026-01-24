@@ -17,8 +17,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Use RPC function that returns all values without row limits
-    const { data, error } = await supabase.rpc('get_dataset_values_all', {
+    // Use RPC function that returns all values as JSON (bypasses PostgREST row limit)
+    const { data, error } = await supabase.rpc('get_dataset_values_json', {
       p_dataset_id: datasetId,
       p_type: type
     });
@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ values: data || [], count: data?.length || 0 });
+    // data is already a JSON array
+    const values = data || [];
+    return NextResponse.json({ values, count: values.length });
   } catch (error: any) {
     console.error('Error in datasetValues API:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
