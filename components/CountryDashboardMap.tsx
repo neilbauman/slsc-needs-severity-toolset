@@ -5,7 +5,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-l
 import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 
 type CountryDashboardMapProps = {
@@ -71,10 +71,17 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
   const [visibleDatasets, setVisibleDatasets] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [datasets, setDatasets] = useState<any[]>([]);
+  
+  // Track loading states for individual layers
+  const [loadingLevels, setLoadingLevels] = useState<Set<string>>(new Set(['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4']));
+  const [loadingDatasets, setLoadingDatasets] = useState<Set<string>>(new Set());
 
   // Load admin boundaries for each level
   useEffect(() => {
     if (!countryId) return;
+
+    // Reset loading states
+    setLoadingLevels(new Set(['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4']));
 
     const loadBoundaries = async () => {
       setLoading(true);
@@ -106,12 +113,19 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         console.warn('Failed to load ADM0 boundaries:', err);
       }
       
+      // Mark ADM0 as done loading
+      setLoadingLevels(prev => {
+        const next = new Set(prev);
+        next.delete('ADM0');
+        return next;
+      });
+      
       setLoading(false);
 
-      // Load other levels in parallel (background)
+      // Load other levels in parallel (background) - each updates when done
       const otherLevels = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
       
-      const promises = otherLevels.map(async (level) => {
+      otherLevels.forEach(async (level) => {
         try {
           const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
             admin_level: level,
@@ -125,31 +139,25 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             });
 
             if (polygonFeatures.length > 0) {
-              return {
-                level,
-                geo: {
+              setAdminLevelGeo(prev => ({
+                ...prev,
+                [level]: {
                   type: 'FeatureCollection',
                   features: polygonFeatures,
                 } as GeoJSONType,
-              };
+              }));
             }
           }
         } catch (err) {
           console.warn(`Failed to load ${level} boundaries:`, err);
         }
-        return null;
-      });
-
-      const results = await Promise.all(promises);
-      
-      setAdminLevelGeo(prev => {
-        const updated = { ...prev };
-        results.forEach(result => {
-          if (result) {
-            updated[result.level] = result.geo;
-          }
+        
+        // Mark this level as done loading
+        setLoadingLevels(prev => {
+          const next = new Set(prev);
+          next.delete(level);
+          return next;
         });
-        return updated;
       });
     };
 
@@ -170,106 +178,121 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
       if (data) {
         setDatasets(data);
+        // Mark all datasets as loading initially
+        setLoadingDatasets(new Set(data.map((d: any) => d.id)));
       }
     };
 
     loadDatasets();
   }, [countryId]);
 
-  // Load dataset values as map layers (in parallel)
+  // Load dataset values as map layers (each updates independently when done)
   useEffect(() => {
     if (datasets.length === 0) return;
 
-    const loadDatasetLayers = async () => {
-      // Load all datasets in parallel
-      const promises = datasets.map(async (dataset) => {
-        try {
-          // Get values
-          const { data: values } = await supabase
-            .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
-            .select('admin_pcode, value')
-            .eq('dataset_id', dataset.id)
-            .limit(1000); // Limit for performance
+    // Load each dataset independently so UI updates as each completes
+    datasets.forEach(async (dataset) => {
+      try {
+        // Get values
+        const { data: values } = await supabase
+          .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
+          .select('admin_pcode, value')
+          .eq('dataset_id', dataset.id)
+          .limit(1000); // Limit for performance
 
-          if (!values || values.length === 0) return null;
-
-          // Use cached boundaries if available, otherwise fetch
-          let boundaries: any = adminLevelGeo[dataset.admin_level];
-          if (!boundaries) {
-            const { data: boundaryData } = await supabase.rpc('get_admin_boundaries_geojson', {
-              admin_level: dataset.admin_level,
-              country_id: countryId,
-            });
-            boundaries = boundaryData;
-          }
-
-          if (!boundaries || !boundaries.features) return null;
-
-          // Create value map and calculate min/max
-          const numericValues = values
-            .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
-            .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
-          
-          if (numericValues.length === 0) return null;
-
-          const maxValue = Math.max(...numericValues);
-          const minValue = Math.min(...numericValues);
-          const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
-
-          // Create colored features
-          const coloredFeatures = boundaries.features.map((f: any) => {
-            const pcode = f.properties?.admin_pcode;
-            const value = valueMap.get(pcode);
-            const normalized = maxValue > minValue && value !== undefined && !isNaN(value) 
-              ? ((value - minValue) / (maxValue - minValue)) 
-              : 0.5;
-            
-            // Color scale: blue (low) to red (high)
-            const hue = 240 - (normalized * 120); // 240 (blue) to 120 (green/yellow)
-            const color = `hsl(${hue}, 70%, 50%)`;
-
-            return {
-              ...f,
-              properties: {
-                ...f.properties,
-                value,
-                _color: color,
-              }
-            };
+        if (!values || values.length === 0) {
+          setLoadingDatasets(prev => {
+            const next = new Set(prev);
+            next.delete(dataset.id);
+            return next;
           });
+          return;
+        }
+
+        // Use cached boundaries if available, otherwise fetch
+        let boundaries: any = adminLevelGeo[dataset.admin_level];
+        if (!boundaries) {
+          const { data: boundaryData } = await supabase.rpc('get_admin_boundaries_geojson', {
+            admin_level: dataset.admin_level,
+            country_id: countryId,
+          });
+          boundaries = boundaryData;
+        }
+
+        if (!boundaries || !boundaries.features) {
+          setLoadingDatasets(prev => {
+            const next = new Set(prev);
+            next.delete(dataset.id);
+            return next;
+          });
+          return;
+        }
+
+        // Create value map and calculate min/max
+        const numericValues = values
+          .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
+          .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
+        
+        if (numericValues.length === 0) {
+          setLoadingDatasets(prev => {
+            const next = new Set(prev);
+            next.delete(dataset.id);
+            return next;
+          });
+          return;
+        }
+
+        const maxValue = Math.max(...numericValues);
+        const minValue = Math.min(...numericValues);
+        const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
+
+        // Create colored features
+        const coloredFeatures = boundaries.features.map((f: any) => {
+          const pcode = f.properties?.admin_pcode;
+          const value = valueMap.get(pcode);
+          const normalized = maxValue > minValue && value !== undefined && !isNaN(value) 
+            ? ((value - minValue) / (maxValue - minValue)) 
+            : 0.5;
+          
+          // Color scale: blue (low) to red (high)
+          const hue = 240 - (normalized * 120); // 240 (blue) to 120 (green/yellow)
+          const color = `hsl(${hue}, 70%, 50%)`;
 
           return {
-            id: dataset.id,
-            layer: {
-              data: {
-                type: 'FeatureCollection',
-                features: coloredFeatures,
-              } as GeoJSONType,
-              color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
-              minValue,
-              maxValue,
-              datasetName: dataset.name,
-            } as DatasetLayerInfo,
+            ...f,
+            properties: {
+              ...f.properties,
+              value,
+              _color: color,
+            }
           };
-        } catch (err) {
-          console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
-          return null;
-        }
-      });
+        });
 
-      const results = await Promise.all(promises);
+        // Update this specific dataset layer
+        setDatasetLayers(prev => ({
+          ...prev,
+          [dataset.id]: {
+            data: {
+              type: 'FeatureCollection',
+              features: coloredFeatures,
+            } as GeoJSONType,
+            color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
+            minValue,
+            maxValue,
+            datasetName: dataset.name,
+          } as DatasetLayerInfo,
+        }));
+      } catch (err) {
+        console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
+      }
       
-      const newLayers: Record<string, DatasetLayerInfo> = {};
-      results.forEach(result => {
-        if (result) {
-          newLayers[result.id] = result.layer;
-        }
+      // Mark this dataset as done loading
+      setLoadingDatasets(prev => {
+        const next = new Set(prev);
+        next.delete(dataset.id);
+        return next;
       });
-      
-      setDatasetLayers(newLayers);
-    };
-
-    loadDatasetLayers();
+    });
   }, [datasets, countryId, adminLevelGeo]);
 
   const allFeatures = useMemo(() => {
@@ -453,6 +476,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               <p className="text-xs font-semibold text-gray-700 mb-2">Admin Levels</p>
               <div className="space-y-2">
                 {['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
+                  const isLoading = loadingLevels.has(level);
                   const hasData = adminLevelGeo[level] !== null && adminLevelGeo[level] !== undefined;
                   const isVisible = visibleLevels.has(level);
                   const levelNum = parseInt(level.replace('ADM', ''));
@@ -463,9 +487,11 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     <button
                       key={level}
                       onClick={() => toggleLevel(level)}
-                      disabled={!hasData}
+                      disabled={isLoading || !hasData}
                       className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
-                        isVisible && hasData
+                        isLoading
+                          ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
+                          : isVisible && hasData
                           ? 'bg-amber-500 text-white border-amber-600'
                           : hasData
                           ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
@@ -473,12 +499,21 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                       }`}
                     >
                       <span className="flex items-center gap-2">
-                        {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                        {isLoading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : isVisible ? (
+                          <Eye size={14} />
+                        ) : (
+                          <EyeOff size={14} />
+                        )}
                         <span>{level}</span>
                         {levelName !== level && (
                           <span className="text-xs opacity-75">({levelName})</span>
                         )}
                       </span>
+                      {isLoading && (
+                        <span className="text-xs opacity-75">Loading...</span>
+                      )}
                     </button>
                   );
                 })}
@@ -491,21 +526,38 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                 <p className="text-xs font-semibold text-gray-700 mb-2">Datasets</p>
                 <div className="space-y-2">
                   {datasets.map(dataset => {
+                    const isLoading = loadingDatasets.has(dataset.id);
+                    const hasData = datasetLayers[dataset.id] !== undefined;
                     const isVisible = visibleDatasets.has(dataset.id);
+                    
                     return (
                       <button
                         key={dataset.id}
                         onClick={() => toggleDataset(dataset.id)}
+                        disabled={isLoading || !hasData}
                         className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
-                          isVisible
+                          isLoading
+                            ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
+                            : isVisible && hasData
                             ? 'bg-blue-500 text-white border-blue-600'
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            : hasData
+                            ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
                         }`}
                       >
                         <span className="flex items-center gap-2">
-                          {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                          {isLoading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : isVisible ? (
+                            <Eye size={14} />
+                          ) : (
+                            <EyeOff size={14} />
+                          )}
                           <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
                         </span>
+                        {isLoading && (
+                          <span className="text-xs opacity-75">Loading...</span>
+                        )}
                       </button>
                     );
                   })}
