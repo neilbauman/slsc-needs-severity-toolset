@@ -765,7 +765,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
           </div>
 
           {/* Legend - Fixed height placeholder */}
-          <div className="flex-1 border-t border-gray-200 min-h-[140px]">
+          <div className="flex-1 border-t border-gray-200 min-h-[180px]">
             {activeDatasetLayer ? (
               <div className="p-3">
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Legend</p>
@@ -790,15 +790,21 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                   </div>
                 </div>
 
-                {/* Simplified breakpoints */}
+                {/* 5-class breakpoints */}
                 <div className="space-y-0.5 text-[9px] text-gray-500">
-                  {[0, 0.5, 1].map((pct, idx) => {
+                  {[
+                    { pct: 0, label: 'Low' },
+                    { pct: 0.25, label: 'Low-Mid' },
+                    { pct: 0.5, label: 'Mid' },
+                    { pct: 0.75, label: 'Mid-High' },
+                    { pct: 1, label: 'High' }
+                  ].map(({ pct, label }, idx) => {
                     const value = activeDatasetLayer.minValue + (activeDatasetLayer.maxValue - activeDatasetLayer.minValue) * pct;
                     const hue = 240 - (pct * 120);
                     return (
                       <div key={idx} className="flex items-center gap-1">
                         <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: `hsl(${hue}, 70%, 50%)` }} />
-                        <span>{pct === 0 ? 'Low' : pct === 0.5 ? 'Mid' : 'High'}: {formatValue(value)}</span>
+                        <span>{label}: {formatValue(value)}</span>
                       </div>
                     );
                   })}

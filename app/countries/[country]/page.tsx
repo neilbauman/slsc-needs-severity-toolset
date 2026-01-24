@@ -637,7 +637,7 @@ export default function CountryDashboardPage() {
                 <p className="text-xs uppercase tracking-wider text-amber-600 font-semibold">
                   SLSC Needs Severity Toolset
                 </p>
-                <h1 className="text-3xl font-semibold text-gray-900 mt-1">Country Dashboard</h1>
+                <h1 className="text-3xl font-semibold text-gray-900 mt-1">{activeCountry.name} Dashboard</h1>
               </div>
             </div>
             <p className="text-sm text-gray-600 mt-2 max-w-2xl">
