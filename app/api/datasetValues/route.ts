@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Use service role key to bypass row limits
+// Use anon key - the RPC function is SECURITY DEFINER so it bypasses RLS
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 export async function GET(request: NextRequest) {
@@ -16,40 +16,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'datasetId required' }, { status: 400 });
   }
 
-  const tableName = type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
-
   try {
-    // Fetch all values with pagination using service key
-    const pageSize = 10000;
-    let allValues: any[] = [];
-    let page = 0;
-    let hasMore = true;
+    // Use RPC function that returns all values without row limits
+    const { data, error } = await supabase.rpc('get_dataset_values_all', {
+      p_dataset_id: datasetId,
+      p_type: type
+    });
 
-    while (hasMore) {
-      const from = page * pageSize;
-      const to = from + pageSize - 1;
-      
-      const { data, error } = await supabase
-        .from(tableName)
-        .select('admin_pcode, value')
-        .eq('dataset_id', datasetId)
-        .range(from, to);
-
-      if (error) {
-        console.error('Error fetching dataset values:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-
-      if (data && data.length > 0) {
-        allValues = allValues.concat(data);
-        hasMore = data.length === pageSize;
-        page++;
-      } else {
-        hasMore = false;
-      }
+    if (error) {
+      console.error('Error fetching dataset values:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ values: allValues, count: allValues.length });
+    return NextResponse.json({ values: data || [], count: data?.length || 0 });
   } catch (error: any) {
     console.error('Error in datasetValues API:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
