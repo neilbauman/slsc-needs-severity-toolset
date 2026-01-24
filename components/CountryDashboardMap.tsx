@@ -5,7 +5,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, RefreshCw, GitBranch } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 
 type CountryDashboardMapProps = {
@@ -139,6 +139,8 @@ type DatasetLayerInfo = {
   minValue: number;
   maxValue: number;
   datasetName: string;
+  isDerived?: boolean;
+  derivedFrom?: string;
 };
 
 export default function CountryDashboardMap({ countryId, countryCode, adminLevels }: CountryDashboardMapProps) {
@@ -328,7 +330,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     const loadDatasets = async () => {
       const { data } = await supabase
         .from('datasets')
-        .select('id, name, type, admin_level')
+        .select('id, name, type, admin_level, is_derived, metadata')
         .eq('country_id', countryId)
         .or('name.ilike.%Population%,name.ilike.%Poverty%')
         .order('name');
@@ -452,6 +454,14 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         };
       });
 
+      // Build derived from string if available
+      const derivedFromStr = dataset.is_derived && dataset.metadata?.derived_from
+        ? dataset.metadata.derived_from
+            .map((s: any) => s.dataset_name || s.source)
+            .filter(Boolean)
+            .join(' + ')
+        : undefined;
+
       setDatasetLayers(prev => ({
         ...prev,
         [dataset.id]: {
@@ -463,6 +473,8 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
           minValue,
           maxValue,
           datasetName: dataset.name,
+          isDerived: dataset.is_derived,
+          derivedFrom: derivedFromStr,
         } as DatasetLayerInfo,
       }));
     } catch (err) {
@@ -720,6 +732,17 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     const hasFailed = failedDatasets.has(dataset.id);
                     const hasData = datasetLayers[dataset.id] !== undefined;
                     const isVisible = visibleDatasets.has(dataset.id);
+                    const isDerived = dataset.is_derived;
+                    
+                    // Build tooltip for derived datasets
+                    let tooltipText = hasFailed ? 'Click to retry' : dataset.name;
+                    if (isDerived && dataset.metadata?.derived_from) {
+                      const sources = dataset.metadata.derived_from
+                        .map((s: any) => s.dataset_name || s.source)
+                        .filter(Boolean)
+                        .join(' + ');
+                      tooltipText = `${dataset.name}\n⚡ Derived from: ${sources}`;
+                    }
                     
                     // Shorten name
                     const shortName = dataset.name
@@ -734,7 +757,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                         key={dataset.id}
                         onClick={() => hasFailed ? retryDataset(dataset.id) : toggleDataset(dataset.id)}
                         disabled={isLoading}
-                        title={hasFailed ? 'Click to retry' : dataset.name}
+                        title={tooltipText}
                         className={`w-full flex items-center justify-between px-2 py-1 text-[11px] rounded transition ${
                           isLoading
                             ? 'bg-gray-200 text-gray-400'
@@ -748,6 +771,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                         <span className="flex items-center gap-1 truncate">
                           {isLoading && <Loader2 size={10} className="animate-spin flex-shrink-0" />}
                           {hasFailed && <RefreshCw size={9} className="flex-shrink-0" />}
+                          {isDerived && !isLoading && !hasFailed && (
+                            <GitBranch size={9} className="flex-shrink-0 opacity-70" title="Derived dataset" />
+                          )}
                           <span className="truncate">{shortName}</span>
                         </span>
                         <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ml-1 ${
@@ -768,9 +794,15 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             {activeDatasetLayer ? (
               <div className="p-3">
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Legend</p>
-                <p className="text-[11px] text-gray-700 font-medium mb-2 truncate" title={activeDatasetLayer.datasetName}>
+                <p className="text-[11px] text-gray-700 font-medium mb-1 truncate" title={activeDatasetLayer.datasetName}>
                   {activeDatasetLayer.datasetName.replace(/Sri Lanka\s*/i, '').replace(/Mozambique\s*/i, '').replace(/Philippines\s*/i, '').split(' - ')[0]}
                 </p>
+                {activeDatasetLayer.isDerived && (
+                  <p className="text-[9px] text-purple-600 mb-2 flex items-center gap-1" title={activeDatasetLayer.derivedFrom}>
+                    <GitBranch size={9} />
+                    <span className="truncate">Derived: {activeDatasetLayer.derivedFrom || 'calculated'}</span>
+                  </p>
+                )}
                 
                 {/* 5-class discrete color scale */}
                 <div className="space-y-1">
