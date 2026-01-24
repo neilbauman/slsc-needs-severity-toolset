@@ -5,7 +5,7 @@ import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-l
 import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
-import { Eye, EyeOff, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 
 type CountryDashboardMapProps = {
@@ -40,7 +40,6 @@ function setCachedGeoJSON(key: string, data: GeoJSONType): void {
     const cacheEntry = { data, timestamp: Date.now() };
     localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(cacheEntry));
   } catch (e) {
-    // localStorage might be full - clear old cache entries
     try {
       const keys = Object.keys(localStorage).filter(k => k.startsWith(CACHE_PREFIX));
       keys.forEach(k => localStorage.removeItem(k));
@@ -106,11 +105,8 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
   const [loading, setLoading] = useState(true);
   const [datasets, setDatasets] = useState<any[]>([]);
   
-  // Track loading states for individual layers
   const [loadingLevels, setLoadingLevels] = useState<Set<string>>(new Set(['ADM0']));
   const [loadingDatasets, setLoadingDatasets] = useState<Set<string>>(new Set());
-  
-  // Track failed/error states
   const [failedLevels, setFailedLevels] = useState<Set<string>>(new Set());
   const [failedDatasets, setFailedDatasets] = useState<Set<string>>(new Set());
 
@@ -118,7 +114,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
   const loadAdminLevel = useCallback(async (level: string) => {
     if (!countryId) return;
     
-    // Check cache first
     const cacheKey = `${countryId}_${level}`;
     const cached = getCachedGeoJSON(cacheKey);
     
@@ -132,7 +127,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       return;
     }
     
-    // Mark as loading
     setLoadingLevels(prev => new Set(prev).add(level));
     setFailedLevels(prev => {
       const next = new Set(prev);
@@ -162,7 +156,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
           } as GeoJSONType;
           
           setAdminLevelGeo(prev => ({ ...prev, [level]: geoData }));
-          setCachedGeoJSON(cacheKey, geoData); // Cache for future use
+          setCachedGeoJSON(cacheKey, geoData);
         }
       }
     } catch (err) {
@@ -177,11 +171,10 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     }
   }, [countryId]);
 
-  // Load only ADM0 on mount (lazy load others when toggled)
+  // Load only ADM0 on mount
   useEffect(() => {
     if (!countryId) return;
 
-    // Reset states
     setAdminLevelGeo({});
     setFailedLevels(new Set());
     setLoading(true);
@@ -194,7 +187,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     initMap();
   }, [countryId, loadAdminLevel]);
 
-  // Load datasets metadata (but NOT their layers - those are lazy loaded)
+  // Load datasets metadata
   useEffect(() => {
     if (!countryId) return;
 
@@ -208,7 +201,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
       if (data) {
         setDatasets(data);
-        // Don't mark as loading until user toggles them
         setLoadingDatasets(new Set());
         setFailedDatasets(new Set());
       }
@@ -217,7 +209,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     loadDatasets();
   }, [countryId]);
 
-  // Load a single dataset layer (lazy, when toggled)
+  // Load a single dataset layer
   const loadDatasetLayer = useCallback(async (dataset: any) => {
     if (!countryId) return;
     
@@ -229,7 +221,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
     
     try {
-      // Get values
       const { data: values } = await supabase
         .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
         .select('admin_pcode, value')
@@ -245,7 +236,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         return;
       }
 
-      // Check cache for boundaries
       const cacheKey = `${countryId}_${dataset.admin_level}`;
       let boundaries: any = adminLevelGeo[dataset.admin_level] || getCachedGeoJSON(cacheKey);
       
@@ -256,7 +246,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         });
         boundaries = boundaryData;
         
-        // Cache boundaries
         if (boundaries && boundaries.features?.length > 0) {
           const polygonFeatures = boundaries.features.filter((f: any) => {
             const geomType = f.geometry?.type;
@@ -285,7 +274,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         return;
       }
 
-      // Create value map and calculate min/max
       const numericValues = values
         .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
         .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
@@ -303,7 +291,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       const minValue = Math.min(...numericValues);
       const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
 
-      // Create colored features
       const coloredFeatures = boundaries.features.map((f: any) => {
         const pcode = f.properties?.admin_pcode;
         const value = valueMap.get(pcode);
@@ -383,12 +370,10 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     return countryCode && countryCenters[countryCode] ? countryCenters[countryCode] : defaultCenter;
   }, [allFeatures, countryCode]);
 
-  // Toggle admin level - lazy load if not already loaded
   const toggleLevel = useCallback((level: string) => {
     const isCurrentlyVisible = visibleLevels.has(level);
     
     if (!isCurrentlyVisible) {
-      // Turning ON - check if we need to load
       if (!adminLevelGeo[level] && !loadingLevels.has(level)) {
         loadAdminLevel(level);
       }
@@ -405,12 +390,10 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
   }, [visibleLevels, adminLevelGeo, loadingLevels, loadAdminLevel]);
 
-  // Toggle dataset - lazy load if not already loaded
   const toggleDataset = useCallback((datasetId: string) => {
     const isCurrentlyVisible = visibleDatasets.has(datasetId);
     
     if (!isCurrentlyVisible) {
-      // Turning ON - check if we need to load
       if (!datasetLayers[datasetId] && !loadingDatasets.has(datasetId)) {
         const dataset = datasets.find(d => d.id === datasetId);
         if (dataset) {
@@ -430,7 +413,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
   }, [visibleDatasets, datasetLayers, loadingDatasets, datasets, loadDatasetLayer]);
 
-  // Retry loading a failed level
   const retryLevel = useCallback((level: string) => {
     setFailedLevels(prev => {
       const next = new Set(prev);
@@ -440,7 +422,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     loadAdminLevel(level);
   }, [loadAdminLevel]);
 
-  // Retry loading a failed dataset
   const retryDataset = useCallback((datasetId: string) => {
     const dataset = datasets.find(d => d.id === datasetId);
     if (dataset) {
@@ -453,7 +434,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     }
   }, [datasets, loadDatasetLayer]);
 
-  // Generate color scale for legend
   const generateColorScale = (steps: number = 5) => {
     const colors: string[] = [];
     for (let i = 0; i <= steps; i++) {
@@ -478,20 +458,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      <div className="border-b border-gray-100 px-5 py-4">
-        <div>
-          <p className="text-xs font-semibold tracking-wider text-amber-600 uppercase mb-1">
-            Country Map
-          </p>
-          <p className="text-sm text-gray-600">
-            Toggle admin levels and dataset overlays to explore country data
-          </p>
-        </div>
-      </div>
-
       <div className="flex gap-0">
-        {/* Map - Constrained height to fit on screen */}
-        <div className="flex-1 h-[450px] max-h-[60vh] relative">
+        {/* Map */}
+        <div className="flex-1 h-[380px] relative">
           {loading ? (
             <div className="h-full flex items-center justify-center text-gray-500">
               <Loader2 className="animate-spin mr-2" size={20} />
@@ -509,7 +478,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               className="h-full w-full"
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
               
@@ -537,7 +506,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                 })}
               </LayersControl>
 
-              {/* Render visible dataset layers */}
               {Object.entries(datasetLayers).map(([datasetId, layer]) => {
                 if (!layer.data || !visibleDatasets.has(datasetId)) return null;
                 
@@ -566,137 +534,98 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
           )}
         </div>
 
-        {/* Right Panel - Toggles and Legend */}
-        <div className="w-80 border-l border-gray-200 bg-gray-50 flex flex-col">
-          {/* Toggle Controls */}
-          <div className="p-4 space-y-4 border-b border-gray-200">
-            {/* Admin Level Toggles */}
+        {/* Right Panel - Compact */}
+        <div className="w-56 border-l border-gray-200 bg-gray-50 flex flex-col">
+          {/* Compact Toggle Controls */}
+          <div className="p-3 space-y-3 flex-shrink-0">
+            {/* Admin Level Chips */}
             <div>
-              <p className="text-xs font-semibold text-gray-700 mb-2">Admin Levels</p>
-              <p className="text-xs text-gray-500 mb-2">Click to load & toggle layers</p>
-              <div className="space-y-2">
+              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Boundaries</p>
+              <div className="flex flex-wrap gap-1">
                 {['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
                   const isLoading = loadingLevels.has(level);
                   const hasFailed = failedLevels.has(level);
                   const hasData = adminLevelGeo[level] !== null && adminLevelGeo[level] !== undefined;
                   const isVisible = visibleLevels.has(level);
-                  const levelNum = parseInt(level.replace('ADM', ''));
-                  const levelConfig = adminLevels?.find((l: any) => l.level_number === levelNum);
-                  const levelName = levelConfig?.name || level;
                   
                   return (
-                    <div key={level} className="flex items-center gap-1">
-                      <button
-                        onClick={() => toggleLevel(level)}
-                        disabled={isLoading}
-                        className={`flex-1 flex items-center justify-between px-3 py-2 text-sm rounded-l border transition ${
-                          isLoading
-                            ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
-                            : hasFailed && !hasData
-                            ? 'bg-red-50 text-red-600 border-red-200'
-                            : isVisible && hasData
-                            ? 'bg-amber-500 text-white border-amber-600'
-                            : hasData
-                            ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2">
-                          {isLoading ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : isVisible && hasData ? (
-                            <Eye size={14} />
-                          ) : (
-                            <EyeOff size={14} />
-                          )}
-                          <span>{level}</span>
-                          {levelName !== level && (
-                            <span className="text-xs opacity-75">({levelName})</span>
-                          )}
+                    <button
+                      key={level}
+                      onClick={() => hasFailed ? retryLevel(level) : toggleLevel(level)}
+                      disabled={isLoading}
+                      title={hasFailed ? 'Click to retry' : undefined}
+                      className={`px-2 py-1 text-[11px] font-medium rounded transition ${
+                        isLoading
+                          ? 'bg-gray-200 text-gray-400'
+                          : hasFailed
+                          ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                          : isVisible && hasData
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-100'
+                      }`}
+                    >
+                      {isLoading ? (
+                        <Loader2 size={10} className="animate-spin" />
+                      ) : hasFailed ? (
+                        <span className="flex items-center gap-0.5">
+                          <RefreshCw size={9} />
+                          {level.replace('ADM', '')}
                         </span>
-                        {isLoading && (
-                          <span className="text-xs opacity-75">Loading...</span>
-                        )}
-                        {hasFailed && !hasData && !isLoading && (
-                          <span className="text-xs text-red-500">Timeout</span>
-                        )}
-                      </button>
-                      {hasFailed && !isLoading && (
-                        <button
-                          onClick={() => retryLevel(level)}
-                          className="px-2 py-2 border border-gray-300 rounded-r bg-white hover:bg-gray-50 text-gray-600"
-                          title="Retry loading"
-                        >
-                          <RefreshCw size={14} />
-                        </button>
+                      ) : (
+                        level.replace('ADM', '')
                       )}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Dataset Toggles */}
+            {/* Dataset Chips */}
             {datasets.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-gray-700 mb-2">Datasets</p>
-                <p className="text-xs text-gray-500 mb-2">Click to load & visualize</p>
-                <div className="space-y-2">
+                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Data Layers</p>
+                <div className="space-y-1">
                   {datasets.map(dataset => {
                     const isLoading = loadingDatasets.has(dataset.id);
                     const hasFailed = failedDatasets.has(dataset.id);
                     const hasData = datasetLayers[dataset.id] !== undefined;
                     const isVisible = visibleDatasets.has(dataset.id);
                     
+                    // Shorten name
+                    const shortName = dataset.name
+                      .replace(/Sri Lanka\s*/i, '')
+                      .replace(/Mozambique\s*/i, '')
+                      .replace(/\s*\([^)]*\)/g, '')
+                      .split(' - ')[0]
+                      .trim();
+                    
                     return (
-                      <div key={dataset.id} className="flex items-center gap-1">
-                        <button
-                          onClick={() => toggleDataset(dataset.id)}
-                          disabled={isLoading}
-                          className={`flex-1 flex items-center justify-between px-3 py-2 text-sm rounded-l border transition ${
-                            isLoading
-                              ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
-                              : hasFailed && !hasData
-                              ? 'bg-red-50 text-red-600 border-red-200'
-                              : isVisible && hasData
-                              ? 'bg-blue-500 text-white border-blue-600'
-                              : hasData
-                              ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          <span className="flex items-center gap-2 flex-1 min-w-0">
-                            {isLoading ? (
-                              <Loader2 size={14} className="animate-spin flex-shrink-0" />
-                            ) : isVisible && hasData ? (
-                              <Eye size={14} className="flex-shrink-0" />
-                            ) : (
-                              <EyeOff size={14} className="flex-shrink-0" />
-                            )}
-                            <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-                              isVisible ? 'bg-blue-600' : hasFailed ? 'bg-red-200 text-red-700' : 'bg-gray-200 text-gray-600'
-                            }`}>
-                              {dataset.admin_level}
-                            </span>
-                          </span>
-                          {isLoading && (
-                            <span className="text-xs opacity-75 flex-shrink-0">Loading...</span>
-                          )}
-                          {hasFailed && !hasData && !isLoading && (
-                            <span className="text-xs text-red-500 flex-shrink-0">Error</span>
-                          )}
-                        </button>
-                        {hasFailed && !isLoading && (
-                          <button
-                            onClick={() => retryDataset(dataset.id)}
-                            className="px-2 py-2 border border-gray-300 rounded-r bg-white hover:bg-gray-50 text-gray-600"
-                            title="Retry loading"
-                          >
-                            <RefreshCw size={14} />
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        key={dataset.id}
+                        onClick={() => hasFailed ? retryDataset(dataset.id) : toggleDataset(dataset.id)}
+                        disabled={isLoading}
+                        title={hasFailed ? 'Click to retry' : dataset.name}
+                        className={`w-full flex items-center justify-between px-2 py-1 text-[11px] rounded transition ${
+                          isLoading
+                            ? 'bg-gray-200 text-gray-400'
+                            : hasFailed
+                            ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                            : isVisible && hasData
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1 truncate">
+                          {isLoading && <Loader2 size={10} className="animate-spin flex-shrink-0" />}
+                          {hasFailed && <RefreshCw size={9} className="flex-shrink-0" />}
+                          <span className="truncate">{shortName}</span>
+                        </span>
+                        <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ml-1 ${
+                          isVisible ? 'bg-blue-600' : 'bg-gray-200 text-gray-500'
+                        }`}>
+                          {dataset.admin_level?.replace('ADM', '')}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
@@ -704,81 +633,54 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             )}
           </div>
 
-          {/* Legend */}
-          {activeDatasetLayer && (
-            <div className="p-4 flex-1 overflow-y-auto">
-              <p className="text-xs font-semibold text-gray-700 mb-3">Legend</p>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-gray-600 mb-2 font-medium">{activeDatasetLayer.datasetName}</p>
-                  
-                  {/* Color Scale */}
-                  <div className="mb-3">
-                    <div className="flex items-center gap-1 mb-2">
-                      {generateColorScale(5).map((color, idx) => (
-                        <div
-                          key={idx}
-                          className="flex-1 h-6 rounded-sm border border-gray-300"
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                    
-                    {/* Value Range */}
-                    <div className="flex justify-between text-xs text-gray-600">
-                      <span>Low: {formatValue(activeDatasetLayer.minValue)}</span>
-                      <span>High: {formatValue(activeDatasetLayer.maxValue)}</span>
-                    </div>
+          {/* Legend - Fixed height placeholder */}
+          <div className="flex-1 border-t border-gray-200 min-h-[140px]">
+            {activeDatasetLayer ? (
+              <div className="p-3">
+                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Legend</p>
+                <p className="text-[11px] text-gray-700 font-medium mb-2 truncate" title={activeDatasetLayer.datasetName}>
+                  {activeDatasetLayer.datasetName.replace(/Sri Lanka\s*/i, '').replace(/Mozambique\s*/i, '').split(' - ')[0]}
+                </p>
+                
+                {/* Compact Color Scale */}
+                <div className="mb-2">
+                  <div className="flex items-center gap-0.5 mb-1">
+                    {generateColorScale(5).map((color, idx) => (
+                      <div
+                        key={idx}
+                        className="flex-1 h-3 first:rounded-l last:rounded-r"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
                   </div>
-
-                  {/* Value Breakpoints */}
-                  <div className="space-y-1 text-xs text-gray-600">
-                    <p className="font-semibold mb-2">Value Ranges:</p>
-                    {(() => {
-                      const steps = 5;
-                      const range = activeDatasetLayer.maxValue - activeDatasetLayer.minValue;
-                      const breakpoints: Array<{ color: string; min: number; max: number }> = [];
-                      
-                      for (let i = 0; i <= steps; i++) {
-                        const normalized = i / steps;
-                        const value = activeDatasetLayer.minValue + (range * normalized);
-                        const hue = 240 - (normalized * 120);
-                        const color = `hsl(${hue}, 70%, 50%)`;
-                        
-                        const min = i === 0 ? activeDatasetLayer.minValue : activeDatasetLayer.minValue + (range * ((i - 1) / steps));
-                        const max = i === steps ? activeDatasetLayer.maxValue : value;
-                        
-                        breakpoints.push({ color, min, max });
-                      }
-                      
-                      return breakpoints.map((bp, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <div
-                            className="w-4 h-4 rounded border border-gray-300"
-                            style={{ backgroundColor: bp.color }}
-                          />
-                          <span>
-                            {formatValue(bp.min)} - {formatValue(bp.max)}
-                          </span>
-                        </div>
-                      ));
-                    })()}
+                  <div className="flex justify-between text-[9px] text-gray-500">
+                    <span>{formatValue(activeDatasetLayer.minValue)}</span>
+                    <span>{formatValue(activeDatasetLayer.maxValue)}</span>
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
 
-          {!activeDatasetLayer && (
-            <div className="p-4 flex-1 flex items-center justify-center">
-              <div className="text-center">
-                <AlertTriangle size={20} className="mx-auto mb-2 text-amber-500" />
-                <p className="text-xs text-gray-500">
-                  Click a layer to load it. Boundaries are cached locally to reduce database load.
+                {/* Simplified breakpoints */}
+                <div className="space-y-0.5 text-[9px] text-gray-500">
+                  {[0, 0.5, 1].map((pct, idx) => {
+                    const value = activeDatasetLayer.minValue + (activeDatasetLayer.maxValue - activeDatasetLayer.minValue) * pct;
+                    const hue = 240 - (pct * 120);
+                    return (
+                      <div key={idx} className="flex items-center gap-1">
+                        <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: `hsl(${hue}, 70%, 50%)` }} />
+                        <span>{pct === 0 ? 'Low' : pct === 0.5 ? 'Mid' : 'High'}: {formatValue(value)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="h-full flex items-center justify-center p-3">
+                <p className="text-[10px] text-gray-400 text-center">
+                  Select a data layer to see legend
                 </p>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

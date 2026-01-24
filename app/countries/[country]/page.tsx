@@ -677,57 +677,43 @@ export default function CountryDashboardPage() {
           </div>
         )}
 
-        {/* MAP SECTION - At the top */}
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Country Map</h2>
-            <p className="text-sm text-gray-600">
-              Toggle admin levels and dataset overlays (population, poverty, etc.) to explore geographic data coverage
-            </p>
+        {/* ADMIN STRUCTURE - Compact inline bar */}
+        <section className="bg-white border border-gray-200 rounded-lg shadow-sm px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-6 overflow-x-auto">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Admin Levels</span>
+              {['ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
+                const levelNum = parseInt(level.replace('ADM', ''));
+                const levelName = getAdminLevelName(adminLevels, levelNum, false);
+                const count = boundaryCounts[level] || 0;
+                
+                return (
+                  <div key={level} className="flex items-center gap-2 whitespace-nowrap">
+                    <span className="text-xs font-medium text-gray-400">{level}</span>
+                    <span className="text-sm font-semibold text-gray-900">{levelName}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${count > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {count.toLocaleString()}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <Link href="/datasets?focus=admin_boundaries" className="text-xs font-semibold text-amber-600 hover:text-amber-700 whitespace-nowrap">
+              Manage
+            </Link>
           </div>
+        </section>
+
+        {/* MAP SECTION */}
+        <section>
           {activeCountry && (
             <CountryDashboardMap
-              key={activeCountry.id}  // Force remount when country changes
+              key={activeCountry.id}
               countryId={activeCountry.id}
               countryCode={activeCountry.iso_code}
               adminLevels={adminLevels}
             />
           )}
-        </section>
-
-        {/* ADMIN LEVEL NAMING SECTION */}
-        <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">Administrative Structure</p>
-              <h2 className="text-lg font-semibold text-gray-900">Admin Level Naming</h2>
-              <p className="text-sm text-gray-600 mt-1">Custom administrative level names for {activeCountry.name}</p>
-            </div>
-            <Link href="/datasets?focus=admin_boundaries" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
-              Manage boundaries
-            </Link>
-          </div>
-          
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {['ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
-              const levelNum = parseInt(level.replace('ADM', ''));
-              const levelName = getAdminLevelName(adminLevels, levelNum, false);
-              const count = boundaryCounts[level] || 0;
-              
-              return (
-                <div key={level} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-gray-500">{level}</span>
-                    <span className="text-xs text-gray-400">{count} boundaries</span>
-                  </div>
-                  <p className="text-base font-semibold text-gray-900">{levelName}</p>
-                  {count === 0 && (
-                    <p className="text-xs text-amber-600 mt-1">No boundaries imported</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
         </section>
 
         {/* CORE DATASETS SECTION */}
