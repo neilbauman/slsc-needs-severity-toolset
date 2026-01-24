@@ -287,15 +287,35 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     if (!countryId) return;
 
     const checkAvailableLevels = async () => {
-      const { data } = await supabase
-        .from('admin_boundaries')
-        .select('admin_level')
-        .eq('country_id', countryId);
-
-      if (data) {
-        const levels = new Set(data.map((d: any) => d.admin_level));
-        setAvailableLevels(levels);
-      }
+      // Check each level individually to avoid row limit issues
+      // (Philippines has 42k+ ADM4 boundaries which exceeds default limit)
+      const levels = ['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'];
+      
+      const results = await Promise.all(
+        levels.map(async (level) => {
+          try {
+            const { count, error } = await supabase
+              .from('admin_boundaries')
+              .select('*', { count: 'exact', head: true })
+              .eq('country_id', countryId)
+              .eq('admin_level', level);
+            
+            if (error) {
+              console.warn(`Error checking ${level}:`, error);
+              return null;
+            }
+            
+            return count && count > 0 ? level : null;
+          } catch (err) {
+            console.warn(`Failed to check ${level}:`, err);
+            return null;
+          }
+        })
+      );
+      
+      const available = new Set(results.filter((level): level is string => level !== null));
+      console.log('Available admin levels:', Array.from(available));
+      setAvailableLevels(available);
     };
 
     checkAvailableLevels();
