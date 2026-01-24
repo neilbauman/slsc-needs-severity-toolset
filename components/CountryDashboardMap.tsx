@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
@@ -50,16 +50,13 @@ function setCachedGeoJSON(key: string, data: GeoJSONType): void {
 // Component to auto-fit map bounds to features
 function MapBoundsController({ features, countryCode }: { features: any[]; countryCode?: string }) {
   const map = useMap();
-  const [hasFitBounds, setHasFitBounds] = useState(false);
+  const prevFeaturesLengthRef = useRef(0);
   
-  // Reset fit state when country changes
+  // Fit bounds when features change
   useEffect(() => {
-    setHasFitBounds(false);
-  }, [countryCode]);
-  
-  useEffect(() => {
-    // Always try to fit bounds when features are available
-    if (features.length > 0 && !hasFitBounds) {
+    if (features.length > 0 && features.length !== prevFeaturesLengthRef.current) {
+      prevFeaturesLengthRef.current = features.length;
+      
       try {
         const validFeatures = features.filter((f: any) => {
           const geomType = f.geometry?.type;
@@ -67,31 +64,38 @@ function MapBoundsController({ features, countryCode }: { features: any[]; count
         });
         
         if (validFeatures.length > 0) {
-          const bounds = L.geoJSON(validFeatures).getBounds();
+          const geoJsonLayer = L.geoJSON(validFeatures);
+          const bounds = geoJsonLayer.getBounds();
+          
           if (bounds.isValid()) {
-            // Use setTimeout to ensure map is ready
-            setTimeout(() => {
+            // Use requestAnimationFrame to ensure map is ready
+            requestAnimationFrame(() => {
               map.fitBounds(bounds, { 
                 padding: [20, 20],
-                maxZoom: 8
+                maxZoom: 8,
+                animate: false
               });
-              setHasFitBounds(true);
-            }, 100);
+            });
           }
         }
       } catch (err) {
         console.error("Error fitting bounds:", err);
       }
     }
-  }, [features, map, hasFitBounds]);
+  }, [features, map]);
 
-  // Also fit when country center is known but no features yet
+  // Set initial view based on country center when no features yet
   useEffect(() => {
     if (features.length === 0 && countryCode && countryCenters[countryCode]) {
       const center = countryCenters[countryCode];
-      map.setView(center, 6);
+      map.setView(center, 6, { animate: false });
     }
   }, [countryCode, features.length, map]);
+
+  // Reset ref when country changes
+  useEffect(() => {
+    prevFeaturesLengthRef.current = 0;
+  }, [countryCode]);
 
   return null;
 }
@@ -190,11 +194,43 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     }
   }, [countryId]);
 
-  // Load only ADM0 on mount
+  // Clear cache for this country (helps with corrupted cache issues)
+  const clearCountryCache = useCallback(() => {
+    if (!countryId) return;
+    
+    const levels = ['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'];
+    levels.forEach(level => {
+      const cacheKey = `${countryId}_${level}`;
+      try {
+        localStorage.removeItem(CACHE_PREFIX + cacheKey);
+      } catch {}
+    });
+    
+    // Reset state and reload
+    setAdminLevelGeo({});
+    setDatasetLayers({});
+    setFailedLevels(new Set());
+    setLoading(true);
+    
+    // Reload ADM0
+    loadAdminLevel('ADM0').then(() => setLoading(false));
+  }, [countryId, loadAdminLevel]);
+
+  // Load only ADM0 on mount - clear cache first to ensure fresh data
   useEffect(() => {
     if (!countryId) return;
 
+    // Clear cache for this country to fix any corrupted cache issues
+    const levels = ['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'];
+    levels.forEach(level => {
+      const cacheKey = `${countryId}_${level}`;
+      try {
+        localStorage.removeItem(CACHE_PREFIX + cacheKey);
+      } catch {}
+    });
+
     setAdminLevelGeo({});
+    setDatasetLayers({});
     setFailedLevels(new Set());
     setLoading(true);
 
