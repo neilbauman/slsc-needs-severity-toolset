@@ -642,9 +642,11 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     })}
                     onEachFeature={(feature, layer) => {
                       const value = feature.properties?.value;
-                      if (value !== undefined) {
-                        layer.bindPopup(`${feature.properties?.name || feature.properties?.admin_pcode}: ${value.toLocaleString()}`);
-                      }
+                      const name = feature.properties?.name || feature.properties?.admin_pcode || 'Unknown';
+                      const displayValue = value !== undefined && value !== null 
+                        ? (typeof value === 'number' ? value.toLocaleString() : value)
+                        : 'No data';
+                      layer.bindPopup(`<strong>${name}</strong><br/>${displayValue}`);
                     }}
                   />
                 );
