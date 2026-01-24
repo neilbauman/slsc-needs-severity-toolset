@@ -1,11 +1,11 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-leaflet';
 import L from 'leaflet';
 import type { GeoJSON as GeoJSONType, GeoJsonObject } from 'geojson';
 import 'leaflet/dist/leaflet.css';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 
 type CountryDashboardMapProps = {
@@ -13,6 +13,40 @@ type CountryDashboardMapProps = {
   countryCode?: string;
   adminLevels?: any;
 };
+
+// Cache configuration
+const CACHE_PREFIX = 'ssc_geo_cache_';
+const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// LocalStorage cache helpers
+function getCachedGeoJSON(key: string): GeoJSONType | null {
+  try {
+    const cached = localStorage.getItem(CACHE_PREFIX + key);
+    if (!cached) return null;
+    
+    const { data, timestamp } = JSON.parse(cached);
+    if (Date.now() - timestamp > CACHE_EXPIRY_MS) {
+      localStorage.removeItem(CACHE_PREFIX + key);
+      return null;
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+function setCachedGeoJSON(key: string, data: GeoJSONType): void {
+  try {
+    const cacheEntry = { data, timestamp: Date.now() };
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(cacheEntry));
+  } catch (e) {
+    // localStorage might be full - clear old cache entries
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith(CACHE_PREFIX));
+      keys.forEach(k => localStorage.removeItem(k));
+    } catch {}
+  }
+}
 
 // Component to auto-fit map bounds to features
 function MapBoundsController({ features }: { features: any[] }) {
@@ -73,118 +107,94 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
   const [datasets, setDatasets] = useState<any[]>([]);
   
   // Track loading states for individual layers
-  const [loadingLevels, setLoadingLevels] = useState<Set<string>>(new Set(['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4']));
+  const [loadingLevels, setLoadingLevels] = useState<Set<string>>(new Set(['ADM0']));
   const [loadingDatasets, setLoadingDatasets] = useState<Set<string>>(new Set());
   
   // Track failed/error states
   const [failedLevels, setFailedLevels] = useState<Set<string>>(new Set());
   const [failedDatasets, setFailedDatasets] = useState<Set<string>>(new Set());
 
-  // Load admin boundaries for each level
+  // Load a single admin level boundary (with caching)
+  const loadAdminLevel = useCallback(async (level: string) => {
+    if (!countryId) return;
+    
+    // Check cache first
+    const cacheKey = `${countryId}_${level}`;
+    const cached = getCachedGeoJSON(cacheKey);
+    
+    if (cached) {
+      setAdminLevelGeo(prev => ({ ...prev, [level]: cached }));
+      setLoadingLevels(prev => {
+        const next = new Set(prev);
+        next.delete(level);
+        return next;
+      });
+      return;
+    }
+    
+    // Mark as loading
+    setLoadingLevels(prev => new Set(prev).add(level));
+    setFailedLevels(prev => {
+      const next = new Set(prev);
+      next.delete(level);
+      return next;
+    });
+    
+    try {
+      const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
+        admin_level: level,
+        country_id: countryId,
+      });
+
+      if (error) {
+        console.warn(`${level} load error:`, error);
+        setFailedLevels(prev => new Set(prev).add(level));
+      } else if (data && data.features && data.features.length > 0) {
+        const polygonFeatures = data.features.filter((f: any) => {
+          const geomType = f.geometry?.type;
+          return geomType === 'Polygon' || geomType === 'MultiPolygon';
+        });
+
+        if (polygonFeatures.length > 0) {
+          const geoData = {
+            type: 'FeatureCollection',
+            features: polygonFeatures,
+          } as GeoJSONType;
+          
+          setAdminLevelGeo(prev => ({ ...prev, [level]: geoData }));
+          setCachedGeoJSON(cacheKey, geoData); // Cache for future use
+        }
+      }
+    } catch (err) {
+      console.warn(`Failed to load ${level} boundaries:`, err);
+      setFailedLevels(prev => new Set(prev).add(level));
+    } finally {
+      setLoadingLevels(prev => {
+        const next = new Set(prev);
+        next.delete(level);
+        return next;
+      });
+    }
+  }, [countryId]);
+
+  // Load only ADM0 on mount (lazy load others when toggled)
   useEffect(() => {
     if (!countryId) return;
 
-    // Reset loading and error states
-    setLoadingLevels(new Set(['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4']));
-    setFailedLevels(new Set());
+    // Reset states
     setAdminLevelGeo({});
+    setFailedLevels(new Set());
+    setLoading(true);
 
-    const loadBoundaries = async () => {
-      setLoading(true);
-      
-      // Load ADM0 first (country boundary) for quick initial display
-      let adm0Success = false;
-      try {
-        const { data: adm0Data, error: adm0Error } = await supabase.rpc('get_admin_boundaries_geojson', {
-          admin_level: 'ADM0',
-          country_id: countryId,
-        });
-
-        if (!adm0Error && adm0Data && adm0Data.features && adm0Data.features.length > 0) {
-          const polygonFeatures = adm0Data.features.filter((f: any) => {
-            const geomType = f.geometry?.type;
-            return geomType === 'Polygon' || geomType === 'MultiPolygon';
-          });
-
-          if (polygonFeatures.length > 0) {
-            setAdminLevelGeo(prev => ({
-              ...prev,
-              'ADM0': {
-                type: 'FeatureCollection',
-                features: polygonFeatures,
-              } as GeoJSONType,
-            }));
-            adm0Success = true;
-          }
-        }
-        
-        if (!adm0Success && adm0Error) {
-          console.warn('ADM0 load error:', adm0Error);
-          setFailedLevels(prev => new Set(prev).add('ADM0'));
-        }
-      } catch (err) {
-        console.warn('Failed to load ADM0 boundaries:', err);
-        setFailedLevels(prev => new Set(prev).add('ADM0'));
-      }
-      
-      // Mark ADM0 as done loading
-      setLoadingLevels(prev => {
-        const next = new Set(prev);
-        next.delete('ADM0');
-        return next;
-      });
-      
+    const initMap = async () => {
+      await loadAdminLevel('ADM0');
       setLoading(false);
-
-      // Load other levels in parallel (background) - each updates when done
-      const otherLevels = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
-      
-      otherLevels.forEach(async (level) => {
-        let success = false;
-        try {
-          const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
-            admin_level: level,
-            country_id: countryId,
-          });
-
-          if (error) {
-            console.warn(`${level} load error:`, error);
-            setFailedLevels(prev => new Set(prev).add(level));
-          } else if (data && data.features && data.features.length > 0) {
-            const polygonFeatures = data.features.filter((f: any) => {
-              const geomType = f.geometry?.type;
-              return geomType === 'Polygon' || geomType === 'MultiPolygon';
-            });
-
-            if (polygonFeatures.length > 0) {
-              setAdminLevelGeo(prev => ({
-                ...prev,
-                [level]: {
-                  type: 'FeatureCollection',
-                  features: polygonFeatures,
-                } as GeoJSONType,
-              }));
-              success = true;
-            }
-          }
-        } catch (err) {
-          console.warn(`Failed to load ${level} boundaries:`, err);
-          setFailedLevels(prev => new Set(prev).add(level));
-        }
-        
-        // Mark this level as done loading
-        setLoadingLevels(prev => {
-          const next = new Set(prev);
-          next.delete(level);
-          return next;
-        });
-      });
     };
 
-    loadBoundaries();
-  }, [countryId]);
+    initMap();
+  }, [countryId, loadAdminLevel]);
 
-  // Load population and poverty datasets
+  // Load datasets metadata (but NOT their layers - those are lazy loaded)
   useEffect(() => {
     if (!countryId) return;
 
@@ -198,8 +208,8 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
       if (data) {
         setDatasets(data);
-        // Mark all datasets as loading initially
-        setLoadingDatasets(new Set(data.map((d: any) => d.id)));
+        // Don't mark as loading until user toggles them
+        setLoadingDatasets(new Set());
         setFailedDatasets(new Set());
       }
     };
@@ -207,148 +217,141 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     loadDatasets();
   }, [countryId]);
 
-  // Load dataset values as map layers (each updates independently when done)
-  useEffect(() => {
-    if (datasets.length === 0) return;
+  // Load a single dataset layer (lazy, when toggled)
+  const loadDatasetLayer = useCallback(async (dataset: any) => {
+    if (!countryId) return;
+    
+    setLoadingDatasets(prev => new Set(prev).add(dataset.id));
+    setFailedDatasets(prev => {
+      const next = new Set(prev);
+      next.delete(dataset.id);
+      return next;
+    });
+    
+    try {
+      // Get values
+      const { data: values } = await supabase
+        .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
+        .select('admin_pcode, value')
+        .eq('dataset_id', dataset.id)
+        .limit(1000);
 
-    // Load each dataset independently so UI updates as each completes
-    datasets.forEach(async (dataset) => {
-      try {
-        // Get values
-        const { data: values } = await supabase
-          .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
-          .select('admin_pcode, value')
-          .eq('dataset_id', dataset.id)
-          .limit(1000); // Limit for performance
+      if (!values || values.length === 0) {
+        setLoadingDatasets(prev => {
+          const next = new Set(prev);
+          next.delete(dataset.id);
+          return next;
+        });
+        return;
+      }
 
-        if (!values || values.length === 0) {
-          setLoadingDatasets(prev => {
-            const next = new Set(prev);
-            next.delete(dataset.id);
-            return next;
-          });
-          return;
-        }
-
-        // Use cached boundaries if available, otherwise fetch
-        let boundaries: any = adminLevelGeo[dataset.admin_level];
-        let boundariesWereFetched = false;
+      // Check cache for boundaries
+      const cacheKey = `${countryId}_${dataset.admin_level}`;
+      let boundaries: any = adminLevelGeo[dataset.admin_level] || getCachedGeoJSON(cacheKey);
+      
+      if (!boundaries) {
+        const { data: boundaryData } = await supabase.rpc('get_admin_boundaries_geojson', {
+          admin_level: dataset.admin_level,
+          country_id: countryId,
+        });
+        boundaries = boundaryData;
         
-        if (!boundaries) {
-          const { data: boundaryData } = await supabase.rpc('get_admin_boundaries_geojson', {
-            admin_level: dataset.admin_level,
-            country_id: countryId,
-          });
-          boundaries = boundaryData;
-          boundariesWereFetched = true;
-        }
-
-        if (!boundaries || !boundaries.features) {
-          setLoadingDatasets(prev => {
-            const next = new Set(prev);
-            next.delete(dataset.id);
-            return next;
-          });
-          return;
-        }
-        
-        // Cache boundaries back to adminLevelGeo if we fetched them
-        // This helps when the admin level toggle didn't load but the dataset did
-        if (boundariesWereFetched && boundaries.features.length > 0) {
+        // Cache boundaries
+        if (boundaries && boundaries.features?.length > 0) {
           const polygonFeatures = boundaries.features.filter((f: any) => {
             const geomType = f.geometry?.type;
             return geomType === 'Polygon' || geomType === 'MultiPolygon';
           });
           
           if (polygonFeatures.length > 0) {
-            setAdminLevelGeo(prev => ({
-              ...prev,
-              [dataset.admin_level]: {
-                type: 'FeatureCollection',
-                features: polygonFeatures,
-              } as GeoJSONType,
-            }));
-            // Also remove from loading state if still there
-            setLoadingLevels(prev => {
-              const next = new Set(prev);
-              next.delete(dataset.admin_level);
-              return next;
-            });
+            const geoData = {
+              type: 'FeatureCollection',
+              features: polygonFeatures,
+            } as GeoJSONType;
+            
+            setAdminLevelGeo(prev => ({ ...prev, [dataset.admin_level]: geoData }));
+            setCachedGeoJSON(cacheKey, geoData);
           }
         }
-
-        // Create value map and calculate min/max
-        const numericValues = values
-          .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
-          .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
-        
-        if (numericValues.length === 0) {
-          setLoadingDatasets(prev => {
-            const next = new Set(prev);
-            next.delete(dataset.id);
-            return next;
-          });
-          return;
-        }
-
-        const maxValue = Math.max(...numericValues);
-        const minValue = Math.min(...numericValues);
-        const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
-
-        // Create colored features
-        const coloredFeatures = boundaries.features.map((f: any) => {
-          const pcode = f.properties?.admin_pcode;
-          const value = valueMap.get(pcode);
-          const normalized = maxValue > minValue && value !== undefined && !isNaN(value) 
-            ? ((value - minValue) / (maxValue - minValue)) 
-            : 0.5;
-          
-          // Color scale: blue (low) to red (high)
-          const hue = 240 - (normalized * 120); // 240 (blue) to 120 (green/yellow)
-          const color = `hsl(${hue}, 70%, 50%)`;
-
-          return {
-            ...f,
-            properties: {
-              ...f.properties,
-              value,
-              _color: color,
-            }
-          };
-        });
-
-        // Update this specific dataset layer
-        setDatasetLayers(prev => ({
-          ...prev,
-          [dataset.id]: {
-            data: {
-              type: 'FeatureCollection',
-              features: coloredFeatures,
-            } as GeoJSONType,
-            color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
-            minValue,
-            maxValue,
-            datasetName: dataset.name,
-          } as DatasetLayerInfo,
-        }));
-      } catch (err) {
-        console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
-        setFailedDatasets(prev => new Set(prev).add(dataset.id));
       }
+
+      if (!boundaries || !boundaries.features) {
+        setFailedDatasets(prev => new Set(prev).add(dataset.id));
+        setLoadingDatasets(prev => {
+          const next = new Set(prev);
+          next.delete(dataset.id);
+          return next;
+        });
+        return;
+      }
+
+      // Create value map and calculate min/max
+      const numericValues = values
+        .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
+        .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
       
-      // Mark this dataset as done loading
+      if (numericValues.length === 0) {
+        setLoadingDatasets(prev => {
+          const next = new Set(prev);
+          next.delete(dataset.id);
+          return next;
+        });
+        return;
+      }
+
+      const maxValue = Math.max(...numericValues);
+      const minValue = Math.min(...numericValues);
+      const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
+
+      // Create colored features
+      const coloredFeatures = boundaries.features.map((f: any) => {
+        const pcode = f.properties?.admin_pcode;
+        const value = valueMap.get(pcode);
+        const normalized = maxValue > minValue && value !== undefined && !isNaN(value) 
+          ? ((value - minValue) / (maxValue - minValue)) 
+          : 0.5;
+        
+        const hue = 240 - (normalized * 120);
+        const color = `hsl(${hue}, 70%, 50%)`;
+
+        return {
+          ...f,
+          properties: {
+            ...f.properties,
+            value,
+            _color: color,
+          }
+        };
+      });
+
+      setDatasetLayers(prev => ({
+        ...prev,
+        [dataset.id]: {
+          data: {
+            type: 'FeatureCollection',
+            features: coloredFeatures,
+          } as GeoJSONType,
+          color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
+          minValue,
+          maxValue,
+          datasetName: dataset.name,
+        } as DatasetLayerInfo,
+      }));
+    } catch (err) {
+      console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
+      setFailedDatasets(prev => new Set(prev).add(dataset.id));
+    } finally {
       setLoadingDatasets(prev => {
         const next = new Set(prev);
         next.delete(dataset.id);
         return next;
       });
-    });
-  }, [datasets, countryId, adminLevelGeo]);
+    }
+  }, [countryId, adminLevelGeo]);
 
   const allFeatures = useMemo(() => {
     const features: any[] = [];
     
-    // Add visible admin level boundaries
     visibleLevels.forEach(level => {
       if (adminLevelGeo[level] && adminLevelGeo[level]!.type === 'FeatureCollection') {
         features.push(...adminLevelGeo[level]!.features);
@@ -380,7 +383,17 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     return countryCode && countryCenters[countryCode] ? countryCenters[countryCode] : defaultCenter;
   }, [allFeatures, countryCode]);
 
-  const toggleLevel = (level: string) => {
+  // Toggle admin level - lazy load if not already loaded
+  const toggleLevel = useCallback((level: string) => {
+    const isCurrentlyVisible = visibleLevels.has(level);
+    
+    if (!isCurrentlyVisible) {
+      // Turning ON - check if we need to load
+      if (!adminLevelGeo[level] && !loadingLevels.has(level)) {
+        loadAdminLevel(level);
+      }
+    }
+    
     setVisibleLevels(prev => {
       const next = new Set(prev);
       if (next.has(level)) {
@@ -390,9 +403,22 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       }
       return next;
     });
-  };
+  }, [visibleLevels, adminLevelGeo, loadingLevels, loadAdminLevel]);
 
-  const toggleDataset = (datasetId: string) => {
+  // Toggle dataset - lazy load if not already loaded
+  const toggleDataset = useCallback((datasetId: string) => {
+    const isCurrentlyVisible = visibleDatasets.has(datasetId);
+    
+    if (!isCurrentlyVisible) {
+      // Turning ON - check if we need to load
+      if (!datasetLayers[datasetId] && !loadingDatasets.has(datasetId)) {
+        const dataset = datasets.find(d => d.id === datasetId);
+        if (dataset) {
+          loadDatasetLayer(dataset);
+        }
+      }
+    }
+    
     setVisibleDatasets(prev => {
       const next = new Set(prev);
       if (next.has(datasetId)) {
@@ -402,14 +428,37 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       }
       return next;
     });
-  };
+  }, [visibleDatasets, datasetLayers, loadingDatasets, datasets, loadDatasetLayer]);
+
+  // Retry loading a failed level
+  const retryLevel = useCallback((level: string) => {
+    setFailedLevels(prev => {
+      const next = new Set(prev);
+      next.delete(level);
+      return next;
+    });
+    loadAdminLevel(level);
+  }, [loadAdminLevel]);
+
+  // Retry loading a failed dataset
+  const retryDataset = useCallback((datasetId: string) => {
+    const dataset = datasets.find(d => d.id === datasetId);
+    if (dataset) {
+      setFailedDatasets(prev => {
+        const next = new Set(prev);
+        next.delete(datasetId);
+        return next;
+      });
+      loadDatasetLayer(dataset);
+    }
+  }, [datasets, loadDatasetLayer]);
 
   // Generate color scale for legend
   const generateColorScale = (steps: number = 5) => {
     const colors: string[] = [];
     for (let i = 0; i <= steps; i++) {
       const normalized = i / steps;
-      const hue = 240 - (normalized * 120); // 240 (blue) to 120 (green/yellow)
+      const hue = 240 - (normalized * 120);
       colors.push(`hsl(${hue}, 70%, 50%)`);
     }
     return colors;
@@ -445,6 +494,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
         <div className="flex-1 h-[450px] max-h-[60vh] relative">
           {loading ? (
             <div className="h-full flex items-center justify-center text-gray-500">
+              <Loader2 className="animate-spin mr-2" size={20} />
               Loading map...
             </div>
           ) : (
@@ -464,7 +514,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
               />
               
               <LayersControl position="topright">
-                {/* Admin Level Layers */}
                 {Object.entries(adminLevelGeo).map(([level, geo]) => {
                   if (!geo) return null;
                   
@@ -524,6 +573,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             {/* Admin Level Toggles */}
             <div>
               <p className="text-xs font-semibold text-gray-700 mb-2">Admin Levels</p>
+              <p className="text-xs text-gray-500 mb-2">Click to load & toggle layers</p>
               <div className="space-y-2">
                 {['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'].map(level => {
                   const isLoading = loadingLevels.has(level);
@@ -535,42 +585,52 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                   const levelName = levelConfig?.name || level;
                   
                   return (
-                    <button
-                      key={level}
-                      onClick={() => toggleLevel(level)}
-                      disabled={isLoading || (!hasData && !hasFailed)}
-                      className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
-                        isLoading
-                          ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
-                          : hasFailed && !hasData
-                          ? 'bg-red-50 text-red-600 border-red-200 cursor-not-allowed'
-                          : isVisible && hasData
-                          ? 'bg-amber-500 text-white border-amber-600'
-                          : hasData
-                          ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                          : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        {isLoading ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : isVisible ? (
-                          <Eye size={14} />
-                        ) : (
-                          <EyeOff size={14} />
+                    <div key={level} className="flex items-center gap-1">
+                      <button
+                        onClick={() => toggleLevel(level)}
+                        disabled={isLoading}
+                        className={`flex-1 flex items-center justify-between px-3 py-2 text-sm rounded-l border transition ${
+                          isLoading
+                            ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
+                            : hasFailed && !hasData
+                            ? 'bg-red-50 text-red-600 border-red-200'
+                            : isVisible && hasData
+                            ? 'bg-amber-500 text-white border-amber-600'
+                            : hasData
+                            ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          {isLoading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : isVisible && hasData ? (
+                            <Eye size={14} />
+                          ) : (
+                            <EyeOff size={14} />
+                          )}
+                          <span>{level}</span>
+                          {levelName !== level && (
+                            <span className="text-xs opacity-75">({levelName})</span>
+                          )}
+                        </span>
+                        {isLoading && (
+                          <span className="text-xs opacity-75">Loading...</span>
                         )}
-                        <span>{level}</span>
-                        {levelName !== level && (
-                          <span className="text-xs opacity-75">({levelName})</span>
+                        {hasFailed && !hasData && !isLoading && (
+                          <span className="text-xs text-red-500">Timeout</span>
                         )}
-                      </span>
-                      {isLoading && (
-                        <span className="text-xs opacity-75">Loading...</span>
+                      </button>
+                      {hasFailed && !isLoading && (
+                        <button
+                          onClick={() => retryLevel(level)}
+                          className="px-2 py-2 border border-gray-300 rounded-r bg-white hover:bg-gray-50 text-gray-600"
+                          title="Retry loading"
+                        >
+                          <RefreshCw size={14} />
+                        </button>
                       )}
-                      {hasFailed && !hasData && !isLoading && (
-                        <span className="text-xs text-red-500">Timeout</span>
-                      )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -580,6 +640,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             {datasets.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-gray-700 mb-2">Datasets</p>
+                <p className="text-xs text-gray-500 mb-2">Click to load & visualize</p>
                 <div className="space-y-2">
                   {datasets.map(dataset => {
                     const isLoading = loadingDatasets.has(dataset.id);
@@ -588,44 +649,54 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                     const isVisible = visibleDatasets.has(dataset.id);
                     
                     return (
-                      <button
-                        key={dataset.id}
-                        onClick={() => toggleDataset(dataset.id)}
-                        disabled={isLoading || (!hasData && !hasFailed)}
-                        className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded border transition ${
-                          isLoading
-                            ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
-                            : hasFailed && !hasData
-                            ? 'bg-red-50 text-red-600 border-red-200 cursor-not-allowed'
-                            : isVisible && hasData
-                            ? 'bg-blue-500 text-white border-blue-600'
-                            : hasData
-                            ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                            : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2 flex-1 min-w-0">
-                          {isLoading ? (
-                            <Loader2 size={14} className="animate-spin flex-shrink-0" />
-                          ) : isVisible ? (
-                            <Eye size={14} className="flex-shrink-0" />
-                          ) : (
-                            <EyeOff size={14} className="flex-shrink-0" />
-                          )}
-                          <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
-                          <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-                            isVisible ? 'bg-blue-600' : hasFailed ? 'bg-red-200 text-red-700' : 'bg-gray-200 text-gray-600'
-                          }`}>
-                            {dataset.admin_level}
+                      <div key={dataset.id} className="flex items-center gap-1">
+                        <button
+                          onClick={() => toggleDataset(dataset.id)}
+                          disabled={isLoading}
+                          className={`flex-1 flex items-center justify-between px-3 py-2 text-sm rounded-l border transition ${
+                            isLoading
+                              ? 'bg-gray-100 text-gray-500 border-gray-200 cursor-wait'
+                              : hasFailed && !hasData
+                              ? 'bg-red-50 text-red-600 border-red-200'
+                              : isVisible && hasData
+                              ? 'bg-blue-500 text-white border-blue-600'
+                              : hasData
+                              ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2 flex-1 min-w-0">
+                            {isLoading ? (
+                              <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                            ) : isVisible && hasData ? (
+                              <Eye size={14} className="flex-shrink-0" />
+                            ) : (
+                              <EyeOff size={14} className="flex-shrink-0" />
+                            )}
+                            <span className="text-left truncate">{dataset.name.split(' - ')[0]}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
+                              isVisible ? 'bg-blue-600' : hasFailed ? 'bg-red-200 text-red-700' : 'bg-gray-200 text-gray-600'
+                            }`}>
+                              {dataset.admin_level}
+                            </span>
                           </span>
-                        </span>
-                        {isLoading && (
-                          <span className="text-xs opacity-75 flex-shrink-0">Loading...</span>
+                          {isLoading && (
+                            <span className="text-xs opacity-75 flex-shrink-0">Loading...</span>
+                          )}
+                          {hasFailed && !hasData && !isLoading && (
+                            <span className="text-xs text-red-500 flex-shrink-0">Error</span>
+                          )}
+                        </button>
+                        {hasFailed && !isLoading && (
+                          <button
+                            onClick={() => retryDataset(dataset.id)}
+                            className="px-2 py-2 border border-gray-300 rounded-r bg-white hover:bg-gray-50 text-gray-600"
+                            title="Retry loading"
+                          >
+                            <RefreshCw size={14} />
+                          </button>
                         )}
-                        {hasFailed && !hasData && !isLoading && (
-                          <span className="text-xs text-red-500 flex-shrink-0">Error</span>
-                        )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -700,9 +771,12 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
           {!activeDatasetLayer && (
             <div className="p-4 flex-1 flex items-center justify-center">
-              <p className="text-xs text-gray-500 text-center">
-                Toggle a dataset to see its legend and value ranges
-              </p>
+              <div className="text-center">
+                <AlertTriangle size={20} className="mx-auto mb-2 text-amber-500" />
+                <p className="text-xs text-gray-500">
+                  Click a layer to load it. Boundaries are cached locally to reduce database load.
+                </p>
+              </div>
             </div>
           )}
         </div>
