@@ -355,11 +355,11 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
     
     try {
+      // Fetch all values - ADM4 datasets can have 40k+ values
       const { data: values } = await supabase
         .from(dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical')
         .select('admin_pcode, value')
-        .eq('dataset_id', dataset.id)
-        .limit(1000);
+        .eq('dataset_id', dataset.id);
 
       if (!values || values.length === 0) {
         setLoadingDatasets(prev => {
