@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // Use anon key - the RPC function is SECURITY DEFINER so it bypasses RLS
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -25,7 +24,12 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       console.error('Error fetching dataset values:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ 
+        error: error.message,
+        supabaseUrl: supabaseUrl?.substring(0, 30) + '...',
+        datasetId,
+        type
+      }, { status: 500 });
     }
 
     // data is already a JSON array
@@ -34,7 +38,8 @@ export async function GET(request: NextRequest) {
       values, 
       count: values.length,
       datasetId,
-      type
+      type,
+      supabaseUrl: supabaseUrl?.substring(0, 30) + '...'
     });
   } catch (error: any) {
     console.error('Error in datasetValues API:', error);
