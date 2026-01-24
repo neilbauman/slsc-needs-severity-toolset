@@ -78,10 +78,40 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
 
     const loadBoundaries = async () => {
       setLoading(true);
-      const levels = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
-      const newGeo: Record<string, GeoJSONType | null> = {};
+      
+      // Load ADM0 first (country boundary) for quick initial display
+      try {
+        const { data: adm0Data, error: adm0Error } = await supabase.rpc('get_admin_boundaries_geojson', {
+          admin_level: 'ADM0',
+          country_id: countryId,
+        });
 
-      for (const level of levels) {
+        if (!adm0Error && adm0Data && adm0Data.features && adm0Data.features.length > 0) {
+          const polygonFeatures = adm0Data.features.filter((f: any) => {
+            const geomType = f.geometry?.type;
+            return geomType === 'Polygon' || geomType === 'MultiPolygon';
+          });
+
+          if (polygonFeatures.length > 0) {
+            setAdminLevelGeo(prev => ({
+              ...prev,
+              'ADM0': {
+                type: 'FeatureCollection',
+                features: polygonFeatures,
+              } as GeoJSONType,
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load ADM0 boundaries:', err);
+      }
+      
+      setLoading(false);
+
+      // Load other levels in parallel (background)
+      const otherLevels = ['ADM1', 'ADM2', 'ADM3', 'ADM4'];
+      
+      const promises = otherLevels.map(async (level) => {
         try {
           const { data, error } = await supabase.rpc('get_admin_boundaries_geojson', {
             admin_level: level,
@@ -95,19 +125,32 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             });
 
             if (polygonFeatures.length > 0) {
-              newGeo[level] = {
-                type: 'FeatureCollection',
-                features: polygonFeatures,
-              } as GeoJSONType;
+              return {
+                level,
+                geo: {
+                  type: 'FeatureCollection',
+                  features: polygonFeatures,
+                } as GeoJSONType,
+              };
             }
           }
         } catch (err) {
           console.warn(`Failed to load ${level} boundaries:`, err);
         }
-      }
+        return null;
+      });
 
-      setAdminLevelGeo(newGeo);
-      setLoading(false);
+      const results = await Promise.all(promises);
+      
+      setAdminLevelGeo(prev => {
+        const updated = { ...prev };
+        results.forEach(result => {
+          if (result) {
+            updated[result.level] = result.geo;
+          }
+        });
+        return updated;
+      });
     };
 
     loadBoundaries();
@@ -133,14 +176,13 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     loadDatasets();
   }, [countryId]);
 
-  // Load dataset values as map layers
+  // Load dataset values as map layers (in parallel)
   useEffect(() => {
     if (datasets.length === 0) return;
 
     const loadDatasetLayers = async () => {
-      const newLayers: Record<string, DatasetLayerInfo> = {};
-
-      for (const dataset of datasets) {
+      // Load all datasets in parallel
+      const promises = datasets.map(async (dataset) => {
         try {
           // Get values
           const { data: values } = await supabase
@@ -149,22 +191,26 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             .eq('dataset_id', dataset.id)
             .limit(1000); // Limit for performance
 
-          if (!values || values.length === 0) continue;
+          if (!values || values.length === 0) return null;
 
-          // Get boundaries for this admin level
-          const { data: boundaries } = await supabase.rpc('get_admin_boundaries_geojson', {
-            admin_level: dataset.admin_level,
-            country_id: countryId,
-          });
+          // Use cached boundaries if available, otherwise fetch
+          let boundaries: any = adminLevelGeo[dataset.admin_level];
+          if (!boundaries) {
+            const { data: boundaryData } = await supabase.rpc('get_admin_boundaries_geojson', {
+              admin_level: dataset.admin_level,
+              country_id: countryId,
+            });
+            boundaries = boundaryData;
+          }
 
-          if (!boundaries || !boundaries.features) continue;
+          if (!boundaries || !boundaries.features) return null;
 
           // Create value map and calculate min/max
           const numericValues = values
             .map((v: any) => typeof v.value === 'number' ? v.value : parseFloat(v.value))
             .filter((v: any) => !isNaN(v) && v !== null && v !== undefined);
           
-          if (numericValues.length === 0) continue;
+          if (numericValues.length === 0) return null;
 
           const maxValue = Math.max(...numericValues);
           const minValue = Math.min(...numericValues);
@@ -192,26 +238,39 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
             };
           });
 
-          newLayers[dataset.id] = {
-            data: {
-              type: 'FeatureCollection',
-              features: coloredFeatures,
-            } as GeoJSONType,
-            color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
-            minValue,
-            maxValue,
-            datasetName: dataset.name,
+          return {
+            id: dataset.id,
+            layer: {
+              data: {
+                type: 'FeatureCollection',
+                features: coloredFeatures,
+              } as GeoJSONType,
+              color: dataset.name.toLowerCase().includes('population') ? '#3b82f6' : '#ef4444',
+              minValue,
+              maxValue,
+              datasetName: dataset.name,
+            } as DatasetLayerInfo,
           };
         } catch (err) {
           console.warn(`Failed to load dataset layer for ${dataset.name}:`, err);
+          return null;
         }
-      }
+      });
 
+      const results = await Promise.all(promises);
+      
+      const newLayers: Record<string, DatasetLayerInfo> = {};
+      results.forEach(result => {
+        if (result) {
+          newLayers[result.id] = result.layer;
+        }
+      });
+      
       setDatasetLayers(newLayers);
     };
 
     loadDatasetLayers();
-  }, [datasets, countryId]);
+  }, [datasets, countryId, adminLevelGeo]);
 
   const allFeatures = useMemo(() => {
     const features: any[] = [];
