@@ -237,11 +237,11 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     loadAdminLevel('ADM0').then(() => setLoading(false));
   }, [countryId, loadAdminLevel]);
 
-  // Load only ADM0 on mount - clear cache first to ensure fresh data
+  // Load ADM0 on mount, fall back to ADM1 if ADM0 not available
   useEffect(() => {
     if (!countryId) return;
 
-    // Clear cache for this country to fix any corrupted cache issues
+    // Clear cache for this country to ensure fresh data
     const levels = ['ADM0', 'ADM1', 'ADM2', 'ADM3', 'ADM4'];
     levels.forEach(level => {
       const cacheKey = `${countryId}_${level}`;
@@ -253,10 +253,26 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     setAdminLevelGeo({});
     setDatasetLayers({});
     setFailedLevels(new Set());
+    setVisibleLevels(new Set(['ADM0'])); // Reset to default
     setLoading(true);
 
     const initMap = async () => {
+      // Try to load ADM0
       await loadAdminLevel('ADM0');
+      
+      // Small delay to let state update, then check if ADM0 loaded
+      setTimeout(async () => {
+        // If ADM0 didn't load (no data), load ADM1 as fallback
+        setAdminLevelGeo(current => {
+          if (!current['ADM0']) {
+            // ADM0 not available, switch to ADM1
+            setVisibleLevels(new Set(['ADM1']));
+            loadAdminLevel('ADM1');
+          }
+          return current;
+        });
+      }, 100);
+      
       setLoading(false);
     };
 
