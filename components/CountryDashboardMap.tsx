@@ -772,7 +772,7 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
                           {isLoading && <Loader2 size={10} className="animate-spin flex-shrink-0" />}
                           {hasFailed && <RefreshCw size={9} className="flex-shrink-0" />}
                           {isDerived && !isLoading && !hasFailed && (
-                            <GitBranch size={9} className="flex-shrink-0 opacity-70" title="Derived dataset" />
+                            <GitBranch size={9} className="flex-shrink-0 opacity-70" />
                           )}
                           <span className="truncate">{shortName}</span>
                         </span>
