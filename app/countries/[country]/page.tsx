@@ -270,18 +270,32 @@ export default function CountryDashboardPage() {
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
   const [drawerMode, setDrawerMode] = useState<'view' | 'edit'>('view');
 
-  // Set current country based on URL
+  // Derive the active country directly from URL - use this for rendering
+  // This avoids stale data when switching countries before context updates
+  const activeCountry = useMemo(() => {
+    if (!countryCode || !availableCountries.length) return null;
+    return availableCountries.find(c => c.iso_code === countryCode) || null;
+  }, [countryCode, availableCountries]);
+
+  // Reset state when country changes to avoid stale data
   useEffect(() => {
-    if (countryCode && availableCountries.length > 0) {
-      const country = availableCountries.find(c => c.iso_code === countryCode);
-      if (country && country.id !== currentCountry?.id) {
-        setCurrentCountry(country);
-      } else if (!country) {
-        // Country not found or no access
-        router.push('/');
-      }
+    // Clear previous country's data when switching
+    setDatasets([]);
+    setInstances([]);
+    setInstanceDatasets([]);
+    setBoundaryCounts({ ADM1: 0, ADM2: 0, ADM3: 0, ADM4: 0, ADM5: 0 });
+    setLoading(true);
+  }, [countryCode]);
+
+  // Update context's currentCountry based on URL
+  useEffect(() => {
+    if (activeCountry && activeCountry.id !== currentCountry?.id) {
+      setCurrentCountry(activeCountry);
+    } else if (countryCode && availableCountries.length > 0 && !activeCountry) {
+      // Country not found or no access
+      router.push('/');
     }
-  }, [countryCode, availableCountries, currentCountry, setCurrentCountry, router]);
+  }, [activeCountry, currentCountry, countryCode, availableCountries, setCurrentCountry, router]);
 
   const loadDashboard = useCallback(async () => {
     // Ensure we're using the country from the URL, not just context
@@ -591,7 +605,7 @@ export default function CountryDashboardPage() {
     );
   }, [populationDatasets]);
 
-  if (!currentCountry) {
+  if (!activeCountry) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -617,7 +631,7 @@ export default function CountryDashboardPage() {
             </div>
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
-                {currentCountry.iso_code}
+                {activeCountry.iso_code}
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wider text-amber-600 font-semibold">
@@ -671,10 +685,11 @@ export default function CountryDashboardPage() {
               Toggle admin levels and dataset overlays (population, poverty, etc.) to explore geographic data coverage
             </p>
           </div>
-          {currentCountry && (
+          {activeCountry && (
             <CountryDashboardMap
-              countryId={currentCountry.id}
-              countryCode={currentCountry.iso_code}
+              key={activeCountry.id}  // Force remount when country changes
+              countryId={activeCountry.id}
+              countryCode={activeCountry.iso_code}
               adminLevels={adminLevels}
             />
           )}
@@ -686,7 +701,7 @@ export default function CountryDashboardPage() {
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-1">Administrative Structure</p>
               <h2 className="text-lg font-semibold text-gray-900">Admin Level Naming</h2>
-              <p className="text-sm text-gray-600 mt-1">Custom administrative level names for {currentCountry.name}</p>
+              <p className="text-sm text-gray-600 mt-1">Custom administrative level names for {activeCountry.name}</p>
             </div>
             <Link href="/datasets?focus=admin_boundaries" className="text-xs font-semibold text-amber-600 hover:text-amber-700">
               Manage boundaries
