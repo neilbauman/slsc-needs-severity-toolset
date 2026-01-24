@@ -61,7 +61,7 @@ function MapBoundsController({ features, countryCode }: { features: any[]; count
   useEffect(() => {
     if (countryCode && countryCenters[countryCode] && !hasInitializedRef.current) {
       const center = countryCenters[countryCode];
-      map.setView(center, 6, { animate: false });
+      map.setView(center, 7, { animate: false });
       hasInitializedRef.current = true;
     }
   }, [countryCode, map]);
@@ -99,7 +99,7 @@ function MapBoundsController({ features, countryCode }: { features: any[]; count
               requestAnimationFrame(() => {
                 map.fitBounds(bounds, { 
                   padding: [20, 20],
-                  maxZoom: 8,
+                  maxZoom: 9,
                   animate: false
                 });
               });
@@ -107,7 +107,7 @@ function MapBoundsController({ features, countryCode }: { features: any[]; count
               // Bounds too small - likely incomplete ADM0, use country center
               if (countryCode && countryCenters[countryCode]) {
                 const center = countryCenters[countryCode];
-                map.setView(center, 6, { animate: false });
+                map.setView(center, 7, { animate: false });
               }
             }
           }
@@ -603,9 +603,9 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
           ) : (
             <MapContainer
               center={mapCenter}
-              zoom={6}
+              zoom={7}
               minZoom={3}
-              maxZoom={11}
+              maxZoom={12}
               scrollWheelZoom={false}
               doubleClickZoom={false}
               dragging={true}
