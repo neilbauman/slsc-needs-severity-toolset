@@ -355,34 +355,13 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
     });
     
     try {
-      // Fetch all values with pagination - ADM4 datasets can have 40k+ values
-      // Supabase has a default limit of 1000, so we need to paginate
-      const tableName = dataset.type === 'numeric' ? 'dataset_values_numeric' : 'dataset_values_categorical';
-      const pageSize = 10000;
-      let allValues: any[] = [];
-      let page = 0;
-      let hasMore = true;
-      
-      while (hasMore) {
-        const from = page * pageSize;
-        const to = from + pageSize - 1;
-        const { data: pageData } = await supabase
-          .from(tableName)
-          .select('admin_pcode, value')
-          .eq('dataset_id', dataset.id)
-          .range(from, to);
-        
-        if (pageData && pageData.length > 0) {
-          allValues = allValues.concat(pageData);
-          hasMore = pageData.length === pageSize;
-          page++;
-        } else {
-          hasMore = false;
-        }
+      // Fetch all values via API route (uses service key to bypass 1000 row limit)
+      const response = await fetch(`/api/datasetValues?datasetId=${dataset.id}&type=${dataset.type}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch dataset values');
       }
-      
-      const values = allValues;
-      console.log(`[Dataset ${dataset.name}] Loaded ${values.length} values`);
+      const { values, count } = await response.json();
+      console.log(`[Dataset ${dataset.name}] Loaded ${count} values via API`);
 
       if (!values || values.length === 0) {
         setLoadingDatasets(prev => {
@@ -449,8 +428,6 @@ export default function CountryDashboardMap({ countryId, countryCode, adminLevel
       const valueMap = new Map(values.map((v: any) => [v.admin_pcode, typeof v.value === 'number' ? v.value : parseFloat(v.value)]));
       
       console.log(`[Dataset ${dataset.name}] Boundaries: ${boundaries.features?.length}, ValueMap size: ${valueMap.size}`);
-      // Debug: check if specific pcode exists
-      console.log(`[Dataset ${dataset.name}] Sample valueMap check - PH175111008:`, valueMap.get('PH175111008'));
 
       // 5-class sequential color palette (blue to green)
       const colorClasses = ['#2166ac', '#67a9cf', '#d1e5f0', '#91cf60', '#1a9850'];
