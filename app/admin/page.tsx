@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { useCountry } from '@/lib/countryContext';
 import { createClient } from '@/lib/supabaseClient';
-import { Plus, Trash2, Edit2, X, Check, AlertTriangle, Globe, Shield, Users, Settings } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Check, AlertTriangle, Globe, Shield, Users, Settings, GitBranch } from 'lucide-react';
 import Link from 'next/link';
 
 interface Country {
@@ -281,6 +281,13 @@ export default function AdminPage() {
                 className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 flex items-center gap-2"
               >
                 Configure Admin Levels
+              </Link>
+              <Link
+                href="/admin/decision-tree"
+                className="px-4 py-2 bg-teal-600 text-white rounded-md hover:bg-teal-700 flex items-center gap-2"
+              >
+                <GitBranch size={16} />
+                Decision Tree
               </Link>
               <Link
                 href="/admin/users"

@@ -128,7 +128,7 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [showEmptyThemes, setShowEmptyThemes] = useState<boolean>(false);
 
-  type AggregationMethod = 'average' | 'worst_case' | 'custom_weighted';
+  type AggregationMethod = 'average' | 'worst_case' | 'custom_weighted' | 'ssc_decision_tree';
   const defaultPillarRollup = { method: 'average' as AggregationMethod, weights: { P1: 1 / 3, P2: 1 / 3, P3: 1 / 3 } };
   const defaultOverallRollup = { method: 'average' as AggregationMethod, weights: { 'SSC Framework': 0.6, 'Hazard': 0.2, 'Underlying Vulnerability': 0.2 } };
   const [pillarRollup, setPillarRollup] = useState<{ method: AggregationMethod; weights: Record<string, number> }>(defaultPillarRollup);
@@ -910,7 +910,13 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
               <option value="average">Average (Mean)</option>
               <option value="worst_case">Worst Case (Maximum)</option>
               <option value="custom_weighted">Custom weights</option>
+              <option value="ssc_decision_tree">Decision Tree</option>
             </select>
+            {pillarRollup.method === 'ssc_decision_tree' && (
+              <p className="text-xs text-gray-500 mt-1">
+                Uses the SSC lookup: P1 (shelter) dominates, then P2/P3. Edit in Admin → Decision Tree.
+              </p>
+            )}
             {pillarRollup.method === 'custom_weighted' && (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {['P1', 'P2', 'P3'].map((k) => (
