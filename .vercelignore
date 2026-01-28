@@ -4,7 +4,9 @@
 dump_zsh_state
 *.md
 docs/
-scripts/
+# Ignore scripts by default, but keep build-required ones
+scripts/*
+!scripts/ensure-cache-dirs.js
 supabase/migrations/
 .cursorrules
 AGENT_SUMMARY.md
