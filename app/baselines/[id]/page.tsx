@@ -21,6 +21,8 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const baselineId = params.id;
   
   const [baseline, setBaseline] = useState<Baseline | null>(null);
+  const [scoreSummary, setScoreSummary] = useState<{ category: string; avg_score: number; admin_count: number; row_count: number }[]>([]);
+  const [loadingScoreSummary, setLoadingScoreSummary] = useState(false);
   const [loading, setLoading] = useState(true);
   const [computing, setComputing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +33,29 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   useEffect(() => {
     loadBaseline();
   }, [baselineId, retryCount]);
+
+  const loadScoreSummary = async (baselineUuid: string) => {
+    setLoadingScoreSummary(true);
+    try {
+      const { data, error: summaryError } = await supabase.rpc('get_baseline_score_summary', {
+        in_baseline_id: baselineUuid,
+      });
+      if (summaryError) throw summaryError;
+      setScoreSummary(
+        (data || []).map((r: any) => ({
+          category: r.category,
+          avg_score: Number(r.avg_score),
+          admin_count: Number(r.admin_count),
+          row_count: Number(r.row_count),
+        }))
+      );
+    } catch (err: any) {
+      console.warn('[BaselinePage] Could not load baseline score summary:', err?.message || err);
+      setScoreSummary([]);
+    } finally {
+      setLoadingScoreSummary(false);
+    }
+  };
 
   const loadBaseline = async (): Promise<void> => {
     setLoading(true);
@@ -71,6 +96,9 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       }
       
       setBaseline(data);
+      if (data?.id) {
+        await loadScoreSummary(data.id);
+      }
     } catch (err: any) {
       console.error('[BaselinePage] Error loading baseline:', err);
       const errorMessage = err?.message || 'Failed to load baseline';
@@ -106,6 +134,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
         .eq('id', baseline.id);
 
       await loadBaseline();
+      await loadScoreSummary(baseline.id);
       alert(`Baseline computed: ${data?.total_scores || 0} scores generated`);
     } catch (err: any) {
       console.error('Error computing baseline:', err);
@@ -240,6 +269,58 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Baseline Scores Summary */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="font-semibold mb-1">Baseline Scores</h3>
+            <p className="text-sm text-gray-500">
+              {baseline.computed_at ? 'Category-level averages from computed baseline scores.' : 'Compute baseline scores to see results.'}
+            </p>
+          </div>
+          <button
+            onClick={() => baseline?.id && loadScoreSummary(baseline.id)}
+            disabled={loadingScoreSummary}
+            className="btn btn-secondary text-sm"
+          >
+            {loadingScoreSummary ? 'Refreshing...' : 'Refresh scores'}
+          </button>
+        </div>
+
+        {!baseline.computed_at ? (
+          <div className="mt-3 text-sm text-gray-500">
+            No computed scores yet.
+          </div>
+        ) : scoreSummary.length === 0 ? (
+          <div className="mt-3 text-sm text-gray-500">
+            No scores found. If you just computed, click “Refresh scores”.
+          </div>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-600 border-b">
+                  <th className="py-2 pr-4">Category</th>
+                  <th className="py-2 pr-4">Avg score</th>
+                  <th className="py-2 pr-4">ADM3 count</th>
+                  <th className="py-2 pr-4">Rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scoreSummary.map((r) => (
+                  <tr key={r.category} className="border-b last:border-b-0">
+                    <td className="py-2 pr-4 font-medium text-gray-900">{r.category}</td>
+                    <td className="py-2 pr-4">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
+                    <td className="py-2 pr-4">{r.admin_count}</td>
+                    <td className="py-2 pr-4">{r.row_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Baseline Configuration */}

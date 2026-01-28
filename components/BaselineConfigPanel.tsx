@@ -1043,6 +1043,10 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
             const pillarItems = groupedBySection[pillar.code] || [];
             const pillarBg = 'bg-red-50';
             const pillarText = 'text-red-900';
+            const filteredThemes =
+              pillar.code === 'P3'
+                ? themes.filter((t) => t.code !== 'P3.2' && t.code !== 'P3.1')
+                : themes;
             return (
               <div key={pillar.code} className="border rounded-lg overflow-hidden border-red-100">
                 <div className={`px-4 py-2.5 ${pillarBg} border-b border-red-100`}>
@@ -1056,7 +1060,7 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
                   </h4>
                 </div>
                 <div className="divide-y divide-gray-100">
-                  {(showEmptyThemes ? themes : themes.filter((t) => (groupedBySection[t.code]?.length ?? 0) > 0)).map((theme) => {
+                  {(showEmptyThemes ? filteredThemes : filteredThemes.filter((t) => (groupedBySection[t.code]?.length ?? 0) > 0)).map((theme) => {
                     const items = groupedBySection[theme.code] || [];
                     const isHazardOrVuln = theme.code === 'P3.2' || theme.code === 'P3.1';
                     const themeBg = isHazardOrVuln ? (theme.code === 'P3.2' ? 'bg-orange-50' : 'bg-amber-50') : 'bg-gray-50';
@@ -1097,6 +1101,44 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
                     </div>
                   )}
                 </div>
+              </div>
+            );
+          })}
+
+          {/* Hazards + Underlying Vulnerabilities AFTER pillars (Hazards first) */}
+          {(['P3.2', 'P3.1'] as const).map((code) => {
+            const items = groupedBySection[code] || [];
+            const title = code === 'P3.2' ? 'Haz – Hazards' : 'UV – Underlying Vulnerabilities';
+            const bg = code === 'P3.2' ? 'bg-orange-50' : 'bg-amber-50';
+            const border = code === 'P3.2' ? 'border-orange-200' : 'border-amber-200';
+            const text = code === 'P3.2' ? 'text-orange-900' : 'text-amber-900';
+            const theme = frameworkSections.find((s) => s.code === code);
+            const themeName = theme?.name || (code === 'P3.2' ? 'Hazards (P3.2)' : 'Underlying Vulnerabilities (P3.1)');
+            if (!showEmptyThemes && items.length === 0) return null;
+            return (
+              <div key={code} className={`border rounded-lg overflow-hidden ${border}`}>
+                <div className={`px-4 py-2.5 ${bg} border-b ${border}`}>
+                  <h4 className={`font-semibold ${text}`}>
+                    {title}
+                    <span className="font-normal ml-2 text-xs text-gray-600">
+                      {code} — {themeName}
+                    </span>
+                    {items.length > 0 && (
+                      <span className="font-normal ml-2 text-xs text-gray-600">
+                        ({items.length} dataset{items.length !== 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </h4>
+                </div>
+                {items.length > 0 ? (
+                  <div className="divide-y divide-gray-50">
+                    {items.map((bd) => renderDatasetRow(bd))}
+                  </div>
+                ) : (
+                  <div className={`px-4 py-2 text-xs ${bg} text-gray-500 italic`}>
+                    No datasets.
+                  </div>
+                )}
               </div>
             );
           })}
