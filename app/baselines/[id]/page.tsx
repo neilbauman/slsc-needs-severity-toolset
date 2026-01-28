@@ -33,6 +33,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const [showImportModal, setShowImportModal] = useState(false);
   const [configKey, setConfigKey] = useState(0); // Force refresh of config panel
   const [retryCount, setRetryCount] = useState(0);
+  const [selectedMapLayer, setSelectedMapLayer] = useState<string>('overall');
 
   useEffect(() => {
     loadBaseline();
@@ -241,15 +242,88 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
         </Link>
       </header>
 
-      {/* Map at top */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-700 mb-1.5">Baseline scores (avg by location)</h2>
-        <BaselineMap
-          baselineId={baseline.id}
-          countryId={baseline.country_id}
-          adminLevel="ADM3"
-          computedAt={baseline.computed_at}
-        />
+      {/* Map (square, left) + Layer list (right) */}
+      <section className="flex gap-4 flex-wrap md:flex-nowrap">
+        <div className="w-full md:w-[480px] md:h-[480px] flex-shrink-0 h-[320px] md:h-[480px]">
+          <BaselineMap
+              baselineId={baseline.id}
+              countryId={baseline.country_id}
+              adminLevel="ADM3"
+              computedAt={baseline.computed_at}
+              selectedLayer={selectedMapLayer}
+            />
+        </div>
+        <div className="flex-1 min-w-0 border border-gray-200 rounded-lg bg-white overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-200 bg-gray-50">
+            <h2 className="text-sm font-semibold text-gray-800">Score layers</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Click a layer to show it on the map.</p>
+          </div>
+          <div className="p-2 overflow-y-auto max-h-[480px]">
+            <button
+              onClick={() => setSelectedMapLayer('overall')}
+              className={`w-full text-left px-3 py-2 rounded text-sm font-medium mb-1 ${selectedMapLayer === 'overall' ? 'bg-teal-100 text-teal-900 border border-teal-300' : 'hover:bg-gray-100 border border-transparent'}`}
+            >
+              Overall (avg all)
+            </button>
+            {['P1', 'P2', 'P3', 'Hazard', 'Underlying Vulnerability'].map((group) => {
+              const categoriesInGroup = scoreSummary.filter((r) => {
+                const c = (r.category || '').trim().toLowerCase();
+                if (group === 'P1') return c.startsWith('p1') && !c.startsWith('p3');
+                if (group === 'P2') return c.startsWith('p2');
+                if (group === 'P3') return c.startsWith('p3');
+                if (group === 'Hazard') return c.includes('hazard') || c.startsWith('p3.2');
+                if (group === 'Underlying Vulnerability') return c.includes('underlying') || c.includes('vuln') || c.startsWith('p3.1');
+                return false;
+              });
+              return (
+                <div key={group} className="mb-2">
+                  <button
+                    onClick={() => setSelectedMapLayer(group)}
+                    className={`w-full text-left px-3 py-2 rounded text-sm font-medium mb-1 ${selectedMapLayer === group ? 'bg-teal-100 text-teal-900 border border-teal-300' : 'hover:bg-gray-100 border border-transparent'}`}
+                  >
+                    {group}
+                  </button>
+                  {categoriesInGroup.length > 0 && (
+                    <div className="pl-3 space-y-0.5">
+                      {categoriesInGroup.map((r) => (
+                        <button
+                          key={r.category}
+                          onClick={() => setSelectedMapLayer(r.category)}
+                          className={`w-full text-left px-2 py-1.5 rounded text-xs truncate ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                          title={r.category}
+                        >
+                          {r.category}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {scoreSummary.filter((r) => {
+              const c = (r.category || '').trim().toLowerCase();
+              const inGroup = c.startsWith('p1') || c.startsWith('p2') || c.startsWith('p3') || c.includes('hazard') || c.includes('underlying') || c.includes('vuln');
+              return !inGroup;
+            }).length > 0 && (
+              <div className="mt-2 pt-2 border-t border-gray-200">
+                <p className="text-xs font-medium text-gray-500 px-2 mb-1">Other categories</p>
+                {scoreSummary.filter((r) => {
+                  const c = (r.category || '').trim().toLowerCase();
+                  return !c.startsWith('p1') && !c.startsWith('p2') && !c.startsWith('p3') && !c.includes('hazard') && !c.includes('underlying') && !c.includes('vuln');
+                }).map((r) => (
+                  <button
+                    key={r.category}
+                    onClick={() => setSelectedMapLayer(r.category)}
+                    className={`w-full text-left px-2 py-1.5 rounded text-xs truncate mb-0.5 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                    title={r.category}
+                  >
+                    {r.category}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Status + Scores: two columns compact */}
