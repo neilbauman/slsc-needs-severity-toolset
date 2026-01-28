@@ -29,16 +29,7 @@ function MapBoundsController({ features }: { features: any[] }) {
   return null;
 }
 
-function matchCategoryToLayer(category: string, layer: string): boolean {
-  const c = (category || '').trim().toLowerCase();
-  if (layer === 'overall') return true;
-  if (layer === 'P1') return c.startsWith('p1') && !c.startsWith('p3');
-  if (layer === 'P2') return c.startsWith('p2');
-  if (layer === 'P3') return c.startsWith('p3');
-  if (layer === 'Hazard') return c.includes('hazard') || c.startsWith('p3.2');
-  if (layer === 'Underlying Vulnerability') return c.includes('underlying') || c.includes('vuln') || c.startsWith('p3.1');
-  return category === layer;
-}
+// Layer filtering is handled server-side by get_baseline_map_scores()
 
 interface Props {
   baselineId: string;
@@ -66,64 +57,35 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
       setLoading(true);
       setError(null);
       try {
-        // Paginate to get all baseline_scores
-        const allScores: { admin_pcode: string; score: number; category: string }[] = [];
-        const pageSize = 2000;
-        let offset = 0;
-        while (true) {
-          const { data, error: e } = await supabase
-            .from('baseline_scores')
-            .select('admin_pcode, score, category')
-            .eq('baseline_id', baselineId)
-            .range(offset, offset + pageSize - 1);
-          if (e) throw e;
-          if (!data || data.length === 0) break;
-          allScores.push(...data.map((r: any) => ({
-            admin_pcode: String(r.admin_pcode || '').trim(),
-            score: Number(r.score),
-            category: String(r.category || '').trim(),
-          })));
-          if (data.length < pageSize) break;
-          offset += pageSize;
-        }
-
-        const filtered = selectedLayer
-          ? allScores.filter((r) => matchCategoryToLayer(r.category, selectedLayer))
-          : allScores;
-        const byPcode = new Map<string, { sum: number; n: number }>();
-        filtered.forEach((r) => {
-          const p = r.admin_pcode;
-          if (!p) return;
-          if (!byPcode.has(p)) byPcode.set(p, { sum: 0, n: 0 });
-          const x = byPcode.get(p)!;
-          x.sum += r.score;
-          x.n += 1;
-        });
-        const scoreByPcode = new Map<string, number>();
-        byPcode.forEach((v, p) => scoreByPcode.set(p, v.sum / v.n));
-
-        const geoRes = await supabase.rpc('get_admin_boundaries_geojson', {
-          country_id: countryId,
-          admin_level: adminLevel,
-        });
+        const [geoRes, mapScoresRes] = await Promise.all([
+          supabase.rpc('get_admin_boundaries_geojson', {
+            country_id: countryId,
+            admin_level: adminLevel,
+          }),
+          supabase.rpc('get_baseline_map_scores', {
+            in_baseline_id: baselineId,
+            in_admin_level: adminLevel,
+            in_layer: selectedLayer || 'overall',
+          }),
+        ]);
         if (cancelled) return;
         if (geoRes.error) throw geoRes.error;
+        if (mapScoresRes.error) throw mapScoresRes.error;
+
+        const scoreByPcode = new Map<string, number>();
+        (mapScoresRes.data || []).forEach((r: any) => {
+          const p = String(r.admin_pcode || '').trim();
+          if (!p) return;
+          const s = Number(r.avg_score);
+          if (!Number.isFinite(s)) return;
+          scoreByPcode.set(p, s);
+        });
 
         const raw = geoRes.data;
         const fc = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        const allPcodes = Array.from(scoreByPcode.keys());
         const feats = (fc?.features || []).map((f: any) => {
           const pcode = f?.properties?.admin_pcode != null ? String(f.properties.admin_pcode).trim() : '';
-          let score = pcode ? scoreByPcode.get(pcode) : undefined;
-          if (score == null && pcode) {
-            const exact = scoreByPcode.get(pcode);
-            if (exact != null) {
-              score = exact;
-            } else {
-              const childScores = allPcodes.filter((sp) => sp.startsWith(pcode + '.') || sp === pcode).map((sp) => scoreByPcode.get(sp)!);
-              if (childScores.length > 0) score = childScores.reduce((a, b) => a + b, 0) / childScores.length;
-            }
-          }
+          const score = pcode ? scoreByPcode.get(pcode) : undefined;
           return {
             ...f,
             properties: {
