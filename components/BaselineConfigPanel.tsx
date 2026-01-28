@@ -623,7 +623,25 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
   // Build pillar → themes structure so we always show P1, P2, P3, and under each its themes (e.g. P3.1 Underlying Vuln, P3.2 Hazard)
   type PillarWithThemes = { pillar: FrameworkSection; themes: FrameworkSection[] };
   const pillarThemeStructure: PillarWithThemes[] = (() => {
-    const pillars = frameworkSections.filter((s) => s.level === 'pillar').sort((a, b) => a.code.localeCompare(b.code));
+    const orderRank = (s: FrameworkSection): number => {
+      const code = (s.code || '').toLowerCase();
+      const name = (s.name || '').toLowerCase();
+      if (code === 'p1' || code.startsWith('p1')) return 10;
+      if (code === 'p2' || code.startsWith('p2')) return 20;
+      if (code === 'p3' || code.startsWith('p3')) return 30;
+      if (code.startsWith('haz') || name.includes('hazard')) return 40;
+      if (code.startsWith('uv') || name.includes('underlying') || name.includes('vulnerab')) return 50;
+      return 100;
+    };
+
+    const pillars = frameworkSections
+      .filter((s) => s.level === 'pillar')
+      .sort((a, b) => {
+        const ra = orderRank(a);
+        const rb = orderRank(b);
+        if (ra !== rb) return ra - rb;
+        return a.code.localeCompare(b.code);
+      });
     const themes = frameworkSections.filter((s) => s.level === 'theme' || s.level === 'subtheme');
     return pillars.map((pillar) => ({
       pillar,
