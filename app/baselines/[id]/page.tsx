@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
 import BaselineConfigPanel from '@/components/BaselineConfigPanel';
 import ImportFromInstanceModal from '@/components/ImportFromInstanceModal';
+import { getSectionHeadingForCategory, FRAMEWORK_SECTION_ORDER } from '@/lib/categoryToSection';
 
 const BaselineMap = dynamic(() => import('@/components/BaselineMap'), { ssr: false });
 
@@ -265,41 +266,27 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             >
               Overall (avg all)
             </button>
-            {['P1', 'P2', 'P3', 'Hazard', 'Underlying Vulnerability'].map((group) => {
+            {FRAMEWORK_SECTION_ORDER.filter(section => 
+              section !== 'Uncategorized' && 
+              ['P1', 'P2', 'P3', 'Hazards', 'Underlying Vulnerabilities'].includes(section)
+            ).map((group) => {
+              // Map UI group names to match layer parameter names
+              const layerGroupName = group === 'Hazards' ? 'Hazard' : 
+                                    group === 'Underlying Vulnerabilities' ? 'Underlying Vulnerability' : 
+                                    group;
+              
+              // Use getSectionHeadingForCategory to match BaselineConfigPanel logic
               const categoriesInGroup = scoreSummary.filter((r) => {
-                const c = (r.category || '').trim().toLowerCase();
-                if (group === 'P1') {
-                  return c.startsWith('p1') && !c.startsWith('p3') && !c.startsWith('p2');
-                }
-                if (group === 'P2') {
-                  return c.startsWith('p2') && !c.startsWith('p3') && !c.startsWith('p1');
-                }
-                if (group === 'P3') {
-                  // P3 only: exclude P3.1.x (UV) and P3.2.x (Hazard)
-                  return c.startsWith('p3') && !c.startsWith('p3.1') && !c.startsWith('p3.2') 
-                    && !c.includes('hazard') && !c.includes('underlying') && !c.includes('vuln');
-                }
-                if (group === 'Hazard') {
-                  // P3.2.x or contains "hazard", but exclude UV categories
-                  return (c.startsWith('p3.2') || c.includes('hazard')) 
-                    && !c.startsWith('p3.1') 
-                    && !c.includes('underlying') 
-                    && !(c.includes('vuln') && !c.includes('hazard'));
-                }
-                if (group === 'Underlying Vulnerability') {
-                  // P3.1.x, UV prefix, or contains "underlying"/"vuln", but exclude Hazard categories
-                  return (c.startsWith('p3.1') || c.startsWith('uv') || c.includes('underlying') || (c.includes('vuln') && !c.includes('hazard')))
-                    && !c.startsWith('p3.2');
-                }
-                return false;
+                const heading = getSectionHeadingForCategory(r.category);
+                return heading === group;
               });
               return (
                 <div key={group} className="mb-2">
                   <button
-                    onClick={() => setSelectedMapLayer(group)}
-                    className={`w-full text-left px-3 py-2 rounded text-sm font-medium mb-1 ${selectedMapLayer === group ? 'bg-teal-100 text-teal-900 border border-teal-300' : 'hover:bg-gray-100 border border-transparent'}`}
+                    onClick={() => setSelectedMapLayer(layerGroupName)}
+                    className={`w-full text-left px-3 py-2 rounded text-sm font-medium mb-1 ${selectedMapLayer === layerGroupName ? 'bg-teal-100 text-teal-900 border border-teal-300' : 'hover:bg-gray-100 border border-transparent'}`}
                   >
-                    {group}
+                    {group === 'Hazards' ? 'Hazard' : group === 'Underlying Vulnerabilities' ? 'Underlying Vulnerability' : group}
                   </button>
                   {categoriesInGroup.length > 0 && (
                     <div className="pl-3 space-y-0.5">
@@ -319,15 +306,14 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
               );
             })}
             {scoreSummary.filter((r) => {
-              const c = (r.category || '').trim().toLowerCase();
-              const inGroup = c.startsWith('p1') || c.startsWith('p2') || c.startsWith('p3') || c.includes('hazard') || c.includes('underlying') || c.includes('vuln');
-              return !inGroup;
+              const heading = getSectionHeadingForCategory(r.category);
+              return heading === 'Uncategorized';
             }).length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <p className="text-xs font-medium text-gray-500 px-2 mb-1">Other categories</p>
                 {scoreSummary.filter((r) => {
-                  const c = (r.category || '').trim().toLowerCase();
-                  return !c.startsWith('p1') && !c.startsWith('p2') && !c.startsWith('p3') && !c.includes('hazard') && !c.includes('underlying') && !c.includes('vuln');
+                  const heading = getSectionHeadingForCategory(r.category);
+                  return heading === 'Uncategorized';
                 }).map((r) => (
                   <button
                     key={r.category}

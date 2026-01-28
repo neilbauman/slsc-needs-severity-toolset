@@ -1,11 +1,13 @@
 -- ============================================
 -- FIX BASELINE MAP SCORES: REMOVE LIMIT & FIX CATEGORY MAPPING
 -- ============================================
--- Issue 1: Supabase RPC may have 1000 row limit - optimize to only return admin areas with scores
+-- Issue 1: Ensure all admin boundaries render (map component shows grey for boundaries without scores)
 -- Issue 2: Fix category filtering to ensure P3.1.2 Market and similar categories map correctly
 --
--- Optimization: Filter scores by category BEFORE joining with admin_boundaries to reduce result set.
--- This ensures we only return admin areas that actually have scores for the selected layer.
+-- Note: This function returns only admin areas WITH scores for the selected layer.
+-- The map component merges these scores with the full GeoJSON boundaries, showing
+-- grey for boundaries without scores. This approach is efficient and avoids hitting
+-- row limits while still displaying all boundaries.
 
 CREATE OR REPLACE FUNCTION public.get_baseline_map_scores(
   in_baseline_id UUID,
@@ -74,14 +76,16 @@ AS $$
   SELECT
     ab.admin_pcode,
     AVG(fbs.score)::numeric AS avg_score,
-    COUNT(*) AS row_count
+    COUNT(fbs.score) AS row_count
   FROM b
   JOIN public.admin_boundaries ab
     ON ab.country_id = b.country_id
    AND ab.admin_level = in_admin_level
-  JOIN filtered_bs fbs
+  LEFT JOIN filtered_bs fbs
     ON fbs.adm3_pcode = ab.admin_pcode
   GROUP BY ab.admin_pcode
+  -- Return all admin boundaries; those without scores will have NULL avg_score
+  -- The map component will display grey for boundaries without scores
   ORDER BY ab.admin_pcode;
 $$;
 
