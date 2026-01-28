@@ -7,28 +7,56 @@ let cached: SupabaseClient | null = null;
 /** Preferred: create a (cached) browser Supabase client */
 export function createClient(): SupabaseClient {
   if (cached) return cached;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  cached = createSBClient(url, anon, { 
-    auth: { persistSession: true },
-    db: {
-      schema: 'public',
-    },
-    global: {
-      headers: {
-        'x-client-info': 'slsc-toolset',
+  
+  // Check environment variables - but don't throw if they're missing during SSR
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  if (!url || !anon) {
+    // In browser, these should be available. If not, throw an error
+    if (typeof window !== 'undefined') {
+      console.error('[SupabaseClient] Missing environment variables:', {
+        hasUrl: !!url,
+        hasAnon: !!anon
+      });
+      throw new Error('Supabase configuration missing. Please check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your .env.local file.');
+    }
+    // During SSR, create a minimal client that will fail gracefully
+    // This prevents server crashes during SSR
+    cached = createSBClient(url || 'https://placeholder.supabase.co', anon || 'placeholder', {
+      auth: { persistSession: false },
+    });
+    return cached;
+  }
+  
+  try {
+    cached = createSBClient(url, anon, { 
+      auth: { persistSession: true },
+      db: {
+        schema: 'public',
       },
-    },
-    realtime: {
-      params: {
-        eventsPerSecond: 10,
+      global: {
+        headers: {
+          'x-client-info': 'slsc-toolset',
+        },
       },
-    },
-  });
-  return cached;
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    });
+    return cached;
+  } catch (error) {
+    console.error('[SupabaseClient] Failed to create client:', error);
+    // Return a minimal client instead of throwing to prevent crashes
+    cached = createSBClient(url, anon, { auth: { persistSession: false } });
+    return cached;
+  }
 }
 
 /** Back-compat export for places importing { supabase } */
+// Initialize the client - createClient() now handles missing env vars gracefully
 export const supabase = createClient();
 
 /** Default export — do not re-export createClient to avoid duplicate bindings */

@@ -45,18 +45,31 @@ export default function HomePage() {
     async function loadPublicCountries(attempt = 1) {
       try {
         setError(null);
-        const supabase = createClient();
+        let supabase;
+        try {
+          supabase = createClient();
+        } catch (clientError: any) {
+          console.error('[HomePage] Failed to create Supabase client:', clientError);
+          setError(`Database configuration error: ${clientError.message || 'Please check your .env.local file'}`);
+          setPublicCountries([]);
+          setLoadingCountries(false);
+          return;
+        }
         
         // Use a simpler query with timeout handling
+        const queryPromise = supabase
+          .from('countries')
+          .select('id, iso_code, name, active')
+          .eq('active', true)
+          .order('name');
+        
+        const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((_, reject) =>
+          setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000)
+        );
+        
         const { data, error: queryError } = await Promise.race([
-          supabase
-            .from('countries')
-            .select('id, iso_code, name, active')
-            .eq('active', true)
-            .order('name'),
-          new Promise<{ data: null; error: { message: string } }>((_, reject) =>
-            setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000)
-          ),
+          queryPromise,
+          timeoutPromise,
         ]) as any;
         
         if (cancelled) return;
@@ -129,39 +142,52 @@ export default function HomePage() {
   // Show countries user has access to if logged in, otherwise show all public countries
   const countriesToShow = user && availableCountries.length > 0 ? availableCountries : publicCountries;
 
-  // Show loading state
-  // Add timeout to prevent infinite loading
+  // Show loading state; hard escape after 12s so we never block forever
   const [loadingTimeout, setLoadingTimeout] = useState(false);
+  const [forceShowContent, setForceShowContent] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => {
       if (authLoading || (loadingCountries && publicCountries.length === 0 && !error)) {
         setLoadingTimeout(true);
       }
-    }, 10000); // 10 second timeout
+    }, 10000);
     return () => clearTimeout(timer);
   }, [authLoading, loadingCountries, publicCountries.length, error]);
+  useEffect(() => {
+    const escape = setTimeout(() => setForceShowContent(true), 12000);
+    return () => clearTimeout(escape);
+  }, []);
 
-  if (authLoading || (loadingCountries && publicCountries.length === 0 && !error)) {
+  const stillLoading = authLoading || (loadingCountries && publicCountries.length === 0 && !error);
+  if (stillLoading && !forceShowContent) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
           <p className="text-gray-600">Loading...</p>
           {loadingTimeout && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg max-w-md mx-auto">
+            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg max-w-md mx-auto text-left">
               <p className="text-sm text-yellow-800 font-semibold mb-2">Loading is taking longer than expected</p>
-              <p className="text-xs text-yellow-700 mb-2">This might indicate:</p>
-              <ul className="text-xs text-yellow-700 list-disc list-inside text-left space-y-1">
-                <li>Supabase connection issue - check your environment variables</li>
-                <li>Database query timeout - check browser console for errors</li>
-                <li>Network connectivity problem</li>
+              <p className="text-xs text-yellow-700 mb-1"><strong>If you saw a blank page or chunk/500 errors first:</strong> In the project folder run <code className="bg-yellow-100 px-1 rounded">npm start</code>, wait for &quot;✓ Ready&quot;, then hard-refresh (Cmd+Shift+R).</p>
+              <p className="text-xs text-yellow-700 mb-2 mt-2">Otherwise this might be:</p>
+              <ul className="text-xs text-yellow-700 list-disc list-inside space-y-1">
+                <li>Supabase connection — check <code className="bg-yellow-100 px-0.5 rounded">.env.local</code> (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)</li>
+                <li>Database timeout or network — see browser console (F12)</li>
               </ul>
-              <button
-                onClick={() => window.location.reload()}
-                className="mt-3 px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-sm"
-              >
-                Reload Page
-              </button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => setForceShowContent(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                >
+                  Show page anyway
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 text-sm"
+                >
+                  Reload Page
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -172,6 +198,14 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-amber-50">
       <div className="max-w-7xl mx-auto px-6 py-12">
+        {/* Shown when we escaped loading after 12s */}
+        {forceShowContent && stillLoading && (
+          <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <p className="text-sm text-amber-800">
+              <strong>Page loaded slowly.</strong> Some data may still be loading. If the list below is empty or something looks wrong, try <strong>Refreshing</strong> or run <code className="bg-amber-100 px-1 rounded">npm start</code> in the project folder and hard-refresh (Cmd+Shift+R).
+            </p>
+          </div>
+        )}
         {/* Error Message */}
         {error && (
           <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -294,6 +328,7 @@ export default function HomePage() {
           <div className="mt-12 grid gap-4 md:grid-cols-3">
               <Link
                 href="/datasets"
+                prefetch={false}
                 className="bg-white rounded-xl border border-gray-200 p-6 hover:border-blue-500 hover:shadow-lg transition text-center"
               >
                 <h3 className="font-semibold text-gray-900 mb-2">All Datasets</h3>
@@ -301,10 +336,18 @@ export default function HomePage() {
               </Link>
               <Link
                 href="/instances"
+                prefetch={false}
                 className="bg-white rounded-xl border border-gray-200 p-6 hover:border-blue-500 hover:shadow-lg transition text-center"
               >
-                <h3 className="font-semibold text-gray-900 mb-2">All Instances</h3>
-                <p className="text-sm text-gray-600">View response instances across countries</p>
+                <h3 className="font-semibold text-gray-900 mb-2">Legacy Instances</h3>
+                <p className="text-sm text-gray-600">View legacy response instances</p>
+              </Link>
+              <Link
+                href="/responses"
+                className="bg-white rounded-xl border border-gray-200 p-6 hover:border-green-500 hover:shadow-lg transition text-center"
+              >
+                <h3 className="font-semibold text-green-700 mb-2">Layered Responses</h3>
+                <p className="text-sm text-gray-600">New: Baseline + temporal layer architecture</p>
               </Link>
               {isSiteAdmin && (
                 <>

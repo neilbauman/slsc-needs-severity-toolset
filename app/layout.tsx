@@ -6,6 +6,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import { AuthProvider } from "../components/AuthProvider";
 import { CountryProvider } from "../lib/countryContext";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import ChunkErrorHandler from "../components/ChunkErrorHandler";
 
 export const metadata = {
   title: "SLSC Needs Severity Toolset",
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="bg-gray-50 text-gray-800">
+        <ChunkErrorHandler />
         <ErrorBoundary>
           <AuthProvider>
             <CountryProvider>

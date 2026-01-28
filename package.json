@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "prestart": "node scripts/ensure-cache-dirs.js",
+    "start": "next build && next start",
+    "start:serve": "next start",
+    "build": "node scripts/ensure-cache-dirs.js && next build",
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "local": "npm start"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

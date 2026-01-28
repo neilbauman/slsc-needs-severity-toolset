@@ -257,6 +257,14 @@ export default function CountryDashboardPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [instanceDatasets, setInstanceDatasets] = useState<InstanceDatasetLink[]>([]);
+  const [countryBaseline, setCountryBaseline] = useState<{
+    id: string;
+    name: string;
+    status: string | null;
+    slug: string | null;
+    computed_at: string | null;
+    dataset_count: number;
+  } | null>(null);
   const [adminBoundaryGeo, setAdminBoundaryGeo] = useState<GeoJSON | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +292,7 @@ export default function CountryDashboardPage() {
     setInstances([]);
     setInstanceDatasets([]);
     setBoundaryCounts({ ADM1: 0, ADM2: 0, ADM3: 0, ADM4: 0, ADM5: 0 });
+    setCountryBaseline(null);
     setLoading(true);
   }, [countryCode]);
 
@@ -484,6 +493,52 @@ export default function CountryDashboardPage() {
         }
       });
       setBoundaryCounts(nextCounts);
+
+      // Fetch country baseline from new layered responses architecture
+      try {
+        const { data: baselineData } = await supabase
+          .from('country_baselines')
+          .select('id, name, status, computed_at, slug')
+          .eq('country_id', targetCountry.id)
+          .single();
+        
+        if (baselineData) {
+          // Count datasets in baseline
+          const { count: datasetCount } = await supabase
+            .from('baseline_datasets')
+            .select('*', { count: 'exact', head: true })
+            .eq('baseline_id', baselineData.id);
+          
+          setCountryBaseline({
+            ...baselineData,
+            dataset_count: datasetCount || 0
+          });
+        } else {
+          // No baseline for this country yet - check for any baseline
+          const { data: anyBaseline } = await supabase
+            .from('country_baselines')
+            .select('id, name, status, computed_at, slug')
+            .limit(1)
+            .single();
+          
+          if (anyBaseline) {
+            const { count: datasetCount } = await supabase
+              .from('baseline_datasets')
+              .select('*', { count: 'exact', head: true })
+              .eq('baseline_id', anyBaseline.id);
+            
+            setCountryBaseline({
+              ...anyBaseline,
+              dataset_count: datasetCount || 0
+            });
+          } else {
+            setCountryBaseline(null);
+          }
+        }
+      } catch (baselineErr) {
+        console.warn('Could not load country baseline (table may not exist):', baselineErr);
+        setCountryBaseline(null);
+      }
     } catch (err: any) {
       console.error('Failed to load dashboard:', err);
       setError(err?.message || 'Unable to load dashboard data.');
@@ -1103,6 +1158,104 @@ export default function CountryDashboardPage() {
           </div>
         </section>
 
+        {/* COUNTRY BASELINE SECTION */}
+        <section className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-green-600 mb-1">Layered Response Architecture</p>
+              <h2 className="text-lg font-semibold text-gray-900">Country Baseline</h2>
+              <p className="text-sm text-gray-600">
+                Pre-crisis national vulnerability analysis that responses build upon
+              </p>
+            </div>
+            {countryBaseline ? (
+              <Link
+                href={`/baselines/${countryBaseline.slug || countryBaseline.id}`}
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <Settings size={16} />
+                Configure Baseline
+              </Link>
+            ) : (
+              <Link
+                href="/responses"
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <Activity size={16} />
+                Set Up Baseline
+              </Link>
+            )}
+          </div>
+
+          {countryBaseline ? (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white/80 border border-green-100 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  {countryBaseline.status === 'active' ? (
+                    <CheckCircle size={18} className="text-green-600" />
+                  ) : (
+                    <AlertCircle size={18} className="text-yellow-600" />
+                  )}
+                  <span className="text-sm font-medium text-gray-700">Status</span>
+                </div>
+                <p className={`text-lg font-semibold ${
+                  countryBaseline.status === 'active' ? 'text-green-700' : 'text-yellow-700'
+                }`}>
+                  {countryBaseline.status === 'active' ? 'Active' : 
+                   countryBaseline.status === 'draft' ? 'Draft' : 'Archived'}
+                </p>
+              </div>
+
+              <div className="bg-white/80 border border-green-100 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Database size={18} className="text-green-600" />
+                  <span className="text-sm font-medium text-gray-700">Datasets</span>
+                </div>
+                <p className="text-lg font-semibold text-gray-900">
+                  {countryBaseline.dataset_count}
+                </p>
+                <p className="text-xs text-gray-500">configured in baseline</p>
+              </div>
+
+              <div className="bg-white/80 border border-green-100 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <RefreshCcw size={18} className="text-green-600" />
+                  <span className="text-sm font-medium text-gray-700">Last Computed</span>
+                </div>
+                <p className="text-sm font-semibold text-gray-900">
+                  {countryBaseline.computed_at 
+                    ? new Date(countryBaseline.computed_at).toLocaleDateString()
+                    : 'Not yet computed'}
+                </p>
+              </div>
+
+              <div className="bg-white/80 border border-green-100 rounded-lg p-4">
+                <Link 
+                  href="/responses"
+                  className="flex items-center gap-2 text-green-700 hover:text-green-800 font-medium"
+                >
+                  <Activity size={18} />
+                  <div>
+                    <p className="text-sm font-semibold">View Responses</p>
+                    <p className="text-xs text-gray-500">Manage crisis responses</p>
+                  </div>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white/80 border border-dashed border-green-300 rounded-lg p-6 text-center">
+              <Activity size={32} className="mx-auto text-green-400 mb-3" />
+              <p className="text-gray-600 mb-2">No baseline configured yet</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Set up a country baseline to enable the layered response architecture
+              </p>
+              <Link href="/responses" className="btn btn-primary">
+                Get Started
+              </Link>
+            </div>
+          )}
+        </section>
+
         {/* MANAGEMENT SECTION */}
         <section className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
@@ -1112,7 +1265,7 @@ export default function CountryDashboardPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
             <Link
               href="/datasets/new"
               className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition flex items-center gap-3"
@@ -1136,6 +1289,19 @@ export default function CountryDashboardPage() {
               <div>
                 <p className="text-sm font-semibold text-gray-900">Create Instance</p>
                 <p className="text-xs text-gray-600">Start new response scenario</p>
+              </div>
+            </Link>
+
+            <Link
+              href="/responses"
+              className="border border-green-200 rounded-lg p-4 hover:shadow-md transition flex items-center gap-3 bg-green-50"
+            >
+              <div className="p-2 rounded bg-green-600 text-white">
+                <Activity size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-green-800">Layered Responses</p>
+                <p className="text-xs text-green-700">Baseline + temporal layers</p>
               </div>
             </Link>
 

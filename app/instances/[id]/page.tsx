@@ -14,6 +14,7 @@ import VulnerableLocationsPanel from "@/components/VulnerableLocationsPanel";
 import UploadHazardEventModal from "@/components/UploadHazardEventModal";
 import HazardEventScoringModal from "@/components/HazardEventScoringModal";
 import ImportHazardEventModal from "@/components/ImportHazardEventModal";
+import ExportInstanceButton from "@/components/ExportInstanceButton";
 
 // Dynamically import modals to avoid SSR issues
 const InstanceScoringModal = dynamic(
@@ -2180,6 +2181,12 @@ export default function InstancePage({ params }: { params: { id: string } }) {
             >
               Import Hazard Event
             </button>
+            {instance && (
+              <ExportInstanceButton
+                instanceId={instanceId}
+                instanceName={instance.name || 'instance'}
+              />
+            )}
             <Link
               href="/instances"
               className="btn btn-secondary text-xs py-1 px-2"

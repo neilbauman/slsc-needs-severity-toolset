@@ -31,12 +31,28 @@ type FrameworkStructure = {
     name: string;
     description?: string;
     order_index: number;
+    indicators?: Array<{
+      id: string;
+      code: string;
+      name: string;
+      description?: string;
+      unit?: string;
+      order_index: number;
+    }>;
     themes?: Array<{
       id: string;
       code: string;
       name: string;
       description?: string;
       order_index: number;
+      indicators?: Array<{
+        id: string;
+        code: string;
+        name: string;
+        description?: string;
+        unit?: string;
+        order_index: number;
+      }>;
       subthemes?: Array<{
         id: string;
         code: string;
@@ -117,6 +133,18 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [structure, setStructure] = useState<FrameworkStructure | null>(null);
+  
+  // Validate Supabase client on mount
+  useEffect(() => {
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      setError(
+        'Supabase configuration missing.\n\n' +
+        'Please ensure your .env.local file contains:\n' +
+        'NEXT_PUBLIC_SUPABASE_URL=your_supabase_url\n' +
+        'NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key'
+      );
+    }
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -124,7 +152,12 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
 
   useEffect(() => {
     if (open) {
-      loadStructure();
+      // Clear any previous errors when opening the modal
+      setError(null);
+      // Small delay to ensure modal is fully mounted
+      setTimeout(() => {
+        loadStructure();
+      }, 100);
     }
   }, [open]);
 
@@ -134,78 +167,152 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
     
     setLoading(true);
     setError(null);
+    
+    let timeoutId: NodeJS.Timeout | null = null;
+    
     try {
-      // Try RPC first
-      const { data: rpcData, error: rpcError } = await supabase.rpc('get_framework_structure');
+      // Safety check - ensure we have a valid supabase client
+      if (!supabase) {
+        throw new Error('Supabase client not initialized');
+      }
       
+      // Validate environment variables
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        throw new Error(
+          'Supabase configuration missing. Please check your .env.local file contains NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY'
+        );
+      }
+      // Skip RPC entirely - it may reference pillar_id/theme_id which aren't in schema cache yet
+      // Go straight to safe table queries with fallback handling
       let pillars: any[] = [];
       
-      if (rpcError) {
-        console.warn('RPC failed, trying direct table queries:', rpcError);
-        // Fallback: Query tables directly
-        const [pillarsRes, themesRes, subthemesRes, indicatorsRes] = await Promise.all([
-          supabase.from('framework_pillars').select('*').eq('is_active', true).order('order_index'),
-          supabase.from('framework_themes').select('*').eq('is_active', true).order('order_index'),
-          supabase.from('framework_subthemes').select('*').eq('is_active', true).order('order_index'),
-          supabase.from('framework_indicators').select('*').eq('is_active', true).order('order_index')
-        ]);
+      console.log('[FrameworkStructureManager] Starting to load framework structure...');
+      
+      // Add timeout to prevent infinite loading
+      timeoutId = setTimeout(() => {
+        console.error('[FrameworkStructureManager] Query timeout - queries taking too long (>30s)');
+        setError('Request timed out after 30 seconds. The database may be slow or unresponsive.\n\nPlease check:\n1. Your internet connection\n2. Supabase service status\n3. Try clicking "Retry" again');
+        setLoading(false);
+      }, 30000); // 30 second timeout
+      
+      // Query tables directly with safe fallback for schema cache issues
+      console.log('[FrameworkStructureManager] Executing queries for pillars, themes, subthemes...');
+      
+      // Test connection first with a simple query
+      try {
+        const testQuery = await supabase.from('framework_pillars').select('id').limit(1);
+        if (testQuery.error && (testQuery.error.message?.includes('Failed to fetch') || testQuery.error.message?.includes('NetworkError'))) {
+          throw new Error('Cannot connect to Supabase. Please check your internet connection and Supabase project status.');
+        }
+      } catch (testErr: any) {
+        if (testErr.message?.includes('Failed to fetch') || testErr.message?.includes('NetworkError')) {
+          throw new Error('Network error: Cannot reach Supabase. Please check:\n1. Your internet connection\n2. Supabase project is active\n3. No firewall/CORS blocking requests');
+        }
+        // If it's a different error (like table doesn't exist), continue with the main queries
+      }
+      
+      const [pillarsRes, themesRes, subthemesRes] = await Promise.all([
+        supabase.from('framework_pillars').select('*').eq('is_active', true).order('order_index'),
+        supabase.from('framework_themes').select('*').eq('is_active', true).order('order_index'),
+        supabase.from('framework_subthemes').select('*').eq('is_active', true).order('order_index')
+      ]);
+      
+      if (pillarsRes.error) throw pillarsRes.error;
+      if (themesRes.error) throw themesRes.error;
+      if (subthemesRes.error) throw subthemesRes.error;
+      
+      // Query indicators - try safe query first (without new columns) to avoid schema cache issues
+      // Then try to get the new columns if available
+      let indicatorsRes: any = { data: [], error: null };
+      
+      try {
+        // Query indicators with all columns including pillar_id and theme_id
+        // The migration has been applied, so these columns should now exist
+        console.log('[FrameworkStructureManager] Querying indicators with all columns (including pillar_id/theme_id)...');
+        indicatorsRes = await supabase.from('framework_indicators')
+          .select('id, pillar_id, theme_id, subtheme_id, code, name, description, data_type, unit, order_index, is_active, created_at, updated_at')
+          .eq('is_active', true)
+          .order('order_index');
         
-        if (pillarsRes.error) throw pillarsRes.error;
-        if (themesRes.error) throw themesRes.error;
-        if (subthemesRes.error) throw subthemesRes.error;
-        if (indicatorsRes.error) throw indicatorsRes.error;
+        console.log('[FrameworkStructureManager] Indicators query result:', { 
+          hasData: !!indicatorsRes.data, 
+          dataLength: indicatorsRes.data?.length || 0,
+          error: indicatorsRes.error?.message || null 
+        });
         
-        // Build hierarchy manually
-        const themes = themesRes.data || [];
-        const subthemes = subthemesRes.data || [];
-        const indicators = indicatorsRes.data || [];
+        if (indicatorsRes.error) {
+          // Check if it's a schema cache error
+          if (indicatorsRes.error.message?.includes('pillar_id') || 
+              indicatorsRes.error.message?.includes('theme_id') ||
+              indicatorsRes.error.message?.includes('Could not find') ||
+              indicatorsRes.error.code === 'PGRST202') {
+            console.error('[FrameworkStructureManager] Schema cache error detected:', indicatorsRes.error);
+            
+            throw new Error(
+              `Schema cache error detected.\n\n` +
+              `The database columns exist, but Supabase's API cache needs to be refreshed.\n\n` +
+              `Please:\n` +
+              `1. Go to your Supabase Dashboard\n` +
+              `2. Navigate to Settings > API\n` +
+              `3. Click "Reload schema" button\n` +
+              `4. Wait 1-2 minutes\n` +
+              `5. Hard refresh your browser: Cmd+Shift+R (Mac) or Ctrl+Shift+R (Windows)\n` +
+              `6. Then click "Retry" again\n\n` +
+              `Original error: ${indicatorsRes.error.message}`
+            );
+          }
+          throw indicatorsRes.error;
+        }
+        
+        console.log(`Loaded ${indicatorsRes.data.length} indicators (with pillar_id/theme_id columns)`);
+      } catch (err: any) {
+        // If even the safe query fails, that's a real problem
+        const errorMsg = err?.message || err?.toString() || 'Unknown error';
+        if (errorMsg.includes('pillar_id') || errorMsg.includes('theme_id') || errorMsg.includes('Could not find')) {
+          throw new Error(
+            `Schema cache error: ${errorMsg}\n\n` +
+            `To fix this:\n` +
+            `1. Go to your Supabase Dashboard\n` +
+            `2. Navigate to Settings > API\n` +
+            `3. Click "Reload schema" button\n` +
+            `4. Wait 1-2 minutes, then click "Retry" below`
+          );
+        }
+        throw new Error(
+          `Failed to load framework indicators: ${errorMsg}\n\n` +
+          `This might be a database connection issue. Please check your Supabase connection.`
+        );
+      }
+      
+      // Build hierarchy manually
+        const themes = (themesRes.data || []).filter((t: any) => t != null);
+        const subthemes = (subthemesRes.data || []).filter((st: any) => st != null);
+        const indicators = (indicatorsRes.data || []).filter((i: any) => i != null);
         
         pillars = (pillarsRes.data || []).map(p => ({
           ...p,
-          themes: themes
-            .filter(t => t.pillar_id === p.id)
+          indicators: (indicators || [])
+            .filter(i => i && i.pillar_id === p.id)
+            .sort((a, b) => (a.order_index || 0) - (b.order_index || 0)),
+          themes: (themes || [])
+            .filter(t => t && t.pillar_id === p.id)
             .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
             .map(t => ({
               ...t,
-              subthemes: subthemes
-                .filter(st => st.theme_id === t.id)
+              indicators: (indicators || [])
+                .filter(i => i && i.theme_id === t.id)
+                .sort((a, b) => (a.order_index || 0) - (b.order_index || 0)),
+              subthemes: (subthemes || [])
+                .filter(st => st && st.theme_id === t.id)
                 .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
                 .map(st => ({
                   ...st,
-                  indicators: indicators
-                    .filter(i => i.subtheme_id === st.id)
+                  indicators: (indicators || [])
+                    .filter(i => i && i.subtheme_id === st.id)
                     .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
                 }))
             }))
         }));
-      } else {
-        // Process RPC response
-        console.log('Raw RPC response:', rpcData);
-        
-        if (Array.isArray(rpcData)) {
-          pillars = rpcData;
-        } else if (rpcData && typeof rpcData === 'object') {
-          if ('pillars' in rpcData && Array.isArray(rpcData.pillars)) {
-            pillars = rpcData.pillars;
-          } else {
-            try {
-              const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              pillars = Array.isArray(parsed) ? parsed : parsed.pillars || [];
-            } catch (e) {
-              console.error('Failed to parse RPC data:', e);
-              pillars = [];
-            }
-          }
-        } else if (typeof rpcData === 'string') {
-          try {
-            const parsed = JSON.parse(rpcData);
-            pillars = Array.isArray(parsed) ? parsed : parsed.pillars || [];
-          } catch (e) {
-            console.error('Failed to parse JSON string:', e);
-            pillars = [];
-          }
-        }
-      }
       
       console.log('Processed pillars:', pillars);
       
@@ -281,10 +388,42 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
         setError('No framework structure found. The framework tables may be empty. Please run the migration script to import the framework structure.');
       }
     } catch (err: any) {
-      console.error('Error loading framework structure:', err);
-      setError(err.message || 'Failed to load framework structure. Check browser console for details.');
+      console.error('[FrameworkStructureManager] Error loading framework structure:', err);
+      let errorMessage = err?.message || err?.toString() || 'Failed to load framework structure. Check browser console for details.';
+      
+      // Provide more helpful error messages for common issues
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError') || errorMessage.includes('fetch')) {
+        errorMessage = 
+          'Network error: Unable to connect to Supabase.\n\n' +
+          'Please check:\n' +
+          '1. Your internet connection\n' +
+          '2. Your Supabase project is active and accessible\n' +
+          '3. Your .env.local file has correct NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY\n' +
+          '4. There are no CORS or firewall issues blocking the connection\n\n' +
+          'If the issue persists, try:\n' +
+          '- Restarting your Next.js dev server\n' +
+          '- Checking the browser console (F12) for more details';
+      } else if (errorMessage.includes('Invalid API key') || errorMessage.includes('JWT')) {
+        errorMessage = 
+          'Supabase authentication error.\n\n' +
+          'Please verify your NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local is correct.';
+      } else if (errorMessage.includes('relation') || errorMessage.includes('does not exist')) {
+        errorMessage = 
+          'Database table not found.\n\n' +
+          'The framework tables may not exist. Please run the migration scripts:\n' +
+          '- supabase/migrations/37_create_framework_structure_tables.sql\n' +
+          '- supabase/migrations/53_enhance_framework_indicators_for_all_levels.sql';
+      }
+      
+      setError(errorMessage);
+      // Don't crash - set empty structure instead
+      setStructure({ pillars: [] });
     } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       setLoading(false);
+      console.log('[FrameworkStructureManager] Loading complete (loading state cleared)');
     }
   };
 
@@ -329,12 +468,24 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
         if (originalParentId) break;
       }
     } else if (type === 'indicator') {
-      // Find which subtheme this indicator belongs to
+      // Find which parent (pillar, theme, or subtheme) this indicator belongs to
       for (const p of structure?.pillars || []) {
+        // Check pillar-level indicators
+        if (p.indicators?.find((i: any) => i.id === item.id)) {
+          originalParentId = p.id;
+          currentParentId = p.id;
+          break;
+        }
+        // Check theme-level indicators
         for (const t of p.themes || []) {
+          if (t.indicators?.find((i: any) => i.id === item.id)) {
+            originalParentId = t.id;
+            currentParentId = t.id;
+            break;
+          }
+          // Check subtheme-level indicators
           for (const st of t.subthemes || []) {
-            const indicator = st.indicators?.find((i: any) => i.id === item.id);
-            if (indicator) {
+            if (st.indicators?.find((i: any) => i.id === item.id)) {
               originalParentId = st.id;
               currentParentId = st.id;
               break;
@@ -351,9 +502,13 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
       parentOptions: parentOptions || [],
       originalParentId: originalParentId,
       // Ensure parent_id is set for the dropdown - use found parent or fallback to item property
-      pillar_id: type === 'theme' ? (currentParentId || item.pillar_id) : undefined,
-      theme_id: type === 'subtheme' ? (currentParentId || item.theme_id) : undefined,
-      subtheme_id: type === 'indicator' ? (currentParentId || item.subtheme_id) : undefined,
+      pillar_id: type === 'theme' ? (currentParentId || item.pillar_id) : 
+                 type === 'indicator' && originalParentId && structure?.pillars?.some((p: any) => p.id === originalParentId) ? originalParentId : item.pillar_id,
+      theme_id: type === 'subtheme' ? (currentParentId || item.theme_id) :
+                type === 'indicator' && originalParentId && structure?.pillars?.some((p: any) => 
+                  p.themes?.some((t: any) => t.id === originalParentId)) ? originalParentId : item.theme_id,
+      subtheme_id: type === 'indicator' && originalParentId && structure?.pillars?.some((p: any) => 
+                    p.themes?.some((t: any) => t.subthemes?.some((st: any) => st.id === originalParentId))) ? originalParentId : item.subtheme_id,
     });
     
     console.log(`Editing ${type} ${item.id}:`, {
@@ -408,13 +563,30 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
           return;
         }
       } else if (type === 'indicator') {
-        if (editData.subtheme_id) {
+        // Indicators can belong to pillar, theme, or subtheme
+        if (editData.pillar_id) {
+          updateData.pillar_id = editData.pillar_id;
+          updateData.theme_id = null;
+          updateData.subtheme_id = null;
+          if (editData.pillar_id !== editData.originalParentId) {
+            console.log(`Moving indicator ${editData.id} to pillar ${editData.pillar_id}`);
+          }
+        } else if (editData.theme_id) {
+          updateData.theme_id = editData.theme_id;
+          updateData.pillar_id = null;
+          updateData.subtheme_id = null;
+          if (editData.theme_id !== editData.originalParentId) {
+            console.log(`Moving indicator ${editData.id} to theme ${editData.theme_id}`);
+          }
+        } else if (editData.subtheme_id) {
           updateData.subtheme_id = editData.subtheme_id;
+          updateData.pillar_id = null;
+          updateData.theme_id = null;
           if (editData.subtheme_id !== editData.originalParentId) {
-            console.log(`Moving indicator ${editData.id} from subtheme ${editData.originalParentId} to ${editData.subtheme_id}`);
+            console.log(`Moving indicator ${editData.id} to subtheme ${editData.subtheme_id}`);
           }
         } else {
-          setError('Please select a sub-theme for this indicator');
+          setError('Please select a pillar, theme, or sub-theme for this indicator');
           setSaving(false);
           return;
         }
@@ -472,6 +644,332 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
     } catch (err: any) {
       console.error('Error deleting:', err);
       setError(err.message || 'Failed to delete');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddNew = async (
+    type: 'pillar' | 'theme' | 'subtheme' | 'indicator',
+    parentId?: string,
+    parentType?: 'pillar' | 'theme' | 'subtheme'
+  ) => {
+    setSaving(true);
+    setError(null);
+    
+    try {
+      let newItem: any = {
+        name: `New ${type}`,
+        code: '',
+        description: null,
+        order_index: 0,
+        is_active: true,
+      };
+
+      if (type === 'pillar') {
+        // Find the highest order_index and add 1
+        const maxOrder = structure?.pillars?.reduce((max: number, p: any) => 
+          Math.max(max, p.order_index || 0), -1) || -1;
+        newItem.code = `P${(structure?.pillars?.length || 0) + 1}`;
+        newItem.order_index = maxOrder + 1;
+        
+        const { data, error } = await supabase
+          .from('framework_pillars')
+          .insert(newItem)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        await loadStructure();
+        if (data) {
+          setExpanded(prev => new Set([...prev, `p-${data.id}`]));
+          handleEdit('pillar', data);
+        }
+      } else if (type === 'theme') {
+        if (!parentId) {
+          setError('Please select a pillar first');
+          setSaving(false);
+          return;
+        }
+        const parentPillar = structure?.pillars?.find((p: any) => p.id === parentId);
+        if (!parentPillar) {
+          setError('Parent pillar not found');
+          setSaving(false);
+          return;
+        }
+        
+        const themes = parentPillar.themes || [];
+        const maxOrder = themes.reduce((max: number, t: any) => 
+          Math.max(max, t.order_index || 0), -1);
+        const themeNum = themes.length + 1;
+        newItem.pillar_id = parentId;
+        newItem.code = `${parentPillar.code}-T${themeNum}`;
+        newItem.order_index = maxOrder + 1;
+        
+        const { data, error } = await supabase
+          .from('framework_themes')
+          .insert(newItem)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        await loadStructure();
+        if (data) {
+          setExpanded(prev => new Set([...prev, `p-${parentId}`, `t-${data.id}`]));
+          handleEdit('theme', data, structure?.pillars);
+        }
+      } else if (type === 'subtheme') {
+        if (!parentId) {
+          setError('Please select a theme first');
+          setSaving(false);
+          return;
+        }
+        // Find the parent theme
+        let parentTheme: any = null;
+        for (const p of structure?.pillars || []) {
+          const theme = p.themes?.find((t: any) => t.id === parentId);
+          if (theme) {
+            parentTheme = theme;
+            break;
+          }
+        }
+        if (!parentTheme) {
+          setError('Parent theme not found');
+          setSaving(false);
+          return;
+        }
+        
+        const subthemes = parentTheme.subthemes || [];
+        const maxOrder = subthemes.reduce((max: number, st: any) => 
+          Math.max(max, st.order_index || 0), -1);
+        const subthemeNum = subthemes.length + 1;
+        newItem.theme_id = parentId;
+        newItem.code = `${parentTheme.code}-ST${subthemeNum}`;
+        newItem.order_index = maxOrder + 1;
+        
+        const { data, error } = await supabase
+          .from('framework_subthemes')
+          .insert(newItem)
+          .select()
+          .single();
+        
+        if (error) throw error;
+        await loadStructure();
+        if (data) {
+          // Find parent pillar to expand
+          let parentPillarId: string | null = null;
+          for (const p of structure?.pillars || []) {
+            if (p.themes?.some((t: any) => t.id === parentId)) {
+              parentPillarId = p.id;
+              break;
+            }
+          }
+          if (parentPillarId) {
+            setExpanded(prev => new Set([...prev, `p-${parentPillarId}`, `t-${parentId}`, `st-${data.id}`]));
+          }
+          handleEdit('subtheme', data, structure?.pillars?.flatMap((p: any) => p.themes || []));
+        }
+      } else if (type === 'indicator') {
+        if (!parentId || !parentType) {
+          setError('Please select a parent (pillar, theme, or subtheme)');
+          setSaving(false);
+          return;
+        }
+        
+        let parentCode = '';
+        let indicators: any[] = [];
+        
+        if (parentType === 'pillar') {
+          const parentPillar = structure?.pillars?.find((p: any) => p.id === parentId);
+          if (!parentPillar) {
+            setError('Parent pillar not found');
+            setSaving(false);
+            return;
+          }
+          parentCode = parentPillar.code;
+          indicators = parentPillar.indicators || [];
+          // Explicitly set pillar_id and null out other parent fields to satisfy constraint
+          newItem.pillar_id = parentId;
+          newItem.theme_id = null;
+          newItem.subtheme_id = null;
+        } else if (parentType === 'theme') {
+          let parentTheme: any = null;
+          for (const p of structure?.pillars || []) {
+            const theme = p.themes?.find((t: any) => t.id === parentId);
+            if (theme) {
+              parentTheme = theme;
+              break;
+            }
+          }
+          if (!parentTheme) {
+            setError('Parent theme not found');
+            setSaving(false);
+            return;
+          }
+          parentCode = parentTheme.code;
+          // Get indicators from the loaded structure, or query directly if not available
+          indicators = parentTheme.indicators || [];
+          
+          // If indicators array is empty or undefined, it might not be loaded yet
+          // This is okay - we'll just start from 0
+          console.log('[FrameworkStructureManager] Adding indicator to theme:', {
+            themeId: parentId,
+            themeCode: parentCode,
+            existingIndicators: indicators.length
+          });
+          
+          // Explicitly set theme_id and null out other parent fields to satisfy constraint
+          newItem.theme_id = parentId;
+          newItem.pillar_id = null;
+          newItem.subtheme_id = null;
+        } else if (parentType === 'subtheme') {
+          let parentSubtheme: any = null;
+          for (const p of structure?.pillars || []) {
+            for (const t of p.themes || []) {
+              const subtheme = t.subthemes?.find((st: any) => st.id === parentId);
+              if (subtheme) {
+                parentSubtheme = subtheme;
+                break;
+              }
+            }
+            if (parentSubtheme) break;
+          }
+          if (!parentSubtheme) {
+            setError('Parent subtheme not found');
+            setSaving(false);
+            return;
+          }
+          parentCode = parentSubtheme.code;
+          indicators = parentSubtheme.indicators || [];
+          // Explicitly set subtheme_id and null out other parent fields to satisfy constraint
+          newItem.subtheme_id = parentId;
+          newItem.pillar_id = null;
+          newItem.theme_id = null;
+        }
+        
+        const maxOrder = indicators.reduce((max: number, i: any) => 
+          Math.max(max, i.order_index || 0), -1);
+        const indicatorNum = indicators.length + 1;
+        newItem.code = `${parentCode}-I${indicatorNum}`;
+        newItem.order_index = maxOrder + 1;
+        
+        // Ensure data_type is set (required field)
+        if (!newItem.data_type) {
+          newItem.data_type = 'numeric'; // Default to numeric
+        }
+        
+        console.log('[FrameworkStructureManager] Inserting new indicator:', {
+          code: newItem.code,
+          name: newItem.name,
+          pillar_id: newItem.pillar_id,
+          theme_id: newItem.theme_id,
+          subtheme_id: newItem.subtheme_id,
+          parentType,
+          data_type: newItem.data_type
+        });
+        
+        const { data, error } = await supabase
+          .from('framework_indicators')
+          .insert(newItem)
+          .select()
+          .single();
+        
+        if (error) {
+          console.error('[FrameworkStructureManager] Error inserting indicator:', {
+            error,
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            newItem: {
+              code: newItem.code,
+              name: newItem.name,
+              pillar_id: newItem.pillar_id,
+              theme_id: newItem.theme_id,
+              subtheme_id: newItem.subtheme_id
+            }
+          });
+          
+          // Check if it's a schema cache error
+          if (error.message?.includes('pillar_id') || 
+              error.message?.includes('theme_id') ||
+              error.message?.includes('Could not find') ||
+              error.code === 'PGRST202') {
+            throw new Error(
+              `Schema cache error: ${error.message}\n\n` +
+              `The database column may not be recognized yet. Please:\n` +
+              `1. Go to your Supabase Dashboard\n` +
+              `2. Navigate to Settings > API\n` +
+              `3. Click "Reload schema" button\n` +
+              `4. Wait 1-2 minutes, then try again`
+            );
+          }
+          
+          // Check for constraint violations
+          if (error.code === '23505' || error.message?.includes('unique constraint') || error.message?.includes('duplicate key')) {
+            throw new Error(
+              `Duplicate indicator code: ${newItem.code}\n\n` +
+              `An indicator with this code already exists at this level. Please use a different code.`
+            );
+          }
+          
+          // Check for check constraint violations (single parent constraint)
+          if (error.code === '23514' || error.message?.includes('check constraint') || error.message?.includes('framework_indicators_single_parent_check')) {
+            throw new Error(
+              `Invalid indicator configuration: ${error.message}\n\n` +
+              `An indicator must belong to exactly one parent (pillar, theme, or subtheme).`
+            );
+          }
+          
+          throw new Error(
+            `Failed to add indicator: ${error.message || 'Unknown error'}\n\n` +
+            `Error code: ${error.code || 'N/A'}\n` +
+            `Please check the browser console for more details.`
+          );
+        }
+        
+        console.log('[FrameworkStructureManager] Successfully inserted indicator:', data);
+        await loadStructure();
+        if (data) {
+          // Expand parent to show new indicator
+          if (parentType === 'pillar') {
+            setExpanded(prev => new Set([...prev, `p-${parentId}`]));
+          } else if (parentType === 'theme') {
+            let parentPillarId: string | null = null;
+            for (const p of structure?.pillars || []) {
+              if (p.themes?.some((t: any) => t.id === parentId)) {
+                parentPillarId = p.id;
+                break;
+              }
+            }
+            if (parentPillarId) {
+              setExpanded(prev => new Set([...prev, `p-${parentPillarId}`, `t-${parentId}`]));
+            }
+          } else if (parentType === 'subtheme') {
+            let parentPillarId: string | null = null;
+            let parentThemeId: string | null = null;
+            for (const p of structure?.pillars || []) {
+              for (const t of p.themes || []) {
+                if (t.subthemes?.some((st: any) => st.id === parentId)) {
+                  parentPillarId = p.id;
+                  parentThemeId = t.id;
+                  break;
+                }
+              }
+              if (parentPillarId) break;
+            }
+            if (parentPillarId && parentThemeId) {
+              setExpanded(prev => new Set([...prev, `p-${parentPillarId}`, `t-${parentThemeId}`, `st-${parentId}`]));
+            }
+          }
+          handleEdit('indicator', data, structure?.pillars?.flatMap((p: any) => 
+            p.themes?.flatMap((t: any) => t.subthemes || []) || []
+          ) || []);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error adding new item:', err);
+      setError(err.message || 'Failed to add new item');
     } finally {
       setSaving(false);
     }
@@ -674,11 +1172,27 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
           if (items.length > 0) break;
         }
       } else if (type === 'indicator') {
+        // Find indicator at any level (pillar, theme, or subtheme)
         for (const p of structure.pillars || []) {
+          // Check pillar-level indicators
+          const pillarIndicator = p.indicators?.find((i: any) => i.id === activeId);
+          if (pillarIndicator) {
+            items = [...(p.indicators || [])];
+            parentId = p.id;
+            break;
+          }
+          // Check theme-level indicators
           for (const t of p.themes || []) {
+            const themeIndicator = t.indicators?.find((i: any) => i.id === activeId);
+            if (themeIndicator) {
+              items = [...(t.indicators || [])];
+              parentId = t.id;
+              break;
+            }
+            // Check subtheme-level indicators
             for (const st of t.subthemes || []) {
-              const indicator = st.indicators?.find((i: any) => i.id === activeId);
-              if (indicator) {
+              const subthemeIndicator = st.indicators?.find((i: any) => i.id === activeId);
+              if (subthemeIndicator) {
                 items = [...(st.indicators || [])];
                 parentId = st.id;
                 break;
@@ -736,11 +1250,11 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
   ) => {
     if (!structure) return;
 
-    // Only allow moving themes to pillars, subthemes to themes, indicators to subthemes
+    // Only allow moving themes to pillars, subthemes to themes, indicators to pillars/themes/subthemes
     const validMoves: Record<string, string[]> = {
       theme: ['pillar'],
       subtheme: ['theme'],
-      indicator: ['subtheme']
+      indicator: ['pillar', 'theme', 'subtheme']
     };
 
     if (!validMoves[activeType]?.includes(overType)) {
@@ -794,12 +1308,26 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
           }
         }
       } else if (activeType === 'indicator') {
+        // Find indicator at any level (pillar, theme, or subtheme)
         for (const p of structure.pillars || []) {
+          // Check pillar-level indicators
+          const pillarIndicator = p.indicators?.find((i: any) => i.id === activeId);
+          if (pillarIndicator) {
+            activeItem = pillarIndicator;
+            break;
+          }
+          // Check theme-level indicators
           for (const t of p.themes || []) {
+            const themeIndicator = t.indicators?.find((i: any) => i.id === activeId);
+            if (themeIndicator) {
+              activeItem = themeIndicator;
+              break;
+            }
+            // Check subtheme-level indicators
             for (const st of t.subthemes || []) {
-              const indicator = st.indicators?.find((i: any) => i.id === activeId);
-              if (indicator) {
-                activeItem = indicator;
+              const subthemeIndicator = st.indicators?.find((i: any) => i.id === activeId);
+              if (subthemeIndicator) {
+                activeItem = subthemeIndicator;
                 break;
               }
             }
@@ -807,16 +1335,30 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
           }
           if (activeItem) break;
         }
-        // Find the target subtheme
-        for (const p of structure.pillars || []) {
-          for (const t of p.themes || []) {
-            const subtheme = t.subthemes?.find((st: any) => st.id === overId);
-            if (subtheme) {
-              newParentId = subtheme.id;
+        
+        // Find the target parent (pillar, theme, or subtheme)
+        if (overType === 'pillar') {
+          const targetPillar = structure.pillars?.find((p: any) => p.id === overId);
+          if (targetPillar) newParentId = targetPillar.id;
+        } else if (overType === 'theme') {
+          for (const p of structure.pillars || []) {
+            const theme = p.themes?.find((t: any) => t.id === overId);
+            if (theme) {
+              newParentId = theme.id;
               break;
             }
           }
-          if (newParentId) break;
+        } else if (overType === 'subtheme') {
+          for (const p of structure.pillars || []) {
+            for (const t of p.themes || []) {
+              const subtheme = t.subthemes?.find((st: any) => st.id === overId);
+              if (subtheme) {
+                newParentId = subtheme.id;
+                break;
+              }
+            }
+            if (newParentId) break;
+          }
         }
       }
 
@@ -839,15 +1381,28 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
           }
         }
       } else if (activeType === 'indicator') {
-        for (const p of structure.pillars || []) {
-          for (const t of p.themes || []) {
-            const subtheme = t.subthemes?.find((st: any) => st.id === newParentId);
-            if (subtheme) {
-              newSiblings = [...(subtheme.indicators || [])];
+        if (overType === 'pillar') {
+          const targetPillar = structure.pillars?.find((p: any) => p.id === newParentId);
+          newSiblings = [...(targetPillar?.indicators || [])];
+        } else if (overType === 'theme') {
+          for (const p of structure.pillars || []) {
+            const theme = p.themes?.find((t: any) => t.id === newParentId);
+            if (theme) {
+              newSiblings = [...(theme.indicators || [])];
               break;
             }
           }
-          if (newSiblings.length > 0) break;
+        } else if (overType === 'subtheme') {
+          for (const p of structure.pillars || []) {
+            for (const t of p.themes || []) {
+              const subtheme = t.subthemes?.find((st: any) => st.id === newParentId);
+              if (subtheme) {
+                newSiblings = [...(subtheme.indicators || [])];
+                break;
+              }
+            }
+            if (newSiblings.length > 0) break;
+          }
         }
       }
 
@@ -863,7 +1418,18 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
       } else if (activeType === 'subtheme') {
         updateData.theme_id = newParentId;
       } else if (activeType === 'indicator') {
-        updateData.subtheme_id = newParentId;
+        // Clear all parent IDs first
+        updateData.pillar_id = null;
+        updateData.theme_id = null;
+        updateData.subtheme_id = null;
+        // Set the appropriate parent ID based on target type
+        if (overType === 'pillar') {
+          updateData.pillar_id = newParentId;
+        } else if (overType === 'theme') {
+          updateData.theme_id = newParentId;
+        } else if (overType === 'subtheme') {
+          updateData.subtheme_id = newParentId;
+        }
       }
 
       const { error: updateError } = await supabase
@@ -933,6 +1499,36 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
         });
       });
       
+      // Fix indicator ordering within each pillar
+      (structure.pillars || []).forEach((p: any) => {
+        (p.indicators || []).forEach((i: any, index: number) => {
+          if (i.order_index !== index) {
+            updates.push(
+              Promise.resolve(supabase.from('framework_indicators').update({ order_index: index }).eq('id', i.id)).then((result) => {
+                if (result.error) throw result.error;
+                return result;
+              })
+            );
+          }
+        });
+      });
+      
+      // Fix indicator ordering within each theme
+      (structure.pillars || []).forEach((p: any) => {
+        (p.themes || []).forEach((t: any) => {
+          (t.indicators || []).forEach((i: any, index: number) => {
+            if (i.order_index !== index) {
+              updates.push(
+                Promise.resolve(supabase.from('framework_indicators').update({ order_index: index }).eq('id', i.id)).then((result) => {
+                  if (result.error) throw result.error;
+                  return result;
+                })
+              );
+            }
+          });
+        });
+      });
+      
       // Fix indicator ordering within each subtheme
       (structure.pillars || []).forEach((p: any) => {
         (p.themes || []).forEach((t: any) => {
@@ -993,11 +1589,134 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
               <p className="mt-4 text-gray-600">Loading framework structure...</p>
             </div>
           ) : error ? (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-              <AlertCircle className="text-red-600" size={20} />
-              <p className="text-sm text-red-700">{error}</p>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
+                <div className="flex-1">
+                  <p className="text-sm text-red-700 whitespace-pre-wrap">{error}</p>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => setError(null)}
+                      className="px-3 py-1.5 text-sm bg-white border border-red-300 text-red-700 rounded hover:bg-red-50 transition"
+                    >
+                      Dismiss
+                    </button>
+                    <button
+                      onClick={() => {
+                        setError(null);
+                        loadStructure();
+                      }}
+                      className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setError(null)}
+                  className="text-red-400 hover:text-red-600 transition flex-shrink-0"
+                  title="Dismiss error"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
-          ) : structure && structure.pillars && structure.pillars.length > 0 ? (
+          ) : (
+            <>
+              {/* Quick Create Section */}
+              <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700">Quick Create</h3>
+                  <button
+                    onClick={() => handleAddNew('pillar')}
+                    disabled={saving || editing !== null}
+                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                    Add Pillar
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      // Check if Hazards pillar already exists
+                      const hazardsExists = structure?.pillars?.some((p: any) => 
+                        p.code === 'Hazards' || p.name.toLowerCase().includes('hazard')
+                      );
+                      if (hazardsExists) {
+                        setError('A Hazards pillar already exists');
+                        return;
+                      }
+                      const maxOrder = structure?.pillars?.reduce((max: number, p: any) => 
+                        Math.max(max, p.order_index || 0), -1) || -1;
+                      const { data, error } = await supabase
+                        .from('framework_pillars')
+                        .insert({
+                          code: 'Hazards',
+                          name: 'Hazards',
+                          description: 'Hazard exposure and risk assessment',
+                          order_index: maxOrder + 1,
+                          is_active: true,
+                        })
+                        .select()
+                        .single();
+                      if (error) {
+                        setError(error.message);
+                      } else {
+                        await loadStructure();
+                        if (data) {
+                          setExpanded(prev => new Set([...prev, `p-${data.id}`]));
+                        }
+                      }
+                    }}
+                    disabled={saving || editing !== null}
+                    className="px-3 py-1.5 text-sm bg-yellow-600 text-white rounded hover:bg-yellow-700 flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                    Add Hazards Pillar
+                  </button>
+                  <button
+                    onClick={async () => {
+                      // Check if Underlying Vulnerabilities pillar already exists
+                      const vulnExists = structure?.pillars?.some((p: any) => 
+                        p.code === 'Underlying Vulnerabilities' || p.name.toLowerCase().includes('underlying vulnerability')
+                      );
+                      if (vulnExists) {
+                        setError('An Underlying Vulnerabilities pillar already exists');
+                        return;
+                      }
+                      const maxOrder = structure?.pillars?.reduce((max: number, p: any) => 
+                        Math.max(max, p.order_index || 0), -1) || -1;
+                      const { data, error } = await supabase
+                        .from('framework_pillars')
+                        .insert({
+                          code: 'Underlying Vulnerabilities',
+                          name: 'Underlying Vulnerabilities',
+                          description: 'Pre-existing vulnerabilities and risk factors',
+                          order_index: maxOrder + 1,
+                          is_active: true,
+                        })
+                        .select()
+                        .single();
+                      if (error) {
+                        setError(error.message);
+                      } else {
+                        await loadStructure();
+                        if (data) {
+                          setExpanded(prev => new Set([...prev, `p-${data.id}`]));
+                        }
+                      }
+                    }}
+                    disabled={saving || editing !== null}
+                    className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                    Add Underlying Vulnerabilities Pillar
+                  </button>
+                </div>
+              </div>
+
+              {structure && structure.pillars && structure.pillars.length > 0 ? (
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -1027,26 +1746,36 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                               )}
                             </button>
                       {editing === `pillar-${pillar.id}` ? (
-                        <div className="flex-1 flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={editData?.code || ''}
-                            onChange={(e) => setEditData({ ...editData, code: e.target.value })}
-                            className="w-24 px-2 py-1 border border-gray-300 rounded text-sm font-mono"
-                            placeholder="Code"
-                            title="Pillar code (e.g., P1, P2, P3)"
-                          />
-                          <input
-                            type="text"
-                            value={editData?.name || ''}
-                            onChange={(e) => setEditData({ ...editData, name: e.target.value })}
-                            className="flex-1 px-2 py-1 border border-gray-300 rounded"
-                            placeholder="Name"
-                            autoFocus
+                        <div className="flex-1 flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editData?.code || ''}
+                              onChange={(e) => setEditData({ ...editData, code: e.target.value })}
+                              className="w-24 px-2 py-1 border border-gray-300 rounded text-sm font-mono"
+                              placeholder="Code"
+                              title="Pillar code (e.g., P1, P2, P3)"
+                            />
+                            <input
+                              type="text"
+                              value={editData?.name || ''}
+                              onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                              className="flex-1 px-2 py-1 border border-gray-300 rounded"
+                              placeholder="Name"
+                              autoFocus
+                            />
+                          </div>
+                          <textarea
+                            value={editData?.description || ''}
+                            onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                            placeholder="Description (optional)"
+                            rows={2}
                           />
                         </div>
                       ) : (
                         <>
+                          <span className="text-xs font-medium text-gray-500 uppercase">Pillar</span>
                           <span className="font-semibold text-blue-900">{pillar.code}</span>
                           <span className="text-gray-900">{pillar.name}</span>
                         </>
@@ -1075,6 +1804,22 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                       ) : (
                         <>
                           <button
+                            onClick={() => handleAddNew('theme', pillar.id)}
+                            disabled={saving || editing !== null}
+                            className="p-1 text-green-600 hover:text-green-700"
+                            title="Add new theme"
+                          >
+                            <Plus size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleAddNew('indicator', pillar.id, 'pillar')}
+                            disabled={saving || editing !== null}
+                            className="p-1 text-purple-600 hover:text-purple-700"
+                            title="Add indicator to pillar"
+                          >
+                            <Plus size={14} />
+                          </button>
+                          <button
                             onClick={() => handleEdit('pillar', pillar)}
                             className="p-1 text-blue-600 hover:text-blue-700"
                           >
@@ -1090,6 +1835,164 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                       )}
                     </div>
                         </div>
+
+                        {/* Pillar-level Indicators */}
+                        {expanded.has(`p-${pillar.id}`) && pillar.indicators && pillar.indicators.length > 0 && (
+                          <SortableContext
+                            items={pillar.indicators.map(i => `indicator-${i.id}`)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <div className="border-t border-gray-200 bg-purple-50">
+                              <div className="px-4 py-2 text-xs font-medium text-purple-700 uppercase">Pillar Indicators</div>
+                              {pillar.indicators.map((indicator) => (
+                                <SortableItem key={indicator.id} id={indicator.id} type="indicator" disabled={editing !== null}>
+                                  <div className="border-t border-purple-200 bg-white px-4 py-1.5 flex items-center justify-between pl-8">
+                                    <div className="flex items-center gap-2 flex-1">
+                                      {editing === `indicator-${indicator.id}` ? (
+                                        <div className="flex-1 flex items-center gap-1">
+                                          <input
+                                            type="text"
+                                            value={editData?.code || ''}
+                                            onChange={(e) => setEditData({ ...editData, code: e.target.value })}
+                                            className="w-24 px-2 py-1 border border-gray-300 rounded text-xs font-mono"
+                                            placeholder="Code"
+                                            title="Indicator code"
+                                          />
+                                          <input
+                                            type="text"
+                                            value={editData?.name || ''}
+                                            onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                                            className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                                            placeholder="Name"
+                                            autoFocus
+                                          />
+                                          <select
+                                            value={editData?.pillar_id || ''}
+                                            onChange={(e) => {
+                                              const newPillarId = e.target.value;
+                                              const newPillar = structure?.pillars?.find((p: any) => p.id === newPillarId);
+                                              let newCode = editData?.code || '';
+                                              if (newPillar && editData?.code) {
+                                                const match = editData.code.match(/-I(\d+)$/);
+                                                if (match) {
+                                                  newCode = `${newPillar.code}-I${match[1]}`;
+                                                }
+                                              }
+                                              setEditData({ ...editData, pillar_id: newPillarId || null, theme_id: null, subtheme_id: null, code: newCode });
+                                            }}
+                                            className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[150px]"
+                                            title="Attach to pillar"
+                                          >
+                                            <option value="">Select pillar...</option>
+                                            {structure?.pillars?.map((p: any) => (
+                                              <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                                            ))}
+                                          </select>
+                                          <select
+                                            value={editData?.theme_id || ''}
+                                            onChange={(e) => {
+                                              const newThemeId = e.target.value;
+                                              const newTheme = structure?.pillars?.flatMap((p: any) => p.themes || []).find((t: any) => t.id === newThemeId);
+                                              let newCode = editData?.code || '';
+                                              if (newTheme && editData?.code) {
+                                                const match = editData.code.match(/-I(\d+)$/);
+                                                if (match) {
+                                                  newCode = `${newTheme.code}-I${match[1]}`;
+                                                }
+                                              }
+                                              setEditData({ ...editData, theme_id: newThemeId || null, pillar_id: null, subtheme_id: null, code: newCode });
+                                            }}
+                                            className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[200px]"
+                                            title="Attach to theme"
+                                          >
+                                            <option value="">Select theme...</option>
+                                            {structure?.pillars?.flatMap((p: any) => 
+                                              p.themes?.map((t: any) => (
+                                                <option key={t.id} value={t.id}>{p.code} → {t.name}</option>
+                                              )) || []
+                                            )}
+                                          </select>
+                                          <select
+                                            value={editData?.subtheme_id || ''}
+                                            onChange={(e) => {
+                                              const newSubthemeId = e.target.value;
+                                              const newSubtheme = structure?.pillars?.flatMap((p: any) => 
+                                                p.themes?.flatMap((t: any) => t.subthemes || []) || []
+                                              ).find((st: any) => st.id === newSubthemeId);
+                                              let newCode = editData?.code || '';
+                                              if (newSubtheme && editData?.code) {
+                                                const match = editData.code.match(/-I(\d+)$/);
+                                                if (match) {
+                                                  newCode = `${newSubtheme.code}-I${match[1]}`;
+                                                }
+                                              }
+                                              setEditData({ ...editData, subtheme_id: newSubthemeId || null, pillar_id: null, theme_id: null, code: newCode });
+                                            }}
+                                            className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[250px]"
+                                            title="Attach to subtheme"
+                                          >
+                                            <option value="">Select subtheme...</option>
+                                            {structure?.pillars?.flatMap((p: any) => 
+                                              p.themes?.flatMap((t: any) => 
+                                                t.subthemes?.map((st: any) => (
+                                                  <option key={st.id} value={st.id}>{p.code} → {t.name} → {st.name}</option>
+                                                )) || []
+                                              ) || []
+                                            )}
+                                          </select>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <span className="text-xs text-gray-500">{indicator.code}</span>
+                                          <span className="text-xs text-gray-600">{indicator.name}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {editing === `indicator-${indicator.id}` ? (
+                                        <>
+                                          <button
+                                            onClick={() => handleSave('indicator')}
+                                            disabled={saving}
+                                            className="p-1 text-green-600 hover:text-green-700"
+                                          >
+                                            <Save size={12} />
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setEditing(null);
+                                              setEditData(null);
+                                            }}
+                                            className="p-1 text-gray-600 hover:text-gray-700"
+                                          >
+                                            <X size={12} />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => handleEdit('indicator', indicator, structure?.pillars?.flatMap((p: any) => 
+                                              p.themes?.flatMap((t: any) => t.subthemes || []) || []
+                                            ) || [])}
+                                            className="p-1 text-blue-600 hover:text-blue-700"
+                                          >
+                                            <Edit2 size={12} />
+                                          </button>
+                                          <button
+                                            onClick={() => handleDelete('indicator', indicator.id)}
+                                            className="p-1 text-red-600 hover:text-red-700"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </SortableItem>
+                              ))}
+                            </div>
+                          </SortableContext>
+                        )}
 
                         {/* Themes */}
                         {expanded.has(`p-${pillar.id}`) && (
@@ -1113,24 +2016,25 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                             )}
                           </button>
                           {editing === `theme-${theme.id}` ? (
-                            <div className="flex-1 flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={editData?.code || ''}
-                                onChange={(e) => setEditData({ ...editData, code: e.target.value })}
-                                className="w-32 px-2 py-1 border border-gray-300 rounded text-sm font-mono"
-                                placeholder="Code"
-                                title="Theme code (e.g., P1-T1)"
-                              />
-                              <input
-                                type="text"
-                                value={editData?.name || ''}
-                                onChange={(e) => setEditData({ ...editData, name: e.target.value })}
-                                className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
-                                placeholder="Name"
-                                autoFocus
-                              />
-                              <select
+                            <div className="flex-1 flex flex-col gap-2">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={editData?.code || ''}
+                                  onChange={(e) => setEditData({ ...editData, code: e.target.value })}
+                                  className="w-32 px-2 py-1 border border-gray-300 rounded text-sm font-mono"
+                                  placeholder="Code"
+                                  title="Theme code (e.g., P1-T1)"
+                                />
+                                <input
+                                  type="text"
+                                  value={editData?.name || ''}
+                                  onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                                  className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                                  placeholder="Name"
+                                  autoFocus
+                                />
+                                <select
                                 value={editData?.pillar_id || ''}
                                 onChange={(e) => {
                                   const newPillarId = e.target.value;
@@ -1160,9 +2064,18 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                                   </option>
                                 ))}
                               </select>
+                              </div>
+                              <textarea
+                                value={editData?.description || ''}
+                                onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                                placeholder="Description (optional)"
+                                rows={2}
+                              />
                             </div>
                           ) : (
                             <>
+                              <span className="text-xs font-medium text-gray-500 uppercase">Theme</span>
                               <span className="font-medium text-gray-700">{theme.code}</span>
                               <span className="text-gray-700 text-sm">{theme.name}</span>
                             </>
@@ -1191,6 +2104,22 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                           ) : (
                         <>
                           <button
+                            onClick={() => handleAddNew('subtheme', theme.id)}
+                            disabled={saving || editing !== null}
+                            className="p-1 text-green-600 hover:text-green-700"
+                            title="Add new subtheme"
+                          >
+                            <Plus size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleAddNew('indicator', theme.id, 'theme')}
+                            disabled={saving || editing !== null}
+                            className="p-1 text-purple-600 hover:text-purple-700"
+                            title="Add indicator to theme"
+                          >
+                            <Plus size={12} />
+                          </button>
+                          <button
                             onClick={() => handleEdit('theme', theme, structure?.pillars)}
                             className="p-1 text-blue-600 hover:text-blue-700"
                           >
@@ -1206,6 +2135,154 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                       )}
                                   </div>
                                 </div>
+
+                                {/* Theme-level Indicators */}
+                                {expanded.has(`t-${theme.id}`) && theme.indicators && theme.indicators.length > 0 && (
+                                  <SortableContext
+                                    items={theme.indicators.map(i => `indicator-${i.id}`)}
+                                    strategy={verticalListSortingStrategy}
+                                  >
+                                    <div className="border-t border-gray-200 bg-purple-50">
+                                      <div className="px-4 py-1.5 text-xs font-medium text-purple-700 uppercase pl-12">Theme Indicators</div>
+                                      {theme.indicators.map((indicator) => (
+                                        <SortableItem key={indicator.id} id={indicator.id} type="indicator" disabled={editing !== null}>
+                                          <div className="border-t border-purple-200 bg-white px-4 py-1.5 flex items-center justify-between pl-16">
+                                            <div className="flex items-center gap-2 flex-1">
+                                              {editing === `indicator-${indicator.id}` ? (
+                                                <div className="flex-1 flex items-center gap-1">
+                                                  <input
+                                                    type="text"
+                                                    value={editData?.code || ''}
+                                                    onChange={(e) => setEditData({ ...editData, code: e.target.value })}
+                                                    className="w-24 px-2 py-1 border border-gray-300 rounded text-xs font-mono"
+                                                    placeholder="Code"
+                                                  />
+                                                  <input
+                                                    type="text"
+                                                    value={editData?.name || ''}
+                                                    onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                                                    className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                                                    placeholder="Name"
+                                                    autoFocus
+                                                  />
+                                                  <select
+                                                    value={editData?.pillar_id || ''}
+                                                    onChange={(e) => {
+                                                      const newPillarId = e.target.value;
+                                                      const newPillar = structure?.pillars?.find((p: any) => p.id === newPillarId);
+                                                      let newCode = editData?.code || '';
+                                                      if (newPillar && editData?.code) {
+                                                        const match = editData.code.match(/-I(\d+)$/);
+                                                        if (match) newCode = `${newPillar.code}-I${match[1]}`;
+                                                      }
+                                                      setEditData({ ...editData, pillar_id: newPillarId || null, theme_id: null, subtheme_id: null, code: newCode });
+                                                    }}
+                                                    className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[150px]"
+                                                  >
+                                                    <option value="">Select pillar...</option>
+                                                    {structure?.pillars?.map((p: any) => (
+                                                      <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                                                    ))}
+                                                  </select>
+                                                  <select
+                                                    value={editData?.theme_id || ''}
+                                                    onChange={(e) => {
+                                                      const newThemeId = e.target.value;
+                                                      const newTheme = structure?.pillars?.flatMap((p: any) => p.themes || []).find((t: any) => t.id === newThemeId);
+                                                      let newCode = editData?.code || '';
+                                                      if (newTheme && editData?.code) {
+                                                        const match = editData.code.match(/-I(\d+)$/);
+                                                        if (match) newCode = `${newTheme.code}-I${match[1]}`;
+                                                      }
+                                                      setEditData({ ...editData, theme_id: newThemeId || null, pillar_id: null, subtheme_id: null, code: newCode });
+                                                    }}
+                                                    className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[200px]"
+                                                  >
+                                                    <option value="">Select theme...</option>
+                                                    {structure?.pillars?.flatMap((p: any) => 
+                                                      p.themes?.map((t: any) => (
+                                                        <option key={t.id} value={t.id}>{p.code} → {t.name}</option>
+                                                      )) || []
+                                                    )}
+                                                  </select>
+                                                  <select
+                                                    value={editData?.subtheme_id || ''}
+                                                    onChange={(e) => {
+                                                      const newSubthemeId = e.target.value;
+                                                      const newSubtheme = structure?.pillars?.flatMap((p: any) => 
+                                                        p.themes?.flatMap((t: any) => t.subthemes || []) || []
+                                                      ).find((st: any) => st.id === newSubthemeId);
+                                                      let newCode = editData?.code || '';
+                                                      if (newSubtheme && editData?.code) {
+                                                        const match = editData.code.match(/-I(\d+)$/);
+                                                        if (match) newCode = `${newSubtheme.code}-I${match[1]}`;
+                                                      }
+                                                      setEditData({ ...editData, subtheme_id: newSubthemeId || null, pillar_id: null, theme_id: null, code: newCode });
+                                                    }}
+                                                    className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[250px]"
+                                                  >
+                                                    <option value="">Select subtheme...</option>
+                                                    {structure?.pillars?.flatMap((p: any) => 
+                                                      p.themes?.flatMap((t: any) => 
+                                                        t.subthemes?.map((st: any) => (
+                                                          <option key={st.id} value={st.id}>{p.code} → {t.name} → {st.name}</option>
+                                                        )) || []
+                                                      ) || []
+                                                    )}
+                                                  </select>
+                                                </div>
+                                              ) : (
+                                                <>
+                                                  <span className="text-xs text-gray-500">{indicator.code}</span>
+                                                  <span className="text-xs text-gray-600">{indicator.name}</span>
+                                                </>
+                                              )}
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                              {editing === `indicator-${indicator.id}` ? (
+                                                <>
+                                                  <button
+                                                    onClick={() => handleSave('indicator')}
+                                                    disabled={saving}
+                                                    className="p-1 text-green-600 hover:text-green-700"
+                                                  >
+                                                    <Save size={12} />
+                                                  </button>
+                                                  <button
+                                                    onClick={() => {
+                                                      setEditing(null);
+                                                      setEditData(null);
+                                                    }}
+                                                    className="p-1 text-gray-600 hover:text-gray-700"
+                                                  >
+                                                    <X size={12} />
+                                                  </button>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <button
+                                                    onClick={() => handleEdit('indicator', indicator, structure?.pillars?.flatMap((p: any) => 
+                                                      p.themes?.flatMap((t: any) => t.subthemes || []) || []
+                                                    ) || [])}
+                                                    className="p-1 text-blue-600 hover:text-blue-700"
+                                                  >
+                                                    <Edit2 size={12} />
+                                                  </button>
+                                                  <button
+                                                    onClick={() => handleDelete('indicator', indicator.id)}
+                                                    className="p-1 text-red-600 hover:text-red-700"
+                                                  >
+                                                    <Trash2 size={12} />
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </SortableItem>
+                                      ))}
+                                    </div>
+                                  </SortableContext>
+                                )}
 
                                 {/* Sub-themes */}
                                 {expanded.has(`t-${theme.id}`) && theme.subthemes && (
@@ -1277,6 +2354,7 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                                 </div>
                               ) : (
                                 <>
+                                  <span className="text-xs font-medium text-gray-500 uppercase">Subtheme</span>
                                   <span className="text-gray-600 text-sm">{subtheme.code}</span>
                                   <span className="text-gray-600 text-sm">{subtheme.name}</span>
                                 </>
@@ -1304,6 +2382,14 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                                 </>
                               ) : (
                                 <>
+                                  <button
+                                    onClick={() => handleAddNew('indicator', subtheme.id, 'subtheme')}
+                                    disabled={saving || editing !== null}
+                                    className="p-1 text-purple-600 hover:text-purple-700"
+                                    title="Add indicator to subtheme"
+                                  >
+                                    <Plus size={12} />
+                                  </button>
                                   <button
                                     onClick={() => handleEdit('subtheme', subtheme, structure?.pillars?.flatMap((p: any) => p.themes || []))}
                                     className="p-1 text-blue-600 hover:text-blue-700"
@@ -1350,6 +2436,48 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                                       autoFocus
                                     />
                                     <select
+                                      value={editData?.pillar_id || ''}
+                                      onChange={(e) => {
+                                        const newPillarId = e.target.value;
+                                        const newPillar = structure?.pillars?.find((p: any) => p.id === newPillarId);
+                                        let newCode = editData?.code || '';
+                                        if (newPillar && editData?.code) {
+                                          const match = editData.code.match(/-I(\d+)$/);
+                                          if (match) newCode = `${newPillar.code}-I${match[1]}`;
+                                        }
+                                        setEditData({ ...editData, pillar_id: newPillarId || null, theme_id: null, subtheme_id: null, code: newCode });
+                                      }}
+                                      className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[150px]"
+                                      title="Attach to pillar"
+                                    >
+                                      <option value="">Select pillar...</option>
+                                      {structure?.pillars?.map((p: any) => (
+                                        <option key={p.id} value={p.id}>{p.code} - {p.name}</option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      value={editData?.theme_id || ''}
+                                      onChange={(e) => {
+                                        const newThemeId = e.target.value;
+                                        const newTheme = structure?.pillars?.flatMap((p: any) => p.themes || []).find((t: any) => t.id === newThemeId);
+                                        let newCode = editData?.code || '';
+                                        if (newTheme && editData?.code) {
+                                          const match = editData.code.match(/-I(\d+)$/);
+                                          if (match) newCode = `${newTheme.code}-I${match[1]}`;
+                                        }
+                                        setEditData({ ...editData, theme_id: newThemeId || null, pillar_id: null, subtheme_id: null, code: newCode });
+                                      }}
+                                      className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[200px]"
+                                      title="Attach to theme"
+                                    >
+                                      <option value="">Select theme...</option>
+                                      {structure?.pillars?.flatMap((p: any) => 
+                                        p.themes?.map((t: any) => (
+                                          <option key={t.id} value={t.id}>{p.code} → {t.name}</option>
+                                        )) || []
+                                      )}
+                                    </select>
+                                    <select
                                       value={editData?.subtheme_id || ''}
                                       onChange={(e) => {
                                         const newSubthemeId = e.target.value;
@@ -1358,25 +2486,20 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                                         ).find((st: any) => st.id === newSubthemeId);
                                         let newCode = editData?.code || '';
                                         if (newSubtheme && editData?.code) {
-                                          // Try to preserve indicator number
                                           const match = editData.code.match(/-I(\d+)$/);
-                                          if (match) {
-                                            newCode = `${newSubtheme.code}-I${match[1]}`;
-                                          } else {
-                                            newCode = `${newSubtheme.code}-${editData.code.split('-').slice(-1)[0]}`;
-                                          }
+                                          if (match) newCode = `${newSubtheme.code}-I${match[1]}`;
                                         }
-                                        setEditData({ ...editData, subtheme_id: newSubthemeId, code: newCode });
+                                        setEditData({ ...editData, subtheme_id: newSubthemeId || null, pillar_id: null, theme_id: null, code: newCode });
                                       }}
                                       className="px-2 py-1 border border-gray-300 rounded text-xs min-w-[250px]"
-                                      title="Move to different sub-theme"
+                                      title="Attach to subtheme"
                                     >
-                                      <option value="">Select sub-theme...</option>
+                                      <option value="">Select subtheme...</option>
                                       {structure?.pillars?.flatMap((p: any) => 
                                         p.themes?.flatMap((t: any) => 
                                           t.subthemes?.map((st: any) => (
                                             <option key={st.id} value={st.id}>
-                                              {p.name} → {t.name} → {st.name}
+                                              {p.code} → {t.name} → {st.name}
                                             </option>
                                           )) || []
                                         ) || []
@@ -1457,18 +2580,20 @@ export default function FrameworkStructureManager({ open, onClose }: FrameworkSt
                 ) : null}
               </DragOverlay>
             </DndContext>
-          ) : (
-            <div className="text-center py-12">
-              <p className="text-gray-600 mb-4">No framework structure found.</p>
-              <p className="text-sm text-gray-500 mb-4">
-                The framework structure (pillars, themes, sub-themes, indicators) needs to be imported.
-              </p>
-              <div className="text-xs text-gray-400 space-y-1">
-                <p>To import the framework structure:</p>
-                <p>1. Run the database migration: <code className="bg-gray-100 px-1 rounded">supabase/migrations/37_create_framework_structure_tables.sql</code></p>
-                <p>2. Run the migration script: <code className="bg-gray-100 px-1 rounded">python scripts/migrate_framework_auto.py</code></p>
-              </div>
-            </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-600 mb-4">No framework structure found.</p>
+                  <p className="text-sm text-gray-500 mb-4">
+                    The framework structure (pillars, themes, sub-themes, indicators) needs to be imported.
+                  </p>
+                  <div className="text-xs text-gray-400 space-y-1">
+                    <p>To import the framework structure:</p>
+                    <p>1. Run the database migration: <code className="bg-gray-100 px-1 rounded">supabase/migrations/37_create_framework_structure_tables.sql</code></p>
+                    <p>2. Run the migration script: <code className="bg-gray-100 px-1 rounded">python scripts/migrate_framework_auto.py</code></p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 

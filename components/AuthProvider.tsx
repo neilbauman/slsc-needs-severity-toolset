@@ -22,10 +22,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
 
   useEffect(() => {
-    // Get initial session
+    let cancelled = false;
+    const AUTH_LOAD_TIMEOUT_MS = 8000;
+
+    // Timeout: stop loading after N seconds so the app never hangs on a slow/unreachable Supabase
+    const timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      setLoading(false);
+    }, AUTH_LOAD_TIMEOUT_MS);
+
+    // Get initial session (race with timeout)
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
       setSession(session);
       setUser(session?.user ?? null);
+      setLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
       setLoading(false);
     });
 
@@ -38,7 +51,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, [supabase.auth]);
 
   const signIn = async (email: string, password: string) => {
