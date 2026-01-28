@@ -584,6 +584,17 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
     {} as Record<string, BaselineDataset[]>
   );
 
+  // Build pillar → themes structure so we always show P1, P2, P3, and under each its themes (e.g. P3.1 Underlying Vuln, P3.2 Hazard)
+  type PillarWithThemes = { pillar: FrameworkSection; themes: FrameworkSection[] };
+  const pillarThemeStructure: PillarWithThemes[] = (() => {
+    const pillars = frameworkSections.filter((s) => s.level === 'pillar').sort((a, b) => a.code.localeCompare(b.code));
+    const themes = frameworkSections.filter((s) => s.level === 'theme' || s.level === 'subtheme');
+    return pillars.map((pillar) => ({
+      pillar,
+      themes: themes.filter((t) => t.code === pillar.code || t.code.startsWith(pillar.code + '.')),
+    }));
+  })();
+
   // Get pillar for a category (for framework structure display)
   const getPillar = (category: string): string => {
     if (category.startsWith('P1')) return 'P1';
@@ -817,6 +828,33 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
         </div>
       </div>
 
+      {/* Proposed baseline scoring (from instance flow) */}
+      <details className="group/proposal border border-gray-200 rounded-lg bg-gray-50/50 overflow-hidden">
+        <summary className="px-3 py-2 text-xs text-gray-600 cursor-pointer hover:bg-gray-100/80 list-none flex items-center justify-between gap-2">
+          <span className="font-medium text-gray-700">Proposed baseline scoring (from instances)</span>
+          <ChevronDown size={14} className="text-gray-400 transition-transform group-open/proposal:rotate-180" />
+        </summary>
+        <div className="px-3 pb-3 pt-1 text-xs text-gray-600 space-y-2">
+          <p className="font-medium text-gray-700">Instance flow (reference):</p>
+          <ol className="list-decimal list-inside space-y-0.5 ml-1">
+            <li>Per-dataset: <code className="bg-gray-200 px-1 rounded">score_numeric_auto</code> / <code className="bg-gray-200 px-1 rounded">score_building_typology</code> → <code className="bg-gray-200 px-1 rounded">instance_dataset_scores</code>, <code className="bg-gray-200 px-1 rounded">instance_category_scores</code></li>
+            <li>Category aggregation: weighted mean (or configurable) per theme/pillar</li>
+            <li>Framework rollup: <code className="bg-gray-200 px-1 rounded">score_framework_aggregate</code> → P1, P2, P3 with methods/weights</li>
+            <li>Final: <code className="bg-gray-200 px-1 rounded">score_final_aggregate</code> → SSC Framework + Hazard + Underlying Vuln → Overall</li>
+          </ol>
+          <p className="font-medium text-gray-700 mt-2">Current baseline (<code className="bg-gray-200 px-1 rounded">score_baseline</code>):</p>
+          <p className="ml-1">Per-dataset min-max or categorical → <code className="bg-gray-200 px-1 rounded">baseline_scores</code> by category. No theme-level aggregation; no P1/P2/P3 rollup; no Overall.</p>
+          <p className="font-medium text-gray-700 mt-2">Proposed baseline scoring (align with instances):</p>
+          <ol className="list-decimal list-inside space-y-0.5 ml-1">
+            <li>Per-dataset: use <code className="bg-gray-200 px-1 rounded">baseline_datasets.scoring_config</code> (normalization, thresholds, category_scores) and write per-dataset scores (e.g. <code className="bg-gray-200 px-1 rounded">baseline_dataset_scores</code> or in-memory).</li>
+            <li>Category aggregation: for each (baseline_id, admin_pcode, category), weighted mean of dataset scores in that category → <code className="bg-gray-200 px-1 rounded">baseline_scores</code> or <code className="bg-gray-200 px-1 rounded">baseline_category_scores</code>.</li>
+            <li>Framework rollup: same logic as <code className="bg-gray-200 px-1 rounded">score_framework_aggregate</code> but for baseline (P1, P2, P3 → SSC Framework).</li>
+            <li>Final: SSC + Hazard + Underlying Vuln → Overall, stored for baseline.</li>
+          </ol>
+          <p className="ml-1 text-gray-500 italic">This would let responses use baseline Overall/theme scores in the same way instances do, and keep category keys (P1.1, P3.2, etc.) aligned.</p>
+        </div>
+      </details>
+
       {/* Header with actions */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -846,74 +884,84 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
         </div>
       </div>
 
-      {baselineDatasets.length === 0 ? (
+      {baselineDatasets.length === 0 && availableDatasets.length === 0 ? (
         <div className="text-sm text-gray-500 py-8 text-center border rounded-lg">
-          {availableDatasets.length === 0 ? (
-            <div>
-              <p className="mb-2">No datasets available for this country.</p>
-              <p className="text-xs text-gray-400">
-                {baselineCountryId || currentCountry?.id 
-                  ? 'Upload datasets for this country to add them to the baseline.'
-                  : 'Please select a country first.'}
-              </p>
-            </div>
-          ) : (
-            'No datasets configured. Add datasets to define the baseline vulnerability analysis.'
-          )}
+          <p className="mb-2">No datasets available for this country.</p>
+          <p className="text-xs text-gray-400">
+            {baselineCountryId || currentCountry?.id 
+              ? 'Upload datasets for this country to add them to the baseline.'
+              : 'Please select a country first.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Framework Datasets: full cards only for sections that have datasets */}
-          {frameworkSections
-            .filter((section) => (groupedBySection[section.code]?.length ?? 0) > 0)
-            .map((section) => {
-              const items = groupedBySection[section.code] || [];
-              const isPillar = section.level === 'pillar';
-              const headerBg = isPillar ? 'bg-red-50' : section.level === 'theme' ? 'bg-orange-50' : 'bg-gray-50';
-              const headerText = isPillar ? 'text-red-900' : section.level === 'theme' ? 'text-orange-900' : 'text-gray-800';
-              return (
-                <div key={section.code} className="border rounded-lg overflow-hidden">
-                  <div className={`px-4 py-3 ${headerBg} border-b`}>
-                    <h4 className={`font-semibold ${headerText}`}>
-                      {section.code} – {section.name} ({items.length} dataset{items.length !== 1 ? 's' : ''})
-                    </h4>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {items.map((bd) => renderDatasetRow(bd))}
-                  </div>
-                </div>
-              );
-            })}
-
-          {/* Empty framework categories: one compact row instead of one huge card per section */}
-          {(() => {
-            const emptySections = frameworkSections.filter(
-              (s) => (groupedBySection[s.code]?.length ?? 0) === 0
-            );
-            if (emptySections.length === 0) return null;
+          {baselineDatasets.length === 0 && (
+            <div className="text-sm text-gray-500 py-4 text-center border rounded-lg bg-gray-50/50">
+              No datasets configured yet. Add datasets below to define the baseline vulnerability analysis.
+            </div>
+          )}
+          {/* Overall structure: each pillar (P1, P2, P3) with its themes (Hazard, Underlying Vuln under P3, etc.) always visible */}
+          {pillarThemeStructure.map(({ pillar, themes }) => {
+            const pillarItems = groupedBySection[pillar.code] || [];
+            const pillarBg = 'bg-red-50';
+            const pillarText = 'text-red-900';
             return (
-              <details className="group border border-gray-200 rounded-lg bg-gray-50/50 overflow-hidden">
-                <summary className="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100/80 list-none flex items-center justify-between gap-2">
-                  <span>
-                    <span className="font-medium text-gray-600">{emptySections.length} empty framework categories</span>
-                    {' '}– click to show
-                  </span>
-                  <ChevronDown size={14} className="text-gray-400 transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="px-3 pb-2 pt-0 flex flex-wrap gap-1.5">
-                  {emptySections.map((s) => (
-                    <span
-                      key={s.code}
-                      className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-white border border-gray-200 text-gray-600"
-                      title={`${s.code} – ${s.name} (${s.level})`}
-                    >
-                      {s.code} – {s.name}
-                    </span>
-                  ))}
+              <div key={pillar.code} className="border rounded-lg overflow-hidden border-red-100">
+                <div className={`px-4 py-2.5 ${pillarBg} border-b border-red-100`}>
+                  <h4 className={`font-semibold ${pillarText}`}>
+                    {pillar.code} – {pillar.name}
+                    {pillarItems.length > 0 && (
+                      <span className="font-normal text-red-700 ml-1">
+                        ({pillarItems.length} at pillar level)
+                      </span>
+                    )}
+                  </h4>
                 </div>
-              </details>
+                <div className="divide-y divide-gray-100">
+                  {themes.map((theme) => {
+                    const items = groupedBySection[theme.code] || [];
+                    const isHazardOrVuln = theme.code === 'P3.2' || theme.code === 'P3.1';
+                    const themeBg = isHazardOrVuln ? (theme.code === 'P3.2' ? 'bg-orange-50' : 'bg-amber-50') : 'bg-gray-50';
+                    const themeText = isHazardOrVuln ? (theme.code === 'P3.2' ? 'text-orange-900' : 'text-amber-900') : 'text-gray-800';
+                    if (items.length > 0) {
+                      return (
+                        <div key={theme.code} className="border-t border-gray-100">
+                          <div className={`px-4 py-2 ${themeBg} border-b border-gray-100`}>
+                            <h5 className={`text-sm font-semibold ${themeText}`}>
+                              {theme.code} – {theme.name} ({items.length} dataset{items.length !== 1 ? 's' : ''})
+                            </h5>
+                          </div>
+                          <div className="divide-y divide-gray-50">
+                            {items.map((bd) => renderDatasetRow(bd))}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div
+                        key={theme.code}
+                        className={`px-4 py-1.5 text-xs ${themeBg} border-t border-gray-100 text-gray-500 italic`}
+                      >
+                        {theme.code} – {theme.name} (0 datasets)
+                      </div>
+                    );
+                  })}
+                  {pillarItems.length > 0 && (
+                    <div className="border-t border-gray-100">
+                      <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                        <h5 className="text-sm font-semibold text-gray-800">
+                          {pillar.code} (pillar-level datasets)
+                        </h5>
+                      </div>
+                      <div className="divide-y divide-gray-50">
+                        {pillarItems.map((bd) => renderDatasetRow(bd))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             );
-          })()}
+          })}
 
           {/* Uncategorized datasets */}
           {groupedBySection['Uncategorized'] && groupedBySection['Uncategorized'].length > 0 && (
