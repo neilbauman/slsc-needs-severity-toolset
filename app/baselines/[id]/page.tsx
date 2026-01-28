@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
 import BaselineConfigPanel from '@/components/BaselineConfigPanel';
 import ImportFromInstanceModal from '@/components/ImportFromInstanceModal';
+
+const BaselineMap = dynamic(() => import('@/components/BaselineMap'), { ssr: false });
 
 type Baseline = {
   id: string;
@@ -14,6 +17,7 @@ type Baseline = {
   computed_at: string | null;
   created_at: string | null;
   slug: string | null;
+  country_id: string | null;
 };
 
 export default function BaselineDetailPage({ params }: { params: { id: string } }) {
@@ -67,7 +71,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       
       let query = supabase
         .from('country_baselines')
-        .select('id, name, description, status, computed_at, created_at, slug');
+        .select('id, name, description, status, computed_at, created_at, slug, country_id');
       
       if (isUUID) {
         query = query.eq('id', baselineId);
@@ -212,15 +216,15 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   }
 
   return (
-    <div className="p-4 space-y-6">
-      {/* Header */}
-      <header className="flex items-center justify-between">
+    <div className="p-3 space-y-3 max-w-7xl mx-auto">
+      {/* Header: compact */}
+      <header className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold" style={{ color: 'var(--gsc-green)' }}>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold" style={{ color: 'var(--gsc-green)' }}>
               {baseline.name}
             </h1>
-            <span className={`text-xs px-2 py-0.5 rounded ${
+            <span className={`text-xs px-1.5 py-0.5 rounded ${
               baseline.status === 'active' ? 'bg-green-100 text-green-800' :
               baseline.status === 'draft' ? 'bg-yellow-100 text-yellow-800' :
               'bg-gray-100 text-gray-600'
@@ -229,32 +233,39 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             </span>
           </div>
           {baseline.description && (
-            <p className="text-sm text-gray-500 mt-1">{baseline.description}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{baseline.description}</p>
           )}
         </div>
-        <div className="flex gap-2">
-          <Link href="/responses" className="btn btn-secondary">
-            Back
-          </Link>
-        </div>
+        <Link href="/responses" className="btn btn-secondary text-sm py-1.5 px-3">
+          Back
+        </Link>
       </header>
 
-      {/* Status and Compute Section */}
-      <div className="card p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold mb-1">Baseline Status</h3>
-            <p className="text-sm text-gray-500">
-              {baseline.computed_at 
-                ? `Last computed: ${new Date(baseline.computed_at).toLocaleString()}`
-                : 'Not yet computed'}
-            </p>
-          </div>
-          <div className="flex gap-2">
+      {/* Map at top */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-700 mb-1.5">Baseline scores (avg by location)</h2>
+        <BaselineMap
+          baselineId={baseline.id}
+          countryId={baseline.country_id}
+          adminLevel="ADM3"
+          computedAt={baseline.computed_at}
+        />
+      </section>
+
+      {/* Status + Scores: two columns compact */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="border border-gray-200 rounded-lg p-3 bg-white">
+          <h3 className="text-sm font-semibold mb-1">Status</h3>
+          <p className="text-xs text-gray-500 mb-2">
+            {baseline.computed_at
+              ? `Last computed: ${new Date(baseline.computed_at).toLocaleString()}`
+              : 'Not yet computed'}
+          </p>
+          <div className="flex flex-wrap gap-2">
             <select
               value={baseline.status || 'draft'}
               onChange={(e) => updateStatus(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm"
+              className="px-2 py-1.5 border rounded text-sm"
             >
               <option value="draft">Draft</option>
               <option value="active">Active</option>
@@ -263,85 +274,71 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             <button
               onClick={computeBaseline}
               disabled={computing}
-              className="btn btn-primary"
+              className="btn btn-primary text-sm py-1.5 px-3"
             >
               {computing ? 'Computing...' : 'Compute Baseline Scores'}
             </button>
           </div>
         </div>
-      </div>
-
-      {/* Baseline Scores Summary */}
-      <div className="card p-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h3 className="font-semibold mb-1">Baseline Scores</h3>
-            <p className="text-sm text-gray-500">
-              {baseline.computed_at ? 'Category-level averages from computed baseline scores.' : 'Compute baseline scores to see results.'}
-            </p>
+        <div className="border border-gray-200 rounded-lg p-3 bg-white">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <h3 className="text-sm font-semibold">Scores summary</h3>
+            <button
+              onClick={() => baseline?.id && loadScoreSummary(baseline.id)}
+              disabled={loadingScoreSummary}
+              className="btn btn-secondary text-xs py-1 px-2"
+            >
+              {loadingScoreSummary ? 'Refreshing...' : 'Refresh'}
+            </button>
           </div>
-          <button
-            onClick={() => baseline?.id && loadScoreSummary(baseline.id)}
-            disabled={loadingScoreSummary}
-            className="btn btn-secondary text-sm"
-          >
-            {loadingScoreSummary ? 'Refreshing...' : 'Refresh scores'}
-          </button>
-        </div>
-
-        {!baseline.computed_at ? (
-          <div className="mt-3 text-sm text-gray-500">
-            No computed scores yet.
-          </div>
-        ) : scoreSummary.length === 0 ? (
-          <div className="mt-3 text-sm text-gray-500">
-            No scores found. If you just computed, click “Refresh scores”.
-          </div>
-        ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600 border-b">
-                  <th className="py-2 pr-4">Category</th>
-                  <th className="py-2 pr-4">Avg score</th>
-                  <th className="py-2 pr-4">ADM3 count</th>
-                  <th className="py-2 pr-4">Rows</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scoreSummary.map((r) => (
-                  <tr key={r.category} className="border-b last:border-b-0">
-                    <td className="py-2 pr-4 font-medium text-gray-900">{r.category}</td>
-                    <td className="py-2 pr-4">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
-                    <td className="py-2 pr-4">{r.admin_count}</td>
-                    <td className="py-2 pr-4">{r.row_count}</td>
+          {!baseline.computed_at ? (
+            <p className="text-xs text-gray-500">No computed scores yet.</p>
+          ) : scoreSummary.length === 0 ? (
+            <p className="text-xs text-gray-500">No scores found. Click Refresh after compute.</p>
+          ) : (
+            <div className="overflow-x-auto max-h-32 overflow-y-auto">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="text-left text-gray-600 border-b">
+                    <th className="py-1 pr-2">Category</th>
+                    <th className="py-1 pr-2">Avg</th>
+                    <th className="py-1 pr-2">#</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {scoreSummary.map((r) => (
+                    <tr key={r.category} className="border-b last:border-b-0">
+                      <td className="py-1 pr-2 font-medium text-gray-900 truncate max-w-[120px]" title={r.category}>{r.category}</td>
+                      <td className="py-1 pr-2">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
+                      <td className="py-1 pr-2">{r.admin_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Baseline Configuration */}
-      <div className="card p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold">Baseline Dataset Configuration</h3>
+      {/* Baseline Configuration: compact card */}
+      <div className="border border-gray-200 rounded-lg p-3 bg-white">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold">Baseline Dataset Configuration</h3>
           <button
             onClick={() => setShowImportModal(true)}
-            className="btn btn-secondary text-sm"
+            className="btn btn-secondary text-xs py-1.5 px-2"
           >
             Import from Instance
           </button>
         </div>
         {baseline ? (
-          <BaselineConfigPanel 
+          <BaselineConfigPanel
             key={configKey}
-            baselineId={baseline.id} 
+            baselineId={baseline.id}
             onUpdate={loadBaseline}
           />
         ) : (
-          <div className="p-4 text-sm text-gray-500">Loading baseline configuration...</div>
+          <div className="p-2 text-sm text-gray-500">Loading...</div>
         )}
       </div>
 
