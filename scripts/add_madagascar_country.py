@@ -263,13 +263,45 @@ def import_boundaries(supabase, country_id: str, output_dir: Path):
             pcode_col = None
             name_col = None
             
+            # Level-specific suffix for column matching (e.g., "adm3" -> "3")
+            level_num = admin_level.replace("ADM", "")
+            
             for col in gdf.columns:
                 col_lower = col.lower()
                 if "pcode" in col_lower or (admin_level.lower() in col_lower and "code" in col_lower):
                     pcode_col = col
-                if "name" in col_lower and "pcode" not in col_lower:
-                    if admin_level.lower() in col_lower or name_col is None:
+                    
+            # Look for name columns with multiple patterns (HDX uses various conventions)
+            # Priority order: exact level match > any level name column
+            name_patterns = [
+                # Exact level match patterns (highest priority)
+                f"adm{level_num}_en",      # ADM3_EN (English name)
+                f"adm{level_num}_name",    # ADM3_NAME
+                f"adm{level_num}name",     # ADM3NAME
+                f"adm{level_num}_fr",      # ADM3_FR (French name - common for Madagascar)
+                f"adm{level_num}_ref",     # ADM3_REF (Reference name)
+                f"adm{level_num}nm",       # ADM3NM
+                # Generic patterns (lower priority)
+                "name_en", "name_fr", "name",
+                "shapename", "shape_name",
+            ]
+            
+            for pattern in name_patterns:
+                if name_col:
+                    break
+                for col in gdf.columns:
+                    col_lower = col.lower()
+                    if col_lower == pattern or col_lower.endswith(f"_{pattern}"):
                         name_col = col
+                        break
+            
+            # Fallback: any column with 'name' that's not a pcode column
+            if not name_col:
+                for col in gdf.columns:
+                    col_lower = col.lower()
+                    if "name" in col_lower and "pcode" not in col_lower:
+                        if admin_level.lower() in col_lower or name_col is None:
+                            name_col = col
             
             if not pcode_col:
                 print(f"  ⚠️  Could not find pcode column, skipping")

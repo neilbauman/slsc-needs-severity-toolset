@@ -70,16 +70,29 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
         ]);
         if (cancelled) return;
         if (geoRes.error) throw geoRes.error;
-        if (mapScoresRes.error) throw mapScoresRes.error;
+        if (mapScoresRes.error) {
+          console.error('[BaselineMap] RPC error:', mapScoresRes.error);
+          throw mapScoresRes.error;
+        }
+
+        const scores = mapScoresRes.data || [];
+        console.log(`[BaselineMap] Loaded ${scores.length} score records for layer "${selectedLayer}"`);
+        
+        // Check if we might have hit a limit (Supabase RPC should return all, but log if suspicious)
+        if (scores.length === 1000) {
+          console.warn('[BaselineMap] Got exactly 1000 records - might be hitting a limit. Check if all admin areas are displayed.');
+        }
 
         const scoreByPcode = new Map<string, number>();
-        (mapScoresRes.data || []).forEach((r: any) => {
+        scores.forEach((r: any) => {
           const p = String(r.admin_pcode || '').trim();
           if (!p) return;
           const s = Number(r.avg_score);
           if (!Number.isFinite(s)) return;
           scoreByPcode.set(p, s);
         });
+        
+        console.log(`[BaselineMap] Mapped ${scoreByPcode.size} unique admin codes to scores`);
 
         const raw = geoRes.data;
         const fc = typeof raw === 'string' ? JSON.parse(raw) : raw;

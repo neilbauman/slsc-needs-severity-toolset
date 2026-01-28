@@ -16,9 +16,24 @@ Deployed via **Vercel**
 - Supabase project (PostgreSQL)
 - Vercel or local dev environment
 
+### 2. Run locally (default: stable)
+
+**Use `npm start` so the app runs reliably.** It builds then serves in production mode.
+
+```bash
+npm install
+npm start
+```
+
+Wait for **"✓ Ready"**, then open **http://localhost:3000** and do a **hard refresh** (Cmd+Shift+R or Ctrl+Shift+R) the first time.
+
+- **If you see 500s or "Something went wrong":** run `npm start` again, then hard-refresh. Avoid `npm run dev` for daily use; it is flaky with chunk loading.
+- **If the port is stuck:** `lsof -ti:3000 | xargs kill -9` then `npm start`.
+- **Hot reload (less stable):** `npm run dev` — only if you need it; use `npm start` if you see crashes.
+
 ---
 
-### 2. Database Schema
+### 3. Database Schema
 
 Run the following SQL in your Supabase SQL Editor:
 

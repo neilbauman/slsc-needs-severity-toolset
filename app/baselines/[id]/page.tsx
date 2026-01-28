@@ -268,11 +268,29 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             {['P1', 'P2', 'P3', 'Hazard', 'Underlying Vulnerability'].map((group) => {
               const categoriesInGroup = scoreSummary.filter((r) => {
                 const c = (r.category || '').trim().toLowerCase();
-                if (group === 'P1') return c.startsWith('p1') && !c.startsWith('p3');
-                if (group === 'P2') return c.startsWith('p2');
-                if (group === 'P3') return c.startsWith('p3') && !c.startsWith('p3.1') && !c.startsWith('p3.2');
-                if (group === 'Hazard') return c.includes('hazard') || c.startsWith('p3.2');
-                if (group === 'Underlying Vulnerability') return c.includes('underlying') || c.includes('vuln') || c.startsWith('p3.1');
+                if (group === 'P1') {
+                  return c.startsWith('p1') && !c.startsWith('p3') && !c.startsWith('p2');
+                }
+                if (group === 'P2') {
+                  return c.startsWith('p2') && !c.startsWith('p3') && !c.startsWith('p1');
+                }
+                if (group === 'P3') {
+                  // P3 only: exclude P3.1.x (UV) and P3.2.x (Hazard)
+                  return c.startsWith('p3') && !c.startsWith('p3.1') && !c.startsWith('p3.2') 
+                    && !c.includes('hazard') && !c.includes('underlying') && !c.includes('vuln');
+                }
+                if (group === 'Hazard') {
+                  // P3.2.x or contains "hazard", but exclude UV categories
+                  return (c.startsWith('p3.2') || c.includes('hazard')) 
+                    && !c.startsWith('p3.1') 
+                    && !c.includes('underlying') 
+                    && !(c.includes('vuln') && !c.includes('hazard'));
+                }
+                if (group === 'Underlying Vulnerability') {
+                  // P3.1.x, UV prefix, or contains "underlying"/"vuln", but exclude Hazard categories
+                  return (c.startsWith('p3.1') || c.startsWith('uv') || c.includes('underlying') || (c.includes('vuln') && !c.includes('hazard')))
+                    && !c.startsWith('p3.2');
+                }
                 return false;
               });
               return (

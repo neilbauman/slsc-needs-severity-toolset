@@ -1,0 +1,23 @@
+# Large data directories that slow down indexing
+data/
+
+# Build artifacts
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# Cache and temporary files
+.cache/
+*.log
+*.tmp
+
+# Git
+.git/
+
+# IDE
+.vscode/
+.idea/
