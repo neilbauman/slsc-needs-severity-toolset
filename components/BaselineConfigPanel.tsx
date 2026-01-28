@@ -126,6 +126,13 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
   const [targetAdminLevel, setTargetAdminLevel] = useState<string>('ADM3');
   const [showFrameworkView, setShowFrameworkView] = useState(true);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [showEmptyThemes, setShowEmptyThemes] = useState<boolean>(false);
+
+  type AggregationMethod = 'average' | 'worst_case' | 'custom_weighted';
+  const defaultPillarRollup = { method: 'average' as AggregationMethod, weights: { P1: 1 / 3, P2: 1 / 3, P3: 1 / 3 } };
+  const defaultOverallRollup = { method: 'average' as AggregationMethod, weights: { 'SSC Framework': 0.6, 'Hazard': 0.2, 'Underlying Vulnerability': 0.2 } };
+  const [pillarRollup, setPillarRollup] = useState<{ method: AggregationMethod; weights: Record<string, number> }>(defaultPillarRollup);
+  const [overallRollup, setOverallRollup] = useState<{ method: AggregationMethod; weights: Record<string, number> }>(defaultOverallRollup);
   
   // Framework structure loaded from database
   const [frameworkStructure, setFrameworkStructure] = useState<any>(null);
@@ -316,6 +323,9 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
         if (baselineData?.config?.target_admin_level) {
           setTargetAdminLevel(baselineData.config.target_admin_level);
         }
+        const ac = baselineData?.config?.aggregation_config;
+        if (ac?.pillar_rollup) setPillarRollup(ac.pillar_rollup);
+        if (ac?.overall_rollup) setOverallRollup(ac.overall_rollup);
       } else {
         // It's a UUID, load config
         const { data: baselineData } = await supabase
@@ -330,6 +340,9 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
           if (baselineData?.config?.target_admin_level) {
             setTargetAdminLevel(baselineData.config.target_admin_level);
           }
+          const ac = baselineData?.config?.aggregation_config;
+          if (ac?.pillar_rollup) setPillarRollup(ac.pillar_rollup);
+          if (ac?.overall_rollup) setOverallRollup(ac.overall_rollup);
         }
       }
       
@@ -532,25 +545,48 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
   // Save target admin level
   const handleSaveTargetLevel = async (level: string) => {
     try {
-      // Get current config
       const { data: current } = await supabase
         .from('country_baselines')
         .select('config')
         .eq('id', baselineId)
         .single();
-      
       const newConfig = { ...(current?.config || {}), target_admin_level: level };
-      
-      const { error } = await supabase
-        .from('country_baselines')
-        .update({ config: newConfig })
-        .eq('id', baselineId);
-
+      const { error } = await supabase.from('country_baselines').update({ config: newConfig }).eq('id', baselineId);
       if (error) throw error;
       setTargetAdminLevel(level);
       onUpdate?.();
     } catch (err: any) {
       console.error('Error updating target level:', err);
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  // Normalize weights to sum to 1
+  const normalizeWeights = (w: Record<string, number>): Record<string, number> => {
+    const sum = Object.values(w).reduce((a, b) => a + b, 0);
+    if (sum === 0) return w;
+    const out: Record<string, number> = {};
+    Object.keys(w).forEach((k) => { out[k] = Number((w[k] / sum).toFixed(3)); });
+    return out;
+  };
+
+  // Save pillar & overall aggregation config
+  const handleSaveAggregationConfig = async () => {
+    try {
+      const { data: current } = await supabase
+        .from('country_baselines')
+        .select('config')
+        .eq('id', baselineId)
+        .single();
+      const newConfig = {
+        ...(current?.config || {}),
+        aggregation_config: { pillar_rollup: pillarRollup, overall_rollup: overallRollup },
+      };
+      const { error } = await supabase.from('country_baselines').update({ config: newConfig }).eq('id', baselineId);
+      if (error) throw error;
+      onUpdate?.();
+    } catch (err: any) {
+      console.error('Error saving aggregation config:', err);
       alert(`Error: ${err.message}`);
     }
   };
@@ -855,17 +891,113 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
         </div>
       </details>
 
+      {/* Pillar & overall aggregation config panel */}
+      <div className="border border-teal-200 rounded-lg overflow-hidden bg-white">
+        <div className="bg-teal-50 px-4 py-2.5 border-b border-teal-200">
+          <h4 className="font-semibold text-teal-900">Pillar & overall aggregation</h4>
+          <p className="text-xs text-teal-700 mt-0.5">
+            How P1/P2/P3 combine into SSC Framework, and how SSC Framework + Hazard + Underlying Vuln combine into Overall (used when computing baseline scores).
+          </p>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <label className="text-xs font-medium text-gray-700 block mb-1">Pillar rollup (P1, P2, P3 → SSC Framework)</label>
+            <select
+              value={pillarRollup.method}
+              onChange={(e) => setPillarRollup((p) => ({ ...p, method: e.target.value as AggregationMethod }))}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+            >
+              <option value="average">Average (Mean)</option>
+              <option value="worst_case">Worst Case (Maximum)</option>
+              <option value="custom_weighted">Custom weights</option>
+            </select>
+            {pillarRollup.method === 'custom_weighted' && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {['P1', 'P2', 'P3'].map((k) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="text-xs w-6">{k}</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={((pillarRollup.weights[k] ?? 0) * 100)}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) / 100;
+                        const next = { ...pillarRollup.weights, [k]: v };
+                        setPillarRollup((p) => ({ ...p, weights: normalizeWeights(next) }));
+                      }}
+                      className="flex-1 h-2"
+                    />
+                    <span className="text-xs w-8">{((pillarRollup.weights[k] ?? 0) * 100).toFixed(0)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-700 block mb-1">Overall rollup (SSC Framework + Hazard + Underlying Vuln → Overall)</label>
+            <select
+              value={overallRollup.method}
+              onChange={(e) => setOverallRollup((p) => ({ ...p, method: e.target.value as AggregationMethod }))}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+            >
+              <option value="average">Average (Mean)</option>
+              <option value="worst_case">Worst Case (Maximum)</option>
+              <option value="custom_weighted">Custom weights</option>
+            </select>
+            {overallRollup.method === 'custom_weighted' && (
+              <div className="mt-2 space-y-1.5">
+                {[
+                  { key: 'SSC Framework', label: 'SSC Framework' },
+                  { key: 'Hazard', label: 'Hazard' },
+                  { key: 'Underlying Vulnerability', label: 'Underlying Vuln' },
+                ].map(({ key, label }) => (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs w-32">{label}</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={((overallRollup.weights[key] ?? 0) * 100)}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) / 100;
+                        const next = { ...overallRollup.weights, [key]: v };
+                        setOverallRollup((p) => ({ ...p, weights: normalizeWeights(next) }));
+                      }}
+                      className="flex-1 h-2"
+                    />
+                    <span className="text-xs w-8">{((overallRollup.weights[key] ?? 0) * 100).toFixed(0)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleSaveAggregationConfig}
+            className="btn btn-primary text-sm"
+          >
+            Save aggregation config
+          </button>
+        </div>
+      </div>
+
       {/* Header with actions */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-4 flex-wrap">
           <h3 className="font-semibold">Framework Datasets</h3>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium" title="Sections come from get_framework_structure (DB)">from DB</span>
           <div className="flex items-center gap-2 text-sm">
             <span className="text-gray-500">{baselineDatasets.length} datasets</span>
           </div>
-          <span className="text-xs text-gray-400 hidden sm:inline">
-            ({frameworkSections.length} sections: pillars, themes, subthemes)
-          </span>
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showEmptyThemes}
+              onChange={(e) => setShowEmptyThemes(e.target.checked)}
+              className="rounded"
+            />
+            Show empty categories
+          </label>
         </div>
         <div className="flex gap-2">
           <button 
@@ -918,7 +1050,7 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
                   </h4>
                 </div>
                 <div className="divide-y divide-gray-100">
-                  {themes.map((theme) => {
+                  {(showEmptyThemes ? themes : themes.filter((t) => (groupedBySection[t.code]?.length ?? 0) > 0)).map((theme) => {
                     const items = groupedBySection[theme.code] || [];
                     const isHazardOrVuln = theme.code === 'P3.2' || theme.code === 'P3.1';
                     const themeBg = isHazardOrVuln ? (theme.code === 'P3.2' ? 'bg-orange-50' : 'bg-amber-50') : 'bg-gray-50';
