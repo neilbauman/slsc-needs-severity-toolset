@@ -270,7 +270,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                 const c = (r.category || '').trim().toLowerCase();
                 if (group === 'P1') return c.startsWith('p1') && !c.startsWith('p3');
                 if (group === 'P2') return c.startsWith('p2');
-                if (group === 'P3') return c.startsWith('p3');
+                if (group === 'P3') return c.startsWith('p3') && !c.startsWith('p3.1') && !c.startsWith('p3.2');
                 if (group === 'Hazard') return c.includes('hazard') || c.startsWith('p3.2');
                 if (group === 'Underlying Vulnerability') return c.includes('underlying') || c.includes('vuln') || c.startsWith('p3.1');
                 return false;
