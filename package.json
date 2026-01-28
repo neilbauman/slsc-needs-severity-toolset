@@ -6,7 +6,7 @@
     "prestart": "node scripts/ensure-cache-dirs.js",
     "start": "next build && next start",
     "start:serve": "next start",
-    "build": "node scripts/ensure-cache-dirs.js && next build",
+    "build": "next build",
     "dev": "next dev",
     "local": "npm start"
   },
