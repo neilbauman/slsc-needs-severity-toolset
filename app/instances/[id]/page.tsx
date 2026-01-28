@@ -10,6 +10,8 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import ScoreLayerSelector, { LayerOption } from "@/components/ScoreLayerSelector";
 import InstanceMetricsPanel from "@/components/InstanceMetricsPanel";
+import InstanceAggregationPanel from "@/components/InstanceAggregationPanel";
+import InstanceFrameworkDatasetsPanel from "@/components/InstanceFrameworkDatasetsPanel";
 import VulnerableLocationsPanel from "@/components/VulnerableLocationsPanel";
 import UploadHazardEventModal from "@/components/UploadHazardEventModal";
 import HazardEventScoringModal from "@/components/HazardEventScoringModal";
@@ -2199,6 +2201,39 @@ export default function InstancePage({ params }: { params: { id: string } }) {
 
       {/* Metrics Panel */}
       <InstanceMetricsPanel refreshKey={metricsRefreshKey} instanceId={instanceId} />
+
+      {/* Pillar & overall aggregation (mirrors baseline layout) */}
+      <InstanceAggregationPanel
+        onAdjustScoring={() => setShowScoringModal(true)}
+        disabled={!instance || refreshing}
+      />
+
+      {/* Framework Datasets: scoring per category (mirrors baseline layout) */}
+      <InstanceFrameworkDatasetsPanel
+        datasets={datasets.map((d: any) => ({
+          dataset_id: d.dataset_id,
+          dataset_name: d.dataset_name ?? d.datasets?.name ?? "Unknown dataset",
+          dataset_type: d.dataset_type ?? d.datasets?.type ?? "numeric",
+          dataset_category: d.dataset_category ?? d.datasets?.metadata?.category ?? "Uncategorized",
+        }))}
+        datasetScores={(() => {
+          const m = new Map<string, number | null>();
+          layerOptions.forEach((opt) => {
+            if (opt.dataset_id && !opt.is_hazard_event && opt.avg_score != null) {
+              m.set(opt.dataset_id, opt.avg_score);
+            }
+          });
+          return m;
+        })()}
+        onConfigureDatasets={() => setShowDatasetConfigModal(true)}
+        onAdjustScoring={() => setShowScoringModal(true)}
+        onViewOnMap={(datasetId, datasetName, category) => {
+          const sel = { type: "dataset" as const, datasetId, datasetName, category };
+          setSelectedLayer(sel);
+          loadFeaturesForSelection(sel, overallFeatures);
+        }}
+        disabled={!instance || refreshing}
+      />
 
       {/* Main Content */}
       <div className="flex gap-2">
