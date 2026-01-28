@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { fetchHazardEventScores } from '@/lib/fetchHazardEventScoresClient';
 
-type Method = 'average' | 'median' | 'worst_case' | 'custom_weighted';
+type Method = 'average' | 'median' | 'worst_case' | 'custom_weighted' | 'ssc_decision_tree';
 
 type GroupKey =
   | 'SSC Framework - P1'
@@ -592,7 +592,12 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
     }
   };
 
-  const renderMethodSelect = (value: Method, onChange: (m: Method) => void, label?: string) => (
+  const renderMethodSelect = (
+    value: Method,
+    onChange: (m: Method) => void,
+    label?: string,
+    opts?: { allowSscDecisionTree?: boolean }
+  ) => (
     <div className="space-y-1">
       {label && <label className="text-xs font-medium text-gray-700">{label}</label>}
       <select
@@ -604,12 +609,17 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
         <option value="median">Median</option>
         <option value="worst_case">Worst Case (Maximum)</option>
         <option value="custom_weighted">Custom Weighted</option>
+        {opts?.allowSscDecisionTree && (
+          <option value="ssc_decision_tree">SSC Decision Tree</option>
+        )}
       </select>
       {value !== 'custom_weighted' && (
         <p className="text-xs text-gray-500">
           {value === 'average' && 'Calculates the mean of all scores'}
           {value === 'median' && 'Uses the middle value when scores are sorted'}
           {value === 'worst_case' && 'Takes the highest (worst) score'}
+          {value === 'ssc_decision_tree' &&
+            'Uses the official SSC lookup: P1 (shelter) dominates, then P2/P3. See SSC Decision tree.xlsx.'}
         </p>
       )}
     </div>
@@ -917,7 +927,7 @@ export default function FrameworkScoringModal({ instance, onClose, onSaved }: Pr
               </p>
             </div>
             <div className="p-4 bg-white space-y-4">
-              {renderMethodSelect(sscRollup.method, (m) => setSscRollup((p) => ({ ...p, method: m })), 'Aggregation Method')}
+              {renderMethodSelect(sscRollup.method, (m) => setSscRollup((p) => ({ ...p, method: m })), 'Aggregation Method', { allowSscDecisionTree: true })}
               {sscRollup.method === 'custom_weighted' && (
                 <div className="space-y-2">
                   <h4 className="text-sm font-medium text-gray-700">Category Weights:</h4>
