@@ -863,31 +863,57 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Framework Datasets: sections from DB (pillars, themes, subthemes). No hardcoded P1/P2/P3/Hazards/Vuln. */}
-          {frameworkSections.map((section) => {
-            const items = groupedBySection[section.code] || [];
-            const isPillar = section.level === 'pillar';
-            const headerBg = isPillar ? 'bg-red-50' : section.level === 'theme' ? 'bg-orange-50' : 'bg-gray-50';
-            const headerText = isPillar ? 'text-red-900' : section.level === 'theme' ? 'text-orange-900' : 'text-gray-800';
-            return (
-              <div key={section.code} className="border rounded-lg overflow-hidden">
-                <div className={`px-4 py-3 ${headerBg} border-b`}>
-                  <h4 className={`font-semibold ${headerText}`}>
-                    {section.code} – {section.name} ({items.length} dataset{items.length !== 1 ? 's' : ''})
-                  </h4>
-                </div>
-                {items.length > 0 ? (
+          {/* Framework Datasets: full cards only for sections that have datasets */}
+          {frameworkSections
+            .filter((section) => (groupedBySection[section.code]?.length ?? 0) > 0)
+            .map((section) => {
+              const items = groupedBySection[section.code] || [];
+              const isPillar = section.level === 'pillar';
+              const headerBg = isPillar ? 'bg-red-50' : section.level === 'theme' ? 'bg-orange-50' : 'bg-gray-50';
+              const headerText = isPillar ? 'text-red-900' : section.level === 'theme' ? 'text-orange-900' : 'text-gray-800';
+              return (
+                <div key={section.code} className="border rounded-lg overflow-hidden">
+                  <div className={`px-4 py-3 ${headerBg} border-b`}>
+                    <h4 className={`font-semibold ${headerText}`}>
+                      {section.code} – {section.name} ({items.length} dataset{items.length !== 1 ? 's' : ''})
+                    </h4>
+                  </div>
                   <div className="divide-y divide-gray-100">
                     {items.map((bd) => renderDatasetRow(bd))}
                   </div>
-                ) : (
-                  <div className="px-4 py-3 text-sm text-gray-400 italic">
-                    No datasets assigned to this {section.level}
-                  </div>
-                )}
-              </div>
+                </div>
+              );
+            })}
+
+          {/* Empty framework categories: one compact row instead of one huge card per section */}
+          {(() => {
+            const emptySections = frameworkSections.filter(
+              (s) => (groupedBySection[s.code]?.length ?? 0) === 0
             );
-          })}
+            if (emptySections.length === 0) return null;
+            return (
+              <details className="group border border-gray-200 rounded-lg bg-gray-50/50 overflow-hidden">
+                <summary className="px-3 py-2 text-xs text-gray-500 cursor-pointer hover:bg-gray-100/80 list-none flex items-center justify-between gap-2">
+                  <span>
+                    <span className="font-medium text-gray-600">{emptySections.length} empty framework categories</span>
+                    {' '}– click to show
+                  </span>
+                  <ChevronDown size={14} className="text-gray-400 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-3 pb-2 pt-0 flex flex-wrap gap-1.5">
+                  {emptySections.map((s) => (
+                    <span
+                      key={s.code}
+                      className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-white border border-gray-200 text-gray-600"
+                      title={`${s.code} – ${s.name} (${s.level})`}
+                    >
+                      {s.code} – {s.name}
+                    </span>
+                  ))}
+                </div>
+              </details>
+            );
+          })()}
 
           {/* Uncategorized datasets */}
           {groupedBySection['Uncategorized'] && groupedBySection['Uncategorized'].length > 0 && (
