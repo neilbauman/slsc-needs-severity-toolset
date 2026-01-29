@@ -38,6 +38,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const [configKey, setConfigKey] = useState(0); // Force refresh of config panel
   const [retryCount, setRetryCount] = useState(0);
   const [selectedMapLayer, setSelectedMapLayer] = useState<string>('overall');
+  const [mapAdminLevel, setMapAdminLevel] = useState<string>('ADM3');
 
   const loadScoreSummary = useCallback(async (baselineUuid: string) => {
     setLoadingScoreSummary(true);
@@ -80,6 +81,8 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
         if (window.location.pathname !== newUrl) window.history.replaceState({}, '', newUrl);
       }
       setBaseline(data);
+      const targetLevel = (data?.config?.target_admin_level || 'ADM3').toUpperCase();
+      setMapAdminLevel(targetLevel);
       if (data?.id) await loadScoreSummary(data.id);
     } catch (err: any) {
       console.error('[BaselinePage] Error loading baseline:', err);
@@ -217,8 +220,6 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     );
   }
 
-  const mapAdminLevel = (baseline?.config?.target_admin_level || 'ADM3').toUpperCase();
-
   return (
     <div className="p-3 space-y-3 max-w-7xl mx-auto">
       {/* Header: compact */}
@@ -248,13 +249,29 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       {/* Map (square, left) + Layer list (right) */}
       <section className="flex gap-4 flex-wrap md:flex-nowrap">
         <div className="w-full md:w-[480px] md:h-[480px] flex-shrink-0 h-[320px] md:h-[480px]">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-gray-800">Map</h2>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span>Admin level</span>
+              <select
+                value={mapAdminLevel}
+                onChange={(e) => setMapAdminLevel(e.target.value)}
+                className="px-2 py-1 border rounded text-xs bg-white"
+              >
+                <option value="ADM1">ADM1</option>
+                <option value="ADM2">ADM2</option>
+                <option value="ADM3">ADM3</option>
+                <option value="ADM4">ADM4</option>
+              </select>
+            </div>
+          </div>
           <BaselineMap
-              baselineId={baseline.id}
-              countryId={baseline.country_id}
-              adminLevel={mapAdminLevel}
-              computedAt={baseline.computed_at}
-              selectedLayer={selectedMapLayer}
-            />
+            baselineId={baseline.id}
+            countryId={baseline.country_id}
+            adminLevel={mapAdminLevel}
+            computedAt={baseline.computed_at}
+            selectedLayer={selectedMapLayer}
+          />
         </div>
         <div className="flex-1 min-w-0 border border-gray-200 rounded-lg bg-white overflow-hidden">
           <div className="px-3 py-2 border-b border-gray-200 bg-gray-50">
