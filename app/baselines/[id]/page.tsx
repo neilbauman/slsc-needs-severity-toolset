@@ -39,6 +39,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const [retryCount, setRetryCount] = useState(0);
   const [selectedMapLayer, setSelectedMapLayer] = useState<string>('overall');
   const [mapAdminLevel, setMapAdminLevel] = useState<string>('ADM3');
+  const [baselineDatasetMap, setBaselineDatasetMap] = useState<Record<string, { id: string; name: string; type: string; admin_level: string }>>({});
 
   const loadScoreSummary = useCallback(async (baselineUuid: string) => {
     setLoadingScoreSummary(true);
@@ -99,6 +100,35 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   useEffect(() => {
     loadBaseline();
   }, [loadBaseline]);
+
+  useEffect(() => {
+    if (!baseline?.id) return;
+    let cancelled = false;
+    const loadBaselineDatasets = async () => {
+      const { data, error: dsError } = await supabase
+        .from('baseline_datasets')
+        .select('category, dataset:datasets(id, name, type, admin_level)')
+        .eq('baseline_id', baseline.id);
+
+      if (dsError || !data || cancelled) return;
+
+      const map: Record<string, { id: string; name: string; type: string; admin_level: string }> = {};
+      data.forEach((row: any) => {
+        const category = String(row.category || '').trim();
+        const dataset = row.dataset;
+        if (!category || !dataset) return;
+        map[category] = {
+          id: dataset.id,
+          name: dataset.name,
+          type: dataset.type,
+          admin_level: dataset.admin_level,
+        };
+      });
+      if (!cancelled) setBaselineDatasetMap(map);
+    };
+    loadBaselineDatasets();
+    return () => { cancelled = true; };
+  }, [baseline?.id, supabase]);
 
   const computeBaseline = async () => {
     if (!baseline) {
@@ -171,6 +201,11 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     const uncategorizedCategories = scoreSummary.filter((r) => getSectionCodeForCategory(r.category) === 'Uncategorized');
     return { scoreLayersBySection, uncategorizedCategories };
   }, [scoreSummary]);
+
+  const selectedDataset = useMemo(() => {
+    if (!selectedMapLayer) return null;
+    return baselineDatasetMap[selectedMapLayer] || null;
+  }, [baselineDatasetMap, selectedMapLayer]);
 
   // Debug logging (only in development)
   if (process.env.NODE_ENV === 'development') {
@@ -272,6 +307,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
               adminLevel={mapAdminLevel}
               computedAt={baseline.computed_at}
               selectedLayer={selectedMapLayer}
+            datasetLayer={selectedDataset}
             />
           </div>
         </div>
