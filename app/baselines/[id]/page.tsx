@@ -180,7 +180,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     }
   };
 
-  // Score layers panel: same section codes and labels as bottom Framework Datasets (BaselineConfigPanel)
+  // Score layers panel + scores summary: same section structure (P1 → P2 → P3 → Haz → UV → Other), categories sorted
   const { scoreLayersBySection, uncategorizedCategories } = useMemo(() => {
     const sections = SCORE_LAYER_SECTIONS.filter((s) => s.code !== 'Uncategorized');
     const byCode = sections.reduce(
@@ -194,11 +194,18 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       const code = getSectionCodeForCategory(r.category);
       if (byCode[code]) byCode[code].categories.push(r);
     }
+    // Sort categories within each section (e.g. P3.1.1, P3.1.2, P3.2.1)
+    for (const s of sections) {
+      const list = byCode[s.code]?.categories ?? [];
+      list.sort((a, b) => (a.category || '').localeCompare(b.category || '', undefined, { numeric: true }));
+    }
     const scoreLayersBySection = sections.map((section) => ({
       section,
       categoriesInSection: byCode[section.code]?.categories ?? [],
     }));
-    const uncategorizedCategories = scoreSummary.filter((r) => getSectionCodeForCategory(r.category) === 'Uncategorized');
+    const uncategorizedCategories = scoreSummary
+      .filter((r) => getSectionCodeForCategory(r.category) === 'Uncategorized')
+      .sort((a, b) => (a.category || '').localeCompare(b.category || '', undefined, { numeric: true }));
     return { scoreLayersBySection, uncategorizedCategories };
   }, [scoreSummary]);
 
@@ -337,10 +344,13 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                       <button
                         key={r.category}
                         onClick={() => setSelectedMapLayer(r.category)}
-                        className={`w-full text-left px-2 py-1.5 rounded text-xs truncate ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                        className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
                         title={r.category}
                       >
-                        {r.category}
+                        <span className="truncate min-w-0">{r.category}</span>
+                        <span className="shrink-0 text-gray-500 tabular-nums">
+                          {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -354,10 +364,13 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                   <button
                     key={r.category}
                     onClick={() => setSelectedMapLayer(r.category)}
-                    className={`w-full text-left px-2 py-1.5 rounded text-xs truncate mb-0.5 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                    className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 mb-0.5 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
                     title={r.category}
                   >
-                    {r.category}
+                    <span className="truncate min-w-0">{r.category}</span>
+                    <span className="shrink-0 text-gray-500 tabular-nums">
+                      {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
+                    </span>
                   </button>
                 ))}
               </div>
@@ -410,23 +423,50 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
           ) : scoreSummary.length === 0 ? (
             <p className="text-xs text-gray-500">No scores found. Click Refresh after compute.</p>
           ) : (
-            <div className="overflow-x-auto max-h-32 overflow-y-auto">
+            <div className="overflow-x-auto max-h-64 overflow-y-auto">
               <table className="min-w-full text-xs">
                 <thead>
                   <tr className="text-left text-gray-600 border-b">
                     <th className="py-1 pr-2">Category</th>
-                    <th className="py-1 pr-2">Avg</th>
-                    <th className="py-1 pr-2">#</th>
+                    <th className="py-1 pr-2 text-right">Avg</th>
+                    <th className="py-1 pr-2 text-right">#</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {scoreSummary.map((r) => (
-                    <tr key={r.category} className="border-b last:border-b-0">
-                      <td className="py-1 pr-2 font-medium text-gray-900 truncate max-w-[120px]" title={r.category}>{r.category}</td>
-                      <td className="py-1 pr-2">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
-                      <td className="py-1 pr-2">{r.admin_count}</td>
-                    </tr>
-                  ))}
+                  {scoreLayersBySection.flatMap(({ section, categoriesInSection }) =>
+                    categoriesInSection.length === 0
+                      ? []
+                      : [
+                          <tr key={`h-${section.code}`}>
+                            <td colSpan={3} className="py-1.5 pr-2 font-semibold text-gray-700 bg-gray-50 border-b">
+                              {section.label}
+                            </td>
+                          </tr>,
+                          ...categoriesInSection.map((r) => (
+                            <tr key={r.category} className="border-b last:border-b-0">
+                              <td className="py-1 pr-2 pl-3 font-medium text-gray-900 truncate max-w-[160px]" title={r.category}>{r.category}</td>
+                              <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
+                              <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
+                            </tr>
+                          )),
+                        ]
+                  )}
+                  {uncategorizedCategories.length > 0 && (
+                    <>
+                      <tr key="h-uncategorized">
+                        <td colSpan={3} className="py-1.5 pr-2 font-semibold text-gray-700 bg-gray-50 border-b">
+                          Other categories
+                        </td>
+                      </tr>
+                      {uncategorizedCategories.map((r) => (
+                        <tr key={r.category} className="border-b last:border-b-0">
+                          <td className="py-1 pr-2 pl-3 font-medium text-gray-900 truncate max-w-[160px]" title={r.category}>{r.category}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
+                          <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
+                        </tr>
+                      ))}
+                    </>
+                  )}
                 </tbody>
               </table>
             </div>
