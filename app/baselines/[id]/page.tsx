@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
 import BaselineConfigPanel from '@/components/BaselineConfigPanel';
 import ImportFromInstanceModal from '@/components/ImportFromInstanceModal';
-import { getSectionHeadingForCategory, FRAMEWORK_SECTION_ORDER } from '@/lib/categoryToSection';
+import { getSectionCodeForCategory, SCORE_LAYER_SECTIONS } from '@/lib/categoryToSection';
 
 const BaselineMap = dynamic(() => import('@/components/BaselineMap'), { ssr: false });
 
@@ -36,11 +36,38 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const [retryCount, setRetryCount] = useState(0);
   const [selectedMapLayer, setSelectedMapLayer] = useState<string>('overall');
 
-  useEffect(() => {
-    loadBaseline();
-  }, [baselineId, retryCount]);
+  const loadBaseline = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(baselineId);
+      let query = supabase
+        .from('country_baselines')
+        .select('id, name, description, status, computed_at, created_at, slug, country_id');
+      if (isUUID) query = query.eq('id', baselineId);
+      else query = query.eq('slug', baselineId);
+      const { data, error: fetchError } = await query.maybeSingle();
+      if (fetchError) throw new Error(`Failed to load baseline: ${fetchError.message}`);
+      if (!data) throw new Error(`Baseline not found. The slug or ID "${baselineId}" does not exist in the database.`);
+      if (isUUID && data.slug && typeof window !== 'undefined') {
+        const newUrl = `/baselines/${data.slug}`;
+        if (window.location.pathname !== newUrl) window.history.replaceState({}, '', newUrl);
+      }
+      setBaseline(data);
+      if (data?.id) await loadScoreSummary(data.id);
+    } catch (err: any) {
+      console.error('[BaselinePage] Error loading baseline:', err);
+      const errorMessage = err?.message || 'Failed to load baseline';
+      setError(errorMessage);
+      if (retryCount === 0 && /network|timeout|fetch/i.test(errorMessage)) {
+        setTimeout(() => setRetryCount(1), 2000);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [baselineId, retryCount, loadScoreSummary]);
 
-  const loadScoreSummary = async (baselineUuid: string) => {
+  const loadScoreSummary = useCallback(async (baselineUuid: string) => {
     setLoadingScoreSummary(true);
     try {
       const { data, error: summaryError } = await supabase.rpc('get_baseline_score_summary', {
@@ -61,63 +88,11 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     } finally {
       setLoadingScoreSummary(false);
     }
-  };
+  }, []);
 
-  const loadBaseline = async (): Promise<void> => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Support both UUID and slug in URL
-      // Check if it's a UUID (contains hyphens and is 36 chars) or a slug
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(baselineId);
-      
-      let query = supabase
-        .from('country_baselines')
-        .select('id, name, description, status, computed_at, created_at, slug, country_id');
-      
-      if (isUUID) {
-        query = query.eq('id', baselineId);
-      } else {
-        query = query.eq('slug', baselineId);
-      }
-      
-      const { data, error: fetchError } = await query.maybeSingle();
-
-      if (fetchError) {
-        console.error('[BaselinePage] Error fetching baseline:', fetchError);
-        throw new Error(`Failed to load baseline: ${fetchError.message}`);
-      }
-      
-      if (!data) {
-        // maybeSingle() returns null if not found, which is not an error
-        throw new Error(`Baseline not found. The slug or ID "${baselineId}" does not exist in the database. Please verify the baseline exists and the slug is correct.`);
-      }
-      
-      // If accessed via UUID but has a slug, redirect to slug URL
-      if (isUUID && data.slug && typeof window !== 'undefined') {
-        const newUrl = `/baselines/${data.slug}`;
-        if (window.location.pathname !== newUrl) {
-          window.history.replaceState({}, '', newUrl);
-        }
-      }
-      
-      setBaseline(data);
-      if (data?.id) {
-        await loadScoreSummary(data.id);
-      }
-    } catch (err: any) {
-      console.error('[BaselinePage] Error loading baseline:', err);
-      const errorMessage = err?.message || 'Failed to load baseline';
-      setError(errorMessage);
-      
-      // Auto-retry once for transient errors
-      if (retryCount === 0 && (errorMessage.includes('network') || errorMessage.includes('timeout') || errorMessage.includes('fetch') || errorMessage.includes('timeout'))) {
-        setTimeout(() => setRetryCount(1), 2000);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    loadBaseline();
+  }, [loadBaseline]);
 
   const computeBaseline = async () => {
     if (!baseline) {
@@ -168,6 +143,28 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       alert(`Error: ${err.message}`);
     }
   };
+
+  // Score layers panel: same section codes and labels as bottom Framework Datasets (BaselineConfigPanel)
+  const { scoreLayersBySection, uncategorizedCategories } = useMemo(() => {
+    const sections = SCORE_LAYER_SECTIONS.filter((s) => s.code !== 'Uncategorized');
+    const byCode = sections.reduce(
+      (acc, s) => {
+        acc[s.code] = { section: s, categories: [] as typeof scoreSummary };
+        return acc;
+      },
+      {} as Record<string, { section: (typeof SCORE_LAYER_SECTIONS)[0]; categories: typeof scoreSummary }>
+    );
+    for (const r of scoreSummary) {
+      const code = getSectionCodeForCategory(r.category);
+      if (byCode[code]) byCode[code].categories.push(r);
+    }
+    const scoreLayersBySection = sections.map((section) => ({
+      section,
+      categoriesInSection: byCode[section.code]?.categories ?? [],
+    }));
+    const uncategorizedCategories = scoreSummary.filter((r) => getSectionCodeForCategory(r.category) === 'Uncategorized');
+    return { scoreLayersBySection, uncategorizedCategories };
+  }, [scoreSummary]);
 
   // Debug logging (only in development)
   if (process.env.NODE_ENV === 'development') {
@@ -266,55 +263,34 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             >
               Overall (avg all)
             </button>
-            {FRAMEWORK_SECTION_ORDER.filter(section => 
-              section !== 'Uncategorized' && 
-              ['P1', 'P2', 'P3', 'Hazards', 'Underlying Vulnerabilities'].includes(section)
-            ).map((group) => {
-              // Map UI group names to match layer parameter names
-              const layerGroupName = group === 'Hazards' ? 'Hazard' : 
-                                    group === 'Underlying Vulnerabilities' ? 'Underlying Vulnerability' : 
-                                    group;
-              
-              // Use getSectionHeadingForCategory to match BaselineConfigPanel logic
-              const categoriesInGroup = scoreSummary.filter((r) => {
-                const heading = getSectionHeadingForCategory(r.category);
-                return heading === group;
-              });
-              return (
-                <div key={group} className="mb-2">
-                  <button
-                    onClick={() => setSelectedMapLayer(layerGroupName)}
-                    className={`w-full text-left px-3 py-2 rounded text-sm font-medium mb-1 ${selectedMapLayer === layerGroupName ? 'bg-teal-100 text-teal-900 border border-teal-300' : 'hover:bg-gray-100 border border-transparent'}`}
-                  >
-                    {group === 'Hazards' ? 'Hazard' : group === 'Underlying Vulnerabilities' ? 'Underlying Vulnerability' : group}
-                  </button>
-                  {categoriesInGroup.length > 0 && (
-                    <div className="pl-3 space-y-0.5">
-                      {categoriesInGroup.map((r) => (
-                        <button
-                          key={r.category}
-                          onClick={() => setSelectedMapLayer(r.category)}
-                          className={`w-full text-left px-2 py-1.5 rounded text-xs truncate ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
-                          title={r.category}
-                        >
-                          {r.category}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {scoreSummary.filter((r) => {
-              const heading = getSectionHeadingForCategory(r.category);
-              return heading === 'Uncategorized';
-            }).length > 0 && (
+            {scoreLayersBySection.map(({ section, categoriesInSection }) => (
+              <div key={section.code} className="mb-2">
+                <button
+                  onClick={() => setSelectedMapLayer(section.layerParam || section.code)}
+                  className={`w-full text-left px-3 py-2 rounded text-sm font-medium mb-1 ${selectedMapLayer === (section.layerParam || section.code) ? 'bg-teal-100 text-teal-900 border border-teal-300' : 'hover:bg-gray-100 border border-transparent'}`}
+                >
+                  {section.label}
+                </button>
+                {categoriesInSection.length > 0 && (
+                  <div className="pl-3 space-y-0.5">
+                    {categoriesInSection.map((r) => (
+                      <button
+                        key={r.category}
+                        onClick={() => setSelectedMapLayer(r.category)}
+                        className={`w-full text-left px-2 py-1.5 rounded text-xs truncate ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                        title={r.category}
+                      >
+                        {r.category}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {uncategorizedCategories.length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <p className="text-xs font-medium text-gray-500 px-2 mb-1">Other categories</p>
-                {scoreSummary.filter((r) => {
-                  const heading = getSectionHeadingForCategory(r.category);
-                  return heading === 'Uncategorized';
-                }).map((r) => (
+                {uncategorizedCategories.map((r) => (
                   <button
                     key={r.category}
                     onClick={() => setSelectedMapLayer(r.category)}
