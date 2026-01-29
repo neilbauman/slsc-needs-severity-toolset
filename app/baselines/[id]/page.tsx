@@ -261,15 +261,22 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     }
     byCode['Uncategorized'].categories.sort((a, b) => (a.category || '').localeCompare(b.category || '', undefined, { numeric: true }));
 
-    const scoreLayersBySection = displaySections.map((section) => ({
+    const withCategories = displaySections.map((section) => ({
       section: {
         code: section.code,
         label: section.name,
         layerParam: sectionToLayerParam(section.code),
+        level: section.level,
       },
       categoriesInSection: byCode[section.code]?.categories ?? [],
     }));
     const uncategorizedCategories = byCode['Uncategorized']?.categories ?? [];
+    // Only show: (1) top-level pillars P1, P2, P3; (2) P3.1 Underlying vulnerabilities, P3.2 Hazards; (3) themes/subthemes that have at least one category
+    const isAlwaysShown = (s: { section: { code: string; level: string } }) =>
+      s.section.level === 'pillar' || s.section.code === 'P3.1' || s.section.code === 'P3.2';
+    const scoreLayersBySection = withCategories.filter(
+      (row) => isAlwaysShown(row) || row.categoriesInSection.length > 0
+    );
     return { scoreLayersBySection, uncategorizedCategories };
   }, [scoreSummary, frameworkSections]);
 
@@ -326,6 +333,34 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     );
   }
 
+  const baselineMetrics = useMemo(() => {
+    if (!scoreSummary.length) {
+      return {
+        categories: 0,
+        avgSeverity: null as number | null,
+        adminUnits: 0,
+        scoreRecords: 0,
+      };
+    }
+    const adminUnits = Math.max(0, ...scoreSummary.map((r) => r.admin_count ?? 0));
+    const scoreRecords = scoreSummary.reduce((s, r) => s + (r.row_count ?? 0), 0);
+    const validAvgs = scoreSummary.map((r) => r.avg_score).filter((v) => Number.isFinite(v)) as number[];
+    const avgSeverity = validAvgs.length ? validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length : null;
+    return {
+      categories: scoreSummary.length,
+      avgSeverity,
+      adminUnits,
+      scoreRecords,
+    };
+  }, [scoreSummary]);
+
+  const formatNum = (n: number | null | undefined): string => {
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+    return String(Math.round(n));
+  };
+
   return (
     <div className="p-3 space-y-3 max-w-7xl mx-auto">
       {/* Header: compact */}
@@ -351,6 +386,44 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
           Back
         </Link>
       </header>
+
+      {/* Summary cards at top (instance-dashboard style: 6-card grid, uppercase labels, context line) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
+        <div className="border rounded p-2 shadow-sm" style={{ backgroundColor: 'rgba(0, 75, 135, 0.05)', borderColor: 'rgba(0, 75, 135, 0.2)' }}>
+          <div className="text-xs font-medium uppercase tracking-wide mb-0.5" style={{ color: 'var(--gsc-blue)' }}>Categories</div>
+          <div className="text-lg font-bold" style={{ color: 'var(--gsc-blue)' }}>{baselineMetrics.categories}</div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>With scores</div>
+        </div>
+        <div className="border rounded p-2 shadow-sm" style={{ backgroundColor: 'rgba(211, 84, 0, 0.05)', borderColor: 'rgba(211, 84, 0, 0.2)' }}>
+          <div className="text-xs font-medium uppercase tracking-wide mb-0.5" style={{ color: 'var(--gsc-orange)' }}>Avg Severity</div>
+          <div className="text-lg font-bold" style={{ color: 'var(--gsc-orange)' }}>
+            {baselineMetrics.avgSeverity != null ? baselineMetrics.avgSeverity.toFixed(2) : '—'}
+          </div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>Out of 5.0</div>
+        </div>
+        <div className="border rounded p-2 shadow-sm" style={{ backgroundColor: 'rgba(99, 7, 16, 0.05)', borderColor: 'rgba(99, 7, 16, 0.2)' }}>
+          <div className="text-xs font-medium uppercase tracking-wide mb-0.5" style={{ color: 'var(--gsc-red)' }}>Admin Units</div>
+          <div className="text-lg font-bold" style={{ color: 'var(--gsc-red)' }}>{formatNum(baselineMetrics.adminUnits)}</div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>With scores</div>
+        </div>
+        <div className="border rounded p-2 shadow-sm" style={{ backgroundColor: 'rgba(0, 75, 135, 0.05)', borderColor: 'rgba(0, 75, 135, 0.2)' }}>
+          <div className="text-xs font-medium uppercase tracking-wide mb-0.5" style={{ color: 'var(--gsc-blue)' }}>Score Records</div>
+          <div className="text-lg font-bold" style={{ color: 'var(--gsc-blue)' }}>{formatNum(baselineMetrics.scoreRecords)}</div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>Total rows</div>
+        </div>
+        <div className="border rounded p-2 shadow-sm" style={{ backgroundColor: 'rgba(211, 84, 0, 0.05)', borderColor: 'rgba(211, 84, 0, 0.2)' }}>
+          <div className="text-xs font-medium uppercase tracking-wide mb-0.5" style={{ color: 'var(--gsc-orange)' }}>Last Computed</div>
+          <div className="text-lg font-bold" style={{ color: 'var(--gsc-orange)' }}>
+            {baseline.computed_at ? new Date(baseline.computed_at).toLocaleDateString() : '—'}
+          </div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>Baseline scores</div>
+        </div>
+        <div className="border rounded p-2 shadow-sm" style={{ backgroundColor: 'var(--gsc-light-gray)', borderColor: 'rgba(55, 65, 81, 0.2)' }}>
+          <div className="text-xs font-medium uppercase tracking-wide mb-0.5" style={{ color: 'var(--gsc-gray)' }}>Status</div>
+          <div className="text-lg font-bold capitalize" style={{ color: 'var(--gsc-gray)' }}>{baseline.status || 'draft'}</div>
+          <div className="text-xs mt-0.5" style={{ color: 'var(--gsc-gray)' }}>Baseline</div>
+        </div>
+      </div>
 
       {/* Map (square, left) + Layer list (right) */}
       <section className="flex gap-4 flex-wrap md:flex-nowrap">
@@ -411,13 +484,11 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                           key={r.category}
                           onClick={() => setSelectedMapLayer(r.category)}
                           className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
-                          title={datasetName ? `${r.category} · ${datasetName}` : r.category}
+                          title={datasetName ? `${datasetName} · ${r.category}` : r.category}
                         >
                           <div className="min-w-0 flex flex-col">
-                            <span className="truncate font-medium text-gray-900">{r.category}</span>
-                            {datasetName && (
-                              <span className="truncate text-[10px] text-gray-500">{datasetName}</span>
-                            )}
+                            <span className="truncate font-medium text-gray-900">{datasetName ?? r.category}</span>
+                            <span className="truncate text-[10px] text-gray-500">{datasetName ? r.category : null}</span>
                           </div>
                           <span className="shrink-0 text-gray-500 tabular-nums">
                             {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
@@ -439,13 +510,11 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                       key={r.category}
                       onClick={() => setSelectedMapLayer(r.category)}
                       className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 mb-0.5 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
-                      title={datasetName ? `${r.category} · ${datasetName}` : r.category}
+                      title={datasetName ? `${datasetName} · ${r.category}` : r.category}
                     >
                       <div className="min-w-0 flex flex-col">
-                        <span className="truncate font-medium text-gray-900">{r.category}</span>
-                        {datasetName && (
-                          <span className="truncate text-[10px] text-gray-500">{datasetName}</span>
-                        )}
+                        <span className="truncate font-medium text-gray-900">{datasetName ?? r.category}</span>
+                        <span className="truncate text-[10px] text-gray-500">{datasetName ? r.category : null}</span>
                       </div>
                       <span className="shrink-0 text-gray-500 tabular-nums">
                         {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
@@ -507,7 +576,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
               <table className="min-w-full text-xs">
                 <thead>
                   <tr className="text-left text-gray-600 border-b">
-                    <th className="py-1 pr-2">Category</th>
+                    <th className="py-1 pr-2">Dataset / Theme</th>
                     <th className="py-1 pr-2 text-right">Avg</th>
                     <th className="py-1 pr-2 text-right">#</th>
                   </tr>
@@ -526,9 +595,9 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                             const dsName = baselineDatasetMap[r.category]?.name;
                             return (
                               <tr key={r.category} className="border-b last:border-b-0">
-                                <td className="py-1 pr-2 pl-3 max-w-[200px]" title={dsName ? `${r.category} · ${dsName}` : r.category}>
-                                  <span className="font-medium text-gray-900 truncate block">{r.category}</span>
-                                  {dsName && <span className="text-[10px] text-gray-500 truncate block">{dsName}</span>}
+                                <td className="py-1 pr-2 pl-3 max-w-[200px]" title={dsName ? `${dsName} · ${r.category}` : r.category}>
+                                  <span className="font-medium text-gray-900 truncate block">{dsName ?? r.category}</span>
+                                  {dsName != null && <span className="text-[10px] text-gray-500 truncate block">{r.category}</span>}
                                 </td>
                                 <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
                                 <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
@@ -548,9 +617,9 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                         const dsName = baselineDatasetMap[r.category]?.name;
                         return (
                           <tr key={r.category} className="border-b last:border-b-0">
-                            <td className="py-1 pr-2 pl-3 max-w-[200px]" title={dsName ? `${r.category} · ${dsName}` : r.category}>
-                              <span className="font-medium text-gray-900 truncate block">{r.category}</span>
-                              {dsName && <span className="text-[10px] text-gray-500 truncate block">{dsName}</span>}
+                            <td className="py-1 pr-2 pl-3 max-w-[200px]" title={dsName ? `${dsName} · ${r.category}` : r.category}>
+                              <span className="font-medium text-gray-900 truncate block">{dsName ?? r.category}</span>
+                              {dsName != null && <span className="text-[10px] text-gray-500 truncate block">{r.category}</span>}
                             </td>
                             <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
                             <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
