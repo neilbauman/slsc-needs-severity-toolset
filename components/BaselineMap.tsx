@@ -167,7 +167,7 @@ export default function BaselineMap({
     return () => { cancelled = true; };
   }, [datasetLayer, countryId]);
 
-  // Fetch scores for the selected layer only (smaller payload, no GeoJSON re-fetch)
+  // Fetch scores for the selected layer only. Paginate to avoid Supabase/PostgREST 1000-row limit.
   useEffect(() => {
     if (!baselineId || !countryId || !computedAt) {
       setScoreByPcode(new Map());
@@ -178,20 +178,31 @@ export default function BaselineMap({
     setLoadingScores(true);
     void (async () => {
       try {
-        const mapScoresRes = await supabase.rpc('get_baseline_map_scores', {
-          in_baseline_id: baselineId,
-          in_admin_level: adminLevel,
-          in_layer: selectedLayer || 'overall',
-        });
-        if (cancelled) return;
-        if (mapScoresRes.error) {
-          console.error('[BaselineMap] RPC error:', mapScoresRes.error);
-          setError(mapScoresRes.error.message);
-          return;
+        const CHUNK = 1000;
+        let offset = 0;
+        const allScores: any[] = [];
+        let hasMore = true;
+        while (hasMore && !cancelled) {
+          const mapScoresRes = await supabase
+            .rpc('get_baseline_map_scores', {
+              in_baseline_id: baselineId,
+              in_admin_level: adminLevel,
+              in_layer: selectedLayer || 'overall',
+            })
+            .range(offset, offset + CHUNK - 1);
+          if (cancelled) return;
+          if (mapScoresRes.error) {
+            console.error('[BaselineMap] RPC error:', mapScoresRes.error);
+            setError(mapScoresRes.error.message);
+            return;
+          }
+          const chunk = mapScoresRes.data || [];
+          allScores.push(...chunk);
+          if (chunk.length < CHUNK) hasMore = false;
+          else offset += CHUNK;
         }
-        const scores = mapScoresRes.data || [];
         const map = new Map<string, number>();
-        scores.forEach((r: any) => {
+        allScores.forEach((r: any) => {
           const p = String(r.admin_pcode ?? '').trim();
           if (!p) return;
           const s = Number(r.avg_score);
