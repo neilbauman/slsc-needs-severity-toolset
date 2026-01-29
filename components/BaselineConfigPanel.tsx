@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabaseClient';
 import { useCountry } from '@/lib/countryContext';
+import { getSectionCodeForCategory as getSectionCodeForCategoryLib } from '@/lib/categoryToSection';
 import { Plus, Trash2, Save, RefreshCw, Settings, CheckCircle, X, Info, ChevronDown } from 'lucide-react';
 
 /** One display section in Framework Datasets, derived from DB framework (pillar/theme/subtheme) */
@@ -591,25 +592,10 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
     }
   };
 
-  // Map category string to section code using DB framework sections (longest matching code)
-  const getSectionCodeForCategory = (category: string): string => {
-    const raw = (category || '').trim();
-    if (!raw) return 'Uncategorized';
-    const codePart = raw.split(' - ')[0]?.trim() || raw;
-    if (!codePart) return 'Uncategorized';
-    const matches = frameworkSections.filter(
-      (s) => codePart === s.code || codePart.startsWith(s.code + '.')
-    );
-    if (matches.length === 0) {
-      const prefixMatch = frameworkSections.filter((s) => codePart.startsWith(s.code));
-      const best = prefixMatch.sort((a, b) => b.code.length - a.code.length)[0];
-      return best ? best.code : 'Uncategorized';
-    }
-    const best = matches.sort((a, b) => b.code.length - a.code.length)[0];
-    return best?.code ?? 'Uncategorized';
-  };
+  // Use same section logic as baseline page Score layers so Framework Datasets and Score layers match
+  const getSectionCodeForCategory = (category: string): string => getSectionCodeForCategoryLib(category);
 
-  // Group datasets by section code (DB-driven sections)
+  // Group datasets by section code (aligned with Score layers panel)
   const groupedBySection = baselineDatasets.reduce(
     (acc, bd) => {
       const code = getSectionCodeForCategory(bd.category);
