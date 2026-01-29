@@ -261,3 +261,9 @@ When reviewing or editing code:
 - Final aggregation combines framework scores
 - Always provide user feedback during long-running operations
 
+## Agent Behavior (Default)
+
+- **Default to agent workflow**: When the user asks for a change or fix, complete the full workflow without asking them to run steps: verify build, commit, push to `main`, and run Supabase migrations when applicable. Do not hand off steps (e.g. "you run this") unless blocked (e.g. browser auth).
+- **Supabase CLI**: The project is linked to Supabase. For `supabase` commands (e.g. `supabase db push`), load the access token from `.env.local` so the CLI is authenticated: run `export SUPABASE_ACCESS_TOKEN=$(grep '^SUPABASE_ACCESS_TOKEN=' .env.local 2>/dev/null | cut -d= -f2-)` before the command, or use `SUPABASE_ACCESS_TOKEN=... supabase ...` with the value from that file. Do not commit or log the token.
+- **Permanent CLI access**: The user has added (or will add) `SUPABASE_ACCESS_TOKEN=<token>` to `.env.local` (gitignored) so the agent can run Supabase CLI without being given the token each time.
+
