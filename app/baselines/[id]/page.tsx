@@ -248,7 +248,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
 
       {/* Map (square, left) + Layer list (right) */}
       <section className="flex gap-4 flex-wrap md:flex-nowrap">
-        <div className="w-full md:w-[480px] md:h-[480px] flex-shrink-0 h-[320px] md:h-[480px]">
+        <div className="w-full md:w-[480px] md:h-[480px] flex-shrink-0 h-[320px] md:h-[480px] flex flex-col">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-sm font-semibold text-gray-800">Map</h2>
             <div className="flex items-center gap-2 text-xs text-gray-600">
@@ -265,13 +265,15 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
               </select>
             </div>
           </div>
-          <BaselineMap
-            baselineId={baseline.id}
-            countryId={baseline.country_id}
-            adminLevel={mapAdminLevel}
-            computedAt={baseline.computed_at}
-            selectedLayer={selectedMapLayer}
-          />
+          <div className="flex-1 min-h-0">
+            <BaselineMap
+              baselineId={baseline.id}
+              countryId={baseline.country_id}
+              adminLevel={mapAdminLevel}
+              computedAt={baseline.computed_at}
+              selectedLayer={selectedMapLayer}
+            />
+          </div>
         </div>
         <div className="flex-1 min-w-0 border border-gray-200 rounded-lg bg-white overflow-hidden">
           <div className="px-3 py-2 border-b border-gray-200 bg-gray-50">
