@@ -57,18 +57,16 @@ AS $$
         )
         WHEN in_layer = 'Hazard' THEN (
           (bs.category ILIKE 'P3.2%' OR bs.category ILIKE '%hazard%')
-          -- Ensure we don't accidentally include UV categories
           AND bs.category NOT ILIKE 'P3.1%'
           AND bs.category NOT ILIKE '%underlying%'
           AND bs.category NOT ILIKE '%vuln%'
+          AND bs.category NOT ILIKE 'UV%'
         )
         WHEN in_layer = 'Underlying Vulnerability' THEN (
-          (bs.category ILIKE 'P3.1%' 
-           OR bs.category ILIKE 'UV%' 
-           OR bs.category ILIKE '%underlying%' 
-           OR (bs.category ILIKE '%vuln%' AND bs.category NOT ILIKE '%hazard%'))
-          -- Ensure we don't accidentally include Hazard categories
-          AND bs.category NOT ILIKE 'P3.2%'
+          bs.category ILIKE 'P3.1%' 
+          OR bs.category ILIKE 'UV%' 
+          OR bs.category ILIKE '%underlying%' 
+          OR (bs.category ILIKE '%vuln%' AND bs.category NOT ILIKE '%hazard%')
         )
         ELSE bs.category = in_layer
       END

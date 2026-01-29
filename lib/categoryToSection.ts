@@ -53,6 +53,9 @@ export function getSectionHeadingForCategory(category: string): FrameworkSection
   if (/^P?3\.1(\b|\.)/.test(c)) return 'Underlying Vulnerabilities';
   if (/^P?3\.2(\b|\.)/.test(c)) return 'Hazards';
 
+  // UV prefix (e.g. "UV.2 - Socio-economic") → Underlying Vulnerabilities
+  if (/^UV[.\s-]/i.test(c) || lower === 'uv') return 'Underlying Vulnerabilities';
+
   // Pillar-level
   if (/^P1\s*-/.test(c)) return 'P1';
   if (/^P2\s*-/.test(c)) return 'P2';
