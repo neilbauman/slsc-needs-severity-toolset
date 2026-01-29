@@ -59,14 +59,15 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
     let cancelled = false;
     setLoadingBoundaries(true);
     setError(null);
-    supabase
-      .rpc('get_admin_boundaries_geojson', {
-        country_id: countryId,
-        admin_level: adminLevel,
-      })
-      .then((geoRes) => {
-        if (cancelled || geoRes.error) {
-          if (geoRes.error && !cancelled) setError(geoRes.error.message);
+    void (async () => {
+      try {
+        const geoRes = await supabase.rpc('get_admin_boundaries_geojson', {
+          country_id: countryId,
+          admin_level: adminLevel,
+        });
+        if (cancelled) return;
+        if (geoRes.error) {
+          setError(geoRes.error.message);
           return;
         }
         const raw = geoRes.data;
@@ -75,10 +76,9 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
           if (typeof raw === 'string') {
             fc = JSON.parse(raw);
           } else if (raw != null && typeof raw === 'object') {
-            // Supabase may return the JSONB as a single object or as [single row]
             fc = Array.isArray(raw) && raw.length > 0 ? raw[0] : raw;
           }
-        } catch (e) {
+        } catch {
           if (!cancelled) setError('Invalid boundaries response');
           return;
         }
@@ -87,13 +87,12 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
         if (feats.length > 0) {
           console.log(`[BaselineMap] Loaded ${feats.length} boundary features`);
         }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e?.message || 'Failed to load boundaries');
-      })
-      .finally(() => {
+      } catch (e) {
+        if (!cancelled) setError((e as Error)?.message || 'Failed to load boundaries');
+      } finally {
         if (!cancelled) setLoadingBoundaries(false);
-      });
+      }
+    })();
     return () => { cancelled = true; };
   }, [baselineId, countryId, adminLevel, computedAt]);
 
@@ -106,18 +105,17 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
     }
     let cancelled = false;
     setLoadingScores(true);
-    supabase
-      .rpc('get_baseline_map_scores', {
-        in_baseline_id: baselineId,
-        in_admin_level: adminLevel,
-        in_layer: selectedLayer || 'overall',
-      })
-      .then((mapScoresRes) => {
-        if (cancelled || mapScoresRes.error) {
-          if (mapScoresRes.error && !cancelled) {
-            console.error('[BaselineMap] RPC error:', mapScoresRes.error);
-            setError(mapScoresRes.error.message);
-          }
+    void (async () => {
+      try {
+        const mapScoresRes = await supabase.rpc('get_baseline_map_scores', {
+          in_baseline_id: baselineId,
+          in_admin_level: adminLevel,
+          in_layer: selectedLayer || 'overall',
+        });
+        if (cancelled) return;
+        if (mapScoresRes.error) {
+          console.error('[BaselineMap] RPC error:', mapScoresRes.error);
+          setError(mapScoresRes.error.message);
           return;
         }
         const scores = mapScoresRes.data || [];
@@ -129,10 +127,10 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
           if (Number.isFinite(s)) map.set(p, s);
         });
         setScoreByPcode(map);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoadingScores(false);
-      });
+      }
+    })();
     return () => { cancelled = true; };
   }, [baselineId, countryId, adminLevel, computedAt, selectedLayer]);
 

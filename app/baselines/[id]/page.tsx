@@ -36,6 +36,29 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const [retryCount, setRetryCount] = useState(0);
   const [selectedMapLayer, setSelectedMapLayer] = useState<string>('overall');
 
+  const loadScoreSummary = useCallback(async (baselineUuid: string) => {
+    setLoadingScoreSummary(true);
+    try {
+      const { data, error: summaryError } = await supabase.rpc('get_baseline_score_summary', {
+        in_baseline_id: baselineUuid,
+      });
+      if (summaryError) throw summaryError;
+      setScoreSummary(
+        (data || []).map((r: any) => ({
+          category: r.category,
+          avg_score: Number(r.avg_score),
+          admin_count: Number(r.admin_count),
+          row_count: Number(r.row_count),
+        }))
+      );
+    } catch (err: any) {
+      console.warn('[BaselinePage] Could not load baseline score summary:', err?.message || err);
+      setScoreSummary([]);
+    } finally {
+      setLoadingScoreSummary(false);
+    }
+  }, []);
+
   const loadBaseline = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
@@ -66,29 +89,6 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       setLoading(false);
     }
   }, [baselineId, retryCount, loadScoreSummary]);
-
-  const loadScoreSummary = useCallback(async (baselineUuid: string) => {
-    setLoadingScoreSummary(true);
-    try {
-      const { data, error: summaryError } = await supabase.rpc('get_baseline_score_summary', {
-        in_baseline_id: baselineUuid,
-      });
-      if (summaryError) throw summaryError;
-      setScoreSummary(
-        (data || []).map((r: any) => ({
-          category: r.category,
-          avg_score: Number(r.avg_score),
-          admin_count: Number(r.admin_count),
-          row_count: Number(r.row_count),
-        }))
-      );
-    } catch (err: any) {
-      console.warn('[BaselinePage] Could not load baseline score summary:', err?.message || err);
-      setScoreSummary([]);
-    } finally {
-      setLoadingScoreSummary(false);
-    }
-  }, []);
 
   useEffect(() => {
     loadBaseline();
