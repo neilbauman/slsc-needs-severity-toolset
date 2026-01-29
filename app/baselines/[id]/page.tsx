@@ -19,6 +19,9 @@ type Baseline = {
   created_at: string | null;
   slug: string | null;
   country_id: string | null;
+  config?: {
+    target_admin_level?: string | null;
+  } | null;
 };
 
 export default function BaselineDetailPage({ params }: { params: { id: string } }) {
@@ -66,7 +69,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(baselineId);
       let query = supabase
         .from('country_baselines')
-        .select('id, name, description, status, computed_at, created_at, slug, country_id');
+        .select('id, name, description, status, computed_at, created_at, slug, country_id, config');
       if (isUUID) query = query.eq('id', baselineId);
       else query = query.eq('slug', baselineId);
       const { data, error: fetchError } = await query.maybeSingle();
@@ -214,6 +217,8 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     );
   }
 
+  const mapAdminLevel = (baseline?.config?.target_admin_level || 'ADM3').toUpperCase();
+
   return (
     <div className="p-3 space-y-3 max-w-7xl mx-auto">
       {/* Header: compact */}
@@ -246,7 +251,7 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
           <BaselineMap
               baselineId={baseline.id}
               countryId={baseline.country_id}
-              adminLevel="ADM3"
+              adminLevel={mapAdminLevel}
               computedAt={baseline.computed_at}
               selectedLayer={selectedMapLayer}
             />
