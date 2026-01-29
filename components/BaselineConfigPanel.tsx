@@ -1109,44 +1109,6 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
             );
           })}
 
-          {/* Hazards + Underlying Vulnerabilities AFTER pillars (Hazards first) */}
-          {(['P3.2', 'P3.1'] as const).map((code) => {
-            const items = groupedBySection[code] || [];
-            const title = code === 'P3.2' ? 'Haz – Hazards' : 'UV – Underlying Vulnerabilities';
-            const bg = code === 'P3.2' ? 'bg-orange-50' : 'bg-amber-50';
-            const border = code === 'P3.2' ? 'border-orange-200' : 'border-amber-200';
-            const text = code === 'P3.2' ? 'text-orange-900' : 'text-amber-900';
-            const theme = frameworkSections.find((s) => s.code === code);
-            const themeName = theme?.name || (code === 'P3.2' ? 'Hazards (P3.2)' : 'Underlying Vulnerabilities (P3.1)');
-            if (!showEmptyThemes && items.length === 0) return null;
-            return (
-              <div key={code} className={`border rounded-lg overflow-hidden ${border}`}>
-                <div className={`px-4 py-2.5 ${bg} border-b ${border}`}>
-                  <h4 className={`font-semibold ${text}`}>
-                    {title}
-                    <span className="font-normal ml-2 text-xs text-gray-600">
-                      {code} — {themeName}
-                    </span>
-                    {items.length > 0 && (
-                      <span className="font-normal ml-2 text-xs text-gray-600">
-                        ({items.length} dataset{items.length !== 1 ? 's' : ''})
-                      </span>
-                    )}
-                  </h4>
-                </div>
-                {items.length > 0 ? (
-                  <div className="divide-y divide-gray-50">
-                    {items.map((bd) => renderDatasetRow(bd))}
-                  </div>
-                ) : (
-                  <div className={`px-4 py-2 text-xs ${bg} text-gray-500 italic`}>
-                    No datasets.
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
           {/* Uncategorized datasets */}
           {groupedBySection['Uncategorized'] && groupedBySection['Uncategorized'].length > 0 && (
             <div className="border border-yellow-300 rounded-lg overflow-hidden">

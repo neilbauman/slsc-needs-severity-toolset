@@ -340,19 +340,27 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                 </button>
                 {categoriesInSection.length > 0 && (
                   <div className="pl-3 space-y-0.5">
-                    {categoriesInSection.map((r) => (
-                      <button
-                        key={r.category}
-                        onClick={() => setSelectedMapLayer(r.category)}
-                        className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
-                        title={r.category}
-                      >
-                        <span className="truncate min-w-0">{r.category}</span>
-                        <span className="shrink-0 text-gray-500 tabular-nums">
-                          {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
-                        </span>
-                      </button>
-                    ))}
+                    {categoriesInSection.map((r) => {
+                      const datasetName = baselineDatasetMap[r.category]?.name;
+                      return (
+                        <button
+                          key={r.category}
+                          onClick={() => setSelectedMapLayer(r.category)}
+                          className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                          title={datasetName ? `${r.category} · ${datasetName}` : r.category}
+                        >
+                          <div className="min-w-0 flex flex-col">
+                            <span className="truncate font-medium text-gray-900">{r.category}</span>
+                            {datasetName && (
+                              <span className="truncate text-[10px] text-gray-500">{datasetName}</span>
+                            )}
+                          </div>
+                          <span className="shrink-0 text-gray-500 tabular-nums">
+                            {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -360,19 +368,27 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
             {uncategorizedCategories.length > 0 && (
               <div className="mt-2 pt-2 border-t border-gray-200">
                 <p className="text-xs font-medium text-gray-500 px-2 mb-1">Other categories</p>
-                {uncategorizedCategories.map((r) => (
-                  <button
-                    key={r.category}
-                    onClick={() => setSelectedMapLayer(r.category)}
-                    className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 mb-0.5 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
-                    title={r.category}
-                  >
-                    <span className="truncate min-w-0">{r.category}</span>
-                    <span className="shrink-0 text-gray-500 tabular-nums">
-                      {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
-                    </span>
-                  </button>
-                ))}
+                {uncategorizedCategories.map((r) => {
+                  const datasetName = baselineDatasetMap[r.category]?.name;
+                  return (
+                    <button
+                      key={r.category}
+                      onClick={() => setSelectedMapLayer(r.category)}
+                      className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between gap-2 mb-0.5 ${selectedMapLayer === r.category ? 'bg-teal-50 text-teal-800 border border-teal-200' : 'hover:bg-gray-50 border border-transparent'}`}
+                      title={datasetName ? `${r.category} · ${datasetName}` : r.category}
+                    >
+                      <div className="min-w-0 flex flex-col">
+                        <span className="truncate font-medium text-gray-900">{r.category}</span>
+                        {datasetName && (
+                          <span className="truncate text-[10px] text-gray-500">{datasetName}</span>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-gray-500 tabular-nums">
+                        {Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'} <span className="text-gray-400">({r.row_count})</span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -442,13 +458,19 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                               {section.label}
                             </td>
                           </tr>,
-                          ...categoriesInSection.map((r) => (
-                            <tr key={r.category} className="border-b last:border-b-0">
-                              <td className="py-1 pr-2 pl-3 font-medium text-gray-900 truncate max-w-[160px]" title={r.category}>{r.category}</td>
-                              <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
-                              <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
-                            </tr>
-                          )),
+                          ...categoriesInSection.map((r) => {
+                            const dsName = baselineDatasetMap[r.category]?.name;
+                            return (
+                              <tr key={r.category} className="border-b last:border-b-0">
+                                <td className="py-1 pr-2 pl-3 max-w-[200px]" title={dsName ? `${r.category} · ${dsName}` : r.category}>
+                                  <span className="font-medium text-gray-900 truncate block">{r.category}</span>
+                                  {dsName && <span className="text-[10px] text-gray-500 truncate block">{dsName}</span>}
+                                </td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
+                                <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
+                              </tr>
+                            );
+                          }),
                         ]
                   )}
                   {uncategorizedCategories.length > 0 && (
@@ -458,13 +480,19 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
                           Other categories
                         </td>
                       </tr>
-                      {uncategorizedCategories.map((r) => (
-                        <tr key={r.category} className="border-b last:border-b-0">
-                          <td className="py-1 pr-2 pl-3 font-medium text-gray-900 truncate max-w-[160px]" title={r.category}>{r.category}</td>
-                          <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
-                          <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
-                        </tr>
-                      ))}
+                      {uncategorizedCategories.map((r) => {
+                        const dsName = baselineDatasetMap[r.category]?.name;
+                        return (
+                          <tr key={r.category} className="border-b last:border-b-0">
+                            <td className="py-1 pr-2 pl-3 max-w-[200px]" title={dsName ? `${r.category} · ${dsName}` : r.category}>
+                              <span className="font-medium text-gray-900 truncate block">{r.category}</span>
+                              {dsName && <span className="text-[10px] text-gray-500 truncate block">{dsName}</span>}
+                            </td>
+                            <td className="py-1 pr-2 text-right tabular-nums">{Number.isFinite(r.avg_score) ? r.avg_score.toFixed(2) : '—'}</td>
+                            <td className="py-1 pr-2 text-right tabular-nums">{r.row_count}</td>
+                          </tr>
+                        );
+                      })}
                     </>
                   )}
                 </tbody>
