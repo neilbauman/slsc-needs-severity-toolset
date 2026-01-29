@@ -228,6 +228,9 @@ export default function BaselineMap({ baselineId, countryId, adminLevel = 'ADM3'
   return (
     <div className="rounded-lg border border-gray-200 overflow-hidden bg-white h-full w-full flex flex-col">
       <div className="flex-1 min-h-0 relative">
+        <div className="absolute top-2 left-2 z-[1000] rounded bg-white/90 px-2 py-1 text-[11px] text-gray-700 shadow border border-gray-200">
+          Admin level: {adminLevel}
+        </div>
         <MapContainer
           center={[12.88, 121.77]}
           zoom={6}
