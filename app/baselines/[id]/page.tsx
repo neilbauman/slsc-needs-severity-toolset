@@ -6,9 +6,10 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabaseClient';
 import BaselineConfigPanel from '@/components/BaselineConfigPanel';
 import ImportFromInstanceModal from '@/components/ImportFromInstanceModal';
-import { getSectionCodeForCategory, SCORE_LAYER_SECTIONS } from '@/lib/categoryToSection';
 
 const BaselineMap = dynamic(() => import('@/components/BaselineMap'), { ssr: false });
+
+type FrameworkSection = { code: string; name: string; level: string };
 
 type Baseline = {
   id: string;
@@ -40,6 +41,37 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   const [selectedMapLayer, setSelectedMapLayer] = useState<string>('overall');
   const [mapAdminLevel, setMapAdminLevel] = useState<string>('ADM3');
   const [baselineDatasetMap, setBaselineDatasetMap] = useState<Record<string, { id: string; name: string; type: string; admin_level: string }>>({});
+  const [frameworkSections, setFrameworkSections] = useState<FrameworkSection[]>([]);
+
+  const loadFrameworkStructure = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_framework_structure');
+      if (error || !data || !Array.isArray(data)) return;
+      const sections: FrameworkSection[] = [];
+      data.forEach((pillar: any) => {
+        const pillarKey = pillar.code || '';
+        sections.push({ code: pillarKey, name: pillar.name || pillarKey, level: 'pillar' });
+        if (pillar.themes && Array.isArray(pillar.themes)) {
+          const sortedThemes = [...pillar.themes].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+          sortedThemes.forEach((theme: any, idx: number) => {
+            const themeNum = (theme.order_index ?? idx) + 1;
+            const themeCode = `${pillarKey}.${themeNum}`;
+            sections.push({ code: themeCode, name: theme.name || themeCode, level: 'theme' });
+            if (theme.subthemes && Array.isArray(theme.subthemes)) {
+              const sortedSub = [...theme.subthemes].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+              sortedSub.forEach((st: any, si: number) => {
+                const stNum = (st.order_index ?? si) + 1;
+                sections.push({ code: `${themeCode}.${stNum}`, name: st.name || st.code, level: 'subtheme' });
+              });
+            }
+          });
+        }
+      });
+      setFrameworkSections(sections);
+    } catch (e) {
+      console.warn('[BaselinePage] Failed to load framework structure:', e);
+    }
+  }, [supabase]);
 
   const loadScoreSummary = useCallback(async (baselineUuid: string) => {
     setLoadingScoreSummary(true);
@@ -100,6 +132,10 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
   useEffect(() => {
     loadBaseline();
   }, [loadBaseline]);
+
+  useEffect(() => {
+    loadFrameworkStructure();
+  }, [loadFrameworkStructure]);
 
   useEffect(() => {
     if (!baseline?.id) return;
@@ -180,34 +216,62 @@ export default function BaselineDetailPage({ params }: { params: { id: string } 
     }
   };
 
-  // Score layers panel + scores summary: same section structure (P1 → P2 → P3 → Haz → UV → Other), categories sorted
+  // Map section code to get_baseline_map_scores in_layer param (RPC expects these names for themes)
+  const sectionToLayerParam = (code: string): string => {
+    if (code === 'P1' || code === 'P2' || code === 'P3') return code;
+    if (code === 'P3.1') return 'Underlying Vulnerability';
+    if (code === 'P3.2') return 'Hazard';
+    return code;
+  };
+
+  // Score layers + scores summary: use framework structure from DB (pillars + themes), longest-match for category → section
   const { scoreLayersBySection, uncategorizedCategories } = useMemo(() => {
-    const sections = SCORE_LAYER_SECTIONS.filter((s) => s.code !== 'Uncategorized');
-    const byCode = sections.reduce(
-      (acc, s) => {
-        acc[s.code] = { section: s, categories: [] as typeof scoreSummary };
-        return acc;
-      },
-      {} as Record<string, { section: (typeof SCORE_LAYER_SECTIONS)[0]; categories: typeof scoreSummary }>
-    );
+    const getSectionCodeForCategory = (category: string): string => {
+      const raw = (category || '').trim();
+      if (!raw) return 'Uncategorized';
+      const codePart = raw.split(' - ')[0]?.trim() || raw;
+      if (!codePart) return 'Uncategorized';
+      const matches = frameworkSections.filter(
+        (s) => codePart === s.code || codePart.startsWith(s.code + '.')
+      );
+      if (matches.length === 0) {
+        const prefixMatch = frameworkSections.filter((s) => codePart.startsWith(s.code));
+        const best = prefixMatch.sort((a, b) => b.code.length - a.code.length)[0];
+        return best ? best.code : 'Uncategorized';
+      }
+      const best = matches.sort((a, b) => b.code.length - a.code.length)[0];
+      return best?.code ?? 'Uncategorized';
+    };
+
+    const displaySections = frameworkSections;
+    const byCode: Record<string, { section: FrameworkSection; categories: typeof scoreSummary }> = {};
+    for (const s of displaySections) {
+      byCode[s.code] = { section: s, categories: [] };
+    }
+    byCode['Uncategorized'] = { section: { code: 'Uncategorized', name: 'Other categories', level: 'theme' }, categories: [] };
+
     for (const r of scoreSummary) {
       const code = getSectionCodeForCategory(r.category);
       if (byCode[code]) byCode[code].categories.push(r);
+      else byCode['Uncategorized'].categories.push(r);
     }
-    // Sort categories within each section (e.g. P3.1.1, P3.1.2, P3.2.1)
-    for (const s of sections) {
+    for (const s of displaySections) {
       const list = byCode[s.code]?.categories ?? [];
       list.sort((a, b) => (a.category || '').localeCompare(b.category || '', undefined, { numeric: true }));
     }
-    const scoreLayersBySection = sections.map((section) => ({
-      section,
+    byCode['Uncategorized'].categories.sort((a, b) => (a.category || '').localeCompare(b.category || '', undefined, { numeric: true }));
+
+    const scoreLayersBySection = displaySections.map((section) => ({
+      section: {
+        code: section.code,
+        label: section.name,
+        layerParam: sectionToLayerParam(section.code),
+      },
       categoriesInSection: byCode[section.code]?.categories ?? [],
     }));
-    const uncategorizedCategories = scoreSummary
-      .filter((r) => getSectionCodeForCategory(r.category) === 'Uncategorized')
-      .sort((a, b) => (a.category || '').localeCompare(b.category || '', undefined, { numeric: true }));
+    const uncategorizedCategories = byCode['Uncategorized']?.categories ?? [];
     return { scoreLayersBySection, uncategorizedCategories };
-  }, [scoreSummary]);
+  }, [scoreSummary, frameworkSections]);
 
   const selectedDataset = useMemo(() => {
     if (!selectedMapLayer) return null;

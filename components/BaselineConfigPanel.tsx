@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createClient } from '@/lib/supabaseClient';
 import { useCountry } from '@/lib/countryContext';
-import { getSectionCodeForCategory as getSectionCodeForCategoryLib } from '@/lib/categoryToSection';
 import { Plus, Trash2, Save, RefreshCw, Settings, CheckCircle, X, Info, ChevronDown } from 'lucide-react';
 
 /** One display section in Framework Datasets, derived from DB framework (pillar/theme/subtheme) */
@@ -592,10 +591,25 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
     }
   };
 
-  // Use same section logic as baseline page Score layers so Framework Datasets and Score layers match
-  const getSectionCodeForCategory = (category: string): string => getSectionCodeForCategoryLib(category);
+  // Map category string to section code using DB framework sections (longest matching code)
+  const getSectionCodeForCategory = (category: string): string => {
+    const raw = (category || '').trim();
+    if (!raw) return 'Uncategorized';
+    const codePart = raw.split(' - ')[0]?.trim() || raw;
+    if (!codePart) return 'Uncategorized';
+    const matches = frameworkSections.filter(
+      (s) => codePart === s.code || codePart.startsWith(s.code + '.')
+    );
+    if (matches.length === 0) {
+      const prefixMatch = frameworkSections.filter((s) => codePart.startsWith(s.code));
+      const best = prefixMatch.sort((a, b) => b.code.length - a.code.length)[0];
+      return best ? best.code : 'Uncategorized';
+    }
+    const best = matches.sort((a, b) => b.code.length - a.code.length)[0];
+    return best?.code ?? 'Uncategorized';
+  };
 
-  // Group datasets by section code (aligned with Score layers panel)
+  // Group datasets by section code (DB-driven sections)
   const groupedBySection = baselineDatasets.reduce(
     (acc, bd) => {
       const code = getSectionCodeForCategory(bd.category);
@@ -1105,6 +1119,44 @@ export default function BaselineConfigPanel({ baselineId, onUpdate }: Props) {
                     </div>
                   )}
                 </div>
+              </div>
+            );
+          })}
+
+          {/* Hazards + Underlying Vulnerabilities (framework themes P3.2, P3.1) */}
+          {(['P3.2', 'P3.1'] as const).map((code) => {
+            const items = groupedBySection[code] || [];
+            const title = code === 'P3.2' ? 'Haz – Hazards' : 'UV – Underlying Vulnerabilities';
+            const bg = code === 'P3.2' ? 'bg-orange-50' : 'bg-amber-50';
+            const border = code === 'P3.2' ? 'border-orange-200' : 'border-amber-200';
+            const text = code === 'P3.2' ? 'text-orange-900' : 'text-amber-900';
+            const theme = frameworkSections.find((s) => s.code === code);
+            const themeName = theme?.name || (code === 'P3.2' ? 'Hazards (P3.2)' : 'Underlying Vulnerabilities (P3.1)');
+            if (!showEmptyThemes && items.length === 0) return null;
+            return (
+              <div key={code} className={`border rounded-lg overflow-hidden ${border}`}>
+                <div className={`px-4 py-2.5 ${bg} border-b ${border}`}>
+                  <h4 className={`font-semibold ${text}`}>
+                    {title}
+                    <span className="font-normal ml-2 text-xs text-gray-600">
+                      {code} — {themeName}
+                    </span>
+                    {items.length > 0 && (
+                      <span className="font-normal ml-2 text-xs text-gray-600">
+                        ({items.length} dataset{items.length !== 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </h4>
+                </div>
+                {items.length > 0 ? (
+                  <div className="divide-y divide-gray-50">
+                    {items.map((bd) => renderDatasetRow(bd))}
+                  </div>
+                ) : (
+                  <div className={`px-4 py-2 text-xs ${bg} text-gray-500 italic`}>
+                    No datasets.
+                  </div>
+                )}
               </div>
             );
           })}

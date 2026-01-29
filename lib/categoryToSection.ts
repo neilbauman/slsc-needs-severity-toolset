@@ -69,22 +69,23 @@ export function getSectionHeadingForCategory(category: string): FrameworkSection
 }
 
 /**
- * Section codes used by BaselineConfigPanel and Score layers panel.
- * P3 includes all pillar-3 themes (P3.x.x, UV.x) so they appear under P3 in the framework.
+ * Section codes used when framework structure is not loaded (fallback).
+ * Baseline page and BaselineConfigPanel use get_framework_structure from DB for real grouping.
  */
-export type SectionCode = 'P1' | 'P2' | 'P3' | 'Uncategorized';
+export type SectionCode = 'P1' | 'P2' | 'P3' | 'P3.1' | 'P3.2' | 'Uncategorized';
 
-/** Order and display labels: P1, P2, P3 (all P3 themes together), Other. */
+/** Fallback order/labels when DB framework not available (P3.1=UV, P3.2=Haz). */
 export const SCORE_LAYER_SECTIONS: { code: SectionCode; label: string; layerParam: string }[] = [
   { code: 'P1', label: 'P1', layerParam: 'P1' },
   { code: 'P2', label: 'P2', layerParam: 'P2' },
   { code: 'P3', label: 'P3', layerParam: 'P3' },
+  { code: 'P3.2', label: 'Haz – Hazards', layerParam: 'Hazard' },
+  { code: 'P3.1', label: 'UV – Underlying Vulnerabilities', layerParam: 'Underlying Vulnerability' },
   { code: 'Uncategorized', label: 'Other categories', layerParam: '' },
 ];
 
 /**
- * Map category string to section code. All P3-prefixed and UV-prefixed categories
- * go under P3 so Community DRR, Market, etc. appear under P3 in the framework.
+ * Fallback: map category to section code (P3.1=UV, P3.2=Haz). Prefer framework from DB when available.
  */
 export function getSectionCodeForCategory(category: string): SectionCode {
   const c = (category || '').trim();
@@ -94,6 +95,11 @@ export function getSectionCodeForCategory(category: string): SectionCode {
   const lower = codePart.toLowerCase();
   if (lower.startsWith('p1')) return 'P1';
   if (lower.startsWith('p2')) return 'P2';
-  if (lower.startsWith('p3') || /^uv[.\s-]/i.test(codePart) || lower === 'uv') return 'P3';
+  if (lower.startsWith('p3.2')) return 'P3.2';
+  if (lower.startsWith('p3.1')) return 'P3.1';
+  if (lower.startsWith('p3')) return 'P3';
+  if (/^uv[.\s-]/i.test(codePart) || lower === 'uv') return 'P3.1';
+  if (lower.includes('hazard') && !lower.includes('underlying') && !lower.includes('vuln')) return 'P3.2';
+  if (lower.includes('underlying') || lower.includes('vulnerab') || (lower.includes('vuln') && !lower.includes('hazard'))) return 'P3.1';
   return 'Uncategorized';
 }
